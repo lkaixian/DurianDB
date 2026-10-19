@@ -128,5 +128,14 @@ await sleep(2500); await go("#overview"); await sleep(3000);
 console.log("folder headings:", await ev(`[...document.querySelectorAll('#points h3.fold')].map(h=>h.textContent).join(' | ')`));
 await set('#f-folder', "Plant/Boiler"); await sleep(2500);
 console.log("filtered tiles:", await ev(`[...document.querySelectorAll('#points .pt')].map(t=>t.dataset.pt).join()`));
+// 10. acknowledge all shown, and the opt-in alarm sound toggle
+await go("#overview"); await sleep(2500);
+const unacked = () => ev(`document.querySelectorAll('#alarms [data-ack]').length`);
+console.log("unacked before:", await unacked(), "| button:", await text('[data-ack-all]'));
+await ev(`document.querySelector('[data-ack-all]').click()`); await sleep(3000);
+console.log("unacked after:", await unacked(), "| header:", await text('#alarm-count'));
+await ev(`document.querySelector('#snd').click()`); await sleep(300);
+console.log("sound toggle:", await text('#snd'), await ev(`document.querySelector('#snd').getAttribute('aria-pressed')`));
+await ev(`document.querySelector('#snd').click()`);
 console.log("problems:", problems);
 process.exit(0);

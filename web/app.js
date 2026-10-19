@@ -42,11 +42,33 @@ function nav(view) {
   $("#nav").innerHTML = groups.map(([g, items]) => `<p class="ng">${esc(g)}</p>${items.map(([v, l]) => `<a href="#${v}" ${cur(v)}>${esc(l)}</a>`).join("")}`).join("");
 }
 // The header shows how many alarms still wait for someone, whatever page is open. Text and colour together.
+// Optional audible alert: a short beep when the number of unacknowledged alarms goes up. Off until someone turns it on (browsers need a click first).
+let sound = {on: false, ctx: null, last: null};
+try { sound.on = localStorage.getItem("durian.sound") === "1"; } catch { /* private window: stays off */ }
+function beep() {
+  try {
+    sound.ctx ??= new AudioContext();
+    const o = sound.ctx.createOscillator(), g = sound.ctx.createGain();
+    o.frequency.value = 880; g.gain.value = 0.15;
+    o.connect(g); g.connect(sound.ctx.destination); o.start(); o.stop(sound.ctx.currentTime + 0.3);
+  } catch { /* no audio available */ }
+}
+function drawSound() { const b = $("#snd"); b.hidden = !me.name; b.setAttribute("aria-pressed", String(sound.on)); b.textContent = "Alarm sound: " + (sound.on ? "on" : "off"); }
+$("#snd").addEventListener("click", () => {
+  sound.on = !sound.on;
+  try { localStorage.setItem("durian.sound", sound.on ? "1" : "0"); } catch { /* not saved */ }
+  if (sound.on) beep();  // also proves the speakers work, and satisfies the browser's need for a click
+  drawSound();
+});
+
 async function refreshAlarmCount() {
   const a = $("#alarm-count");
+  drawSound();
   if (!me.name) { a.hidden = true; return; }
   try {
     const n = (await api("GET", "/api/events")).filter(e => e.acked_ts == null && e.state !== "closed").length;
+    if (sound.on && sound.last != null && n > sound.last) beep();
+    sound.last = n;
     a.hidden = false; a.className = n ? "ac on" : "ac";
     a.textContent = n ? `${n} alarm${n === 1 ? "" : "s"} not acknowledged` : "No unacknowledged alarms";
   } catch { a.hidden = true; }
@@ -110,6 +132,7 @@ function viewOverview() {
   ptSig = "";
   $("#filter").addEventListener("input", () => { ptSig = ""; refreshOverview().catch(showErr); });
   bindAlarmActions($("#alarms"), refreshOverview);
+  bindAckAll($("#alarms"), refreshOverview);
   bindSetForms($("#points"));
   every(refreshOverview, 2000);
   every(refreshKpis, 30000);
@@ -151,7 +174,7 @@ function bindAlarmActions(box, refresh) {
       call = ["POST", `/api/alarms/${encodeURIComponent(d.shelve)}/shelve`, {reason, minutes}];
     } else if (d.unshelve) call = ["POST", `/api/alarms/${encodeURIComponent(d.unshelve)}/unshelve`, undefined];
     ev.target.disabled = true;
-    try { await api(...call); await refresh(); } catch (e) { ev.target.disabled = false; showErr(e, box); }
+    try { await api(...call); await refresh(); refreshAlarmCount(); } catch (e) { ev.target.disabled = false; showErr(e, box); }
   });
 }
 
@@ -247,12 +270,28 @@ async function viewPoint(name) {
   every(chart, 6000);
 }
 
+// "Acknowledge all shown": one request for every unacknowledged alarm in `box`, after a confirmation that says how many.
+function ackAllHtml(evs) {
+  const n = evs.filter(e => e.acked_ts == null).length;
+  return n > 1 && isUser() ? `<p><button type="button" data-ack-all="${evs.filter(e => e.acked_ts == null).map(e => e.id).join(",")}">Acknowledge all ${n} shown</button></p>` : "";
+}
+function bindAckAll(box, refresh) {
+  box.addEventListener("click", async ev => {
+    const ids = ev.target.dataset.ackAll;
+    if (!ids) return;
+    const list = ids.split(",").map(Number);
+    if (!confirm(`Acknowledge ${list.length} alarms? They are recorded as acknowledged by you.`)) return;
+    ev.target.disabled = true;
+    try { await api("POST", "/api/events/ack-many", {ids: list}); await refresh(); refreshAlarmCount(); } catch (e) { ev.target.disabled = false; showErr(e, box); }
+  });
+}
+
 function renderAlarms(evs) {
   const box = $("#alarms"), open = evs.filter(e => e.acked_ts == null).length;
   $("#al-count").textContent = evs.length ? `${open} unacknowledged of ${evs.length}` : "";
   if (!evs.length) { box.className = "status"; box.textContent = "No alarms. One is raised when a point breaks a limit or stops reporting, and it stays here until someone acknowledges it."; return; }
   box.className = "";
-  box.innerHTML = alarmTableHtml(evs);
+  box.innerHTML = ackAllHtml(evs) + alarmTableHtml(evs);
 }
 
 function alarmTableHtml(evs, showPoint = true) {
@@ -355,12 +394,12 @@ function viewAlarms() {
     $("#aj-csv").href = "/api/events/search?" + q;
     const box = $("#aj-out");
     box.className = r.items.length ? "" : "status";
-    box.innerHTML = r.items.length ? alarmTableHtml(r.items) : "No alarms match. Widen the time range or clear the search.";
+    box.innerHTML = r.items.length ? ackAllHtml(r.items) + alarmTableHtml(r.items) : "No alarms match. Widen the time range or clear the search.";
     $("#aj-pager").hidden = r.total <= PAGE;
     $("#aj-newer").disabled = offset === 0;
     $("#aj-older").disabled = offset + PAGE >= r.total;
     $("#aj-range").textContent = r.total ? `${offset + 1} to ${Math.min(offset + PAGE, r.total)} of ${r.total}` : "";
-    if (r.items.length) makeSortable(box.querySelector("table"));
+    if (r.items.length) makeSortable(box.querySelector("table"));  // (the button above the table is outside it)
   };
   const reload = () => load().catch(e => showErr(e, $("#aj-out")));
   $("#aj").addEventListener("change", () => { offset = 0; reload(); });
@@ -369,6 +408,7 @@ function viewAlarms() {
   $("#aj-newer").addEventListener("click", () => { offset = Math.max(0, offset - PAGE); reload(); });
   $("#aj-older").addEventListener("click", () => { offset += PAGE; reload(); });
   bindAlarmActions($("#aj-out"), load);
+  bindAckAll($("#aj-out"), load);
   reload();  // no timer: a refresh would undo the sort you chose
 }
 
