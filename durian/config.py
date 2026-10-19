@@ -160,6 +160,11 @@ def validate_source(name, b):
         add("enabled", "must be true or false")
     if not _roles_ok(b.get("read_roles", ["user"])):
         add("read_roles", "must be a list of role names")
+    hb = b.get("heartbeat_seconds")
+    if "heartbeat_seconds" in b and not (_num(hb) and 5 <= hb <= 86400):
+        add("heartbeat_seconds", "must be a number of seconds from 5 to 86400")
+    if "down_after" in b and not (_num(b["down_after"]) and 0 <= b["down_after"] <= 3600):
+        add("down_after", "must be a number of seconds from 0 to 3600")
     if b.get("type") == "mqtt":
         try:
             load_creds(b.get("creds", ""))
@@ -343,6 +348,7 @@ def build_engine(store):
             src = Source(s["name"])
             src.error = f"cannot start: {type(ex).__name__}"
         src.meta = {"type": s.get("type"), "read_roles": s.get("read_roles", ["user"])}
+        src.heartbeat, src.down_after = s.get("heartbeat_seconds"), s.get("down_after", 10.0)
         eng.sources.append(src)
     return eng
 

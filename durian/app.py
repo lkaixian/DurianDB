@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from .config import (build_engine, roles_ok, validate_point, validate_source, validate_watchlist)
-from .core import Event, Level, Quality, alarm_state
+from .core import SOURCE, Event, Level, Quality, alarm_state
 from .dashboards import validate_dashboard
 from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
@@ -269,8 +269,8 @@ class App:
         if (method, a, b) == ("GET", "export", "history"):
             return self.history_csv(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
-            ok = self.visible_points(ident)
-            rows = [e for e in self.store.events(300) if e["point"] in ok or (e["point"] == SYSTEM and admin)][:100]
+            ok = self.event_points(ident)
+            rows = [e for e in self.store.events(300) if e["point"] in ok][:100]
             for e in rows:
                 e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
             return 200, rows
@@ -279,7 +279,7 @@ class App:
         if (method, a, c) == ("POST", "events", "ack"):
             need(user)
             ev = self.store.q("select point from events where id=?", (int(b) if b.isdigit() else -1,))
-            if not ev or not (ev[0]["point"] in self.visible_points(ident) or (ev[0]["point"] == SYSTEM and admin)):
+            if not ev or ev[0]["point"] not in self.event_points(ident):
                 raise ApiError(404, "unknown event")
             n = self.store.ack_event(int(b), ident["name"], time.time())
             self.store.audit(ident["name"], "ack", f"event {b}")
@@ -398,7 +398,7 @@ class App:
             return 200, [h for h in self.holds.values() if h["name"] in pts]
         if (method, point, action) == ("GET", "kpis", None):
             h = (query or {}).get("hours", "24")
-            return 200, self.alarm_kpis(pts, "superadmin" in ident["roles"], int(h) if h.isdigit() else 24)
+            return 200, self.alarm_kpis(pts, "superadmin" in ident["roles"], int(h) if h.isdigit() else 24, extra=self.event_points(ident))
         if method != "POST" or action not in ("shelve", "unshelve", "out-of-service", "in-service"):
             raise ApiError(404, "not found")
         if not ident["name"]:
@@ -444,11 +444,17 @@ class App:
         self.store.audit(ident["name"], "alarm." + action, f"{point}: {reason}" if reason else point)
         return 200, {"point": point, "action": action}
 
-    def alarm_kpis(self, pts, admin, hours, now=None):
+    def event_points(self, ident):
+        """Names an identity may see alarms for: its points, the sources it may read, and DurianDB itself for a superadmin."""
+        ok = set(self.visible_points(ident))
+        ok |= {SOURCE + s.name for s in self.engine.sources if can(ident["roles"], s.meta.get("read_roles", ["user"]))}
+        return ok | ({SYSTEM} if "superadmin" in ident["roles"] else set())
+
+    def alarm_kpis(self, pts, admin, hours, now=None, extra=()):
         """Alarm system performance over the last `hours`, in the spirit of ISA-18.2 / EEMUA 191. Only points the caller can see."""
         now = now or time.time()
         hours = hours if isinstance(hours, (int, float)) and 1 <= hours <= 720 else 24
-        rows = [e for e in self.store.events_for_kpis(now - hours * 3600) if e["point"] in pts or (e["point"] == SYSTEM and admin)]
+        rows = [e for e in self.store.events_for_kpis(now - hours * 3600) if e["point"] in pts or e["point"] in extra or (e["point"] == SYSTEM and admin)]
         inwin = [e for e in rows if e["ts"] >= now - hours * 3600]
         buckets = Counter(int(e["ts"] // 600) for e in inwin)  # 10-minute buckets: the unit EEMUA 191 counts alarm floods in
         per_point, chatter = Counter(e["point"] for e in inwin), Counter()
@@ -593,7 +599,7 @@ class App:
 
     def source_view(self, s):
         return {"name": s.name, "type": s.meta.get("type"), "points": len(s.points), "error": s.error,
-                "connected": getattr(s, "connected", None), "dropped": getattr(s, "dropped", None)}
+                "down": s.down_reason, "connected": getattr(s, "connected", None), "dropped": getattr(s, "dropped", None)}
 
     def series(self, ident, q):
         point = q.get("point")

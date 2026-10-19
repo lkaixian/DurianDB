@@ -31,6 +31,7 @@ class Quality(IntEnum):
     BAD = 2  # the source is down or could not supply this point
 
 
+SOURCE = "(source) "  # events about a data source use this prefix plus the source name as their "point"
 FUTURE_SLACK = 60  # seconds a source clock may run ahead before its timestamp is not believed
 
 
@@ -225,6 +226,11 @@ class Source:
     error: Optional[str] = None  # last poll failure, None when healthy
     manages_error: bool = False  # True for sources that poll in a thread and set `error` themselves
     meta: dict = field(default_factory=dict)  # type and read roles, filled by config.build_engine
+    heartbeat: Optional[float] = None  # seconds of silence (no good value from any point) after which the source counts as down
+    down_after: float = 10.0  # a failure must last this long before the source-down alarm, so a start-up or a blip does not alarm
+    down_reason: Optional[str] = None  # why the source is down right now, None when it is not
+    last_data: Optional[float] = None
+    _down_since: Optional[float] = None
 
     def add(self, point: Point) -> Point:
         self.points[point.name] = point
@@ -237,9 +243,36 @@ class Source:
 class Engine:
     def __init__(self):
         self.sources, self.events, self.publishers = [], [], []
+        self.down = {}  # source name -> its open source-down Event
 
     def _event(self, ev: Event):
         self.events.append(ev)
+
+    def _watch(self, s, ts):
+        """Source-down alarm: the link is lost, the source failed, or nothing good arrived within its heartbeat."""
+        if s.last_data is None:
+            s.last_data = ts
+        reason = None
+        if getattr(s, "connected", None) is False or (s.error and not s.manages_error):
+            reason = s.error or "not connected"
+        elif s.heartbeat and ts - s.last_data > s.heartbeat:
+            reason = f"no data for {ts - s.last_data:.0f}s (heartbeat {s.heartbeat:g}s)"
+        s.down_reason, ev = None, self.down.get(s.name)
+        if reason is None:
+            s._down_since = None
+            if ev:
+                ev.cleared_ts = ts
+                del self.down[s.name]
+            return
+        if s._down_since is None:
+            s._down_since = ts
+        if ts - s._down_since >= s.down_after:
+            s.down_reason = reason
+            if ev is None:
+                self.down[s.name] = ev = Event(SOURCE + s.name, Level.URGENT, f"source down: {reason}", ts)
+                self._event(ev)
+                for p in s.points.values():  # what we hold is no longer being refreshed
+                    p.update(None, ts, self._event, Quality.BAD)
 
     def tick(self, ts):
         for s in self.sources:
@@ -261,10 +294,13 @@ class Engine:
                         t, q = ts, max(q, Quality.UNCERTAIN)
                     elif p.last_ts is not None and t < p.last_ts:  # older than what we already have
                         continue
+                if q != Quality.BAD:
+                    s.last_data = ts
                 p.update(value, t, self._event, q, ts)
                 if p.last is not None:
                     for pub in self.publishers:
                         pub(p, p.last, t)
+            self._watch(s, ts)
             for p in list(s.points.values()):
                 for d in p.detectors if p.in_service else ():
                     ev = d.tick(p, ts)
