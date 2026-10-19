@@ -64,7 +64,7 @@ class App:
                     self.store.clear_event(ev.id, now)
             self.open_events = []
             self.engine = build_engine(self.store)
-            self.outputs = Outputs(self.store)
+            self.outputs = Outputs(self.store, self.scope_of, self.handler_write)
             self.engine.publishers.append(self.outputs.on_value)
             self.holds = {h["name"]: h for h in self.store.list("alarmhold")}
             self.load_windows()
@@ -111,6 +111,33 @@ class App:
             self.open_events = still
 
     # ---- safe control
+    def perform_write(self, p, s, v, who, note=""):
+        """The one place a value is written to a source: used by operators and by set-point handlers alike."""
+        try:
+            with self.store.lock:
+                s.write(p.name, v)
+        except RuntimeError as ex:
+            raise ApiError(502, str(ex))
+        if hasattr(s, "override"):  # keep held values across engine rebuilds and restarts
+            self.store.put("override", p.name, {"value": v}) if v is not None else self.store.delete("override", p.name)
+        self.store.audit(who, "set", f"{p.name}: {p.last} -> {v}{note}")
+
+    def handler_write(self, point, v, who):
+        """A set-point event handler's write. It meets the same rules as an operator's (settable, limits, step size) except the confirm step."""
+        with self.store.lock:
+            p, s = self.points().get(point, (None, None))
+            try:
+                if p is None or not p.meta.get("settable") or not hasattr(s, "write"):
+                    raise ApiError(400, "not a settable point")
+                self.check_setpoint(p, v)
+                self.perform_write(p, s, v, who)
+            except ApiError as e:
+                self.store.audit(who, "set.refused", f"{point}: {e}")
+
+    def scope_of(self, name):
+        p, s = self.points().get(name, (None, None))
+        return (p.tags if p else {}), (s.name if s else None)
+
     @staticmethod
     def set_limit(p, which):
         """Lowest or highest value a write may carry: the point's own limit, else its engineering range."""
@@ -284,14 +311,7 @@ class App:
             if p.meta.get("confirm") and v is not None and not self.confirmed(ident, p.name, v, (body or {}).get("confirm")):
                 return 202, {"confirm": self.confirm_token(ident, p.name, v), "expires_in": CONFIRM_SECONDS,
                              "message": f"Repeat the request with this confirm token to set {p.name} to {v}"}
-            try:
-                with self.store.lock:
-                    s.write(p.name, v)
-            except RuntimeError as ex:
-                raise ApiError(502, str(ex))
-            if hasattr(s, "override"):  # keep held values across engine rebuilds and restarts
-                self.store.put("override", p.name, {"value": v}) if v is not None else self.store.delete("override", p.name)
-            self.store.audit(ident["name"], "set", f"{p.name}: {p.last} -> {v}" + (f" via token {ident['token']}" if scope else ""))
+            self.perform_write(p, s, v, ident["name"], f" via token {ident['token']}" if scope else "")
             return 200, {"ok": True}
         if (method, a) == ("GET", "series"):
             return 200, self.series(ident, query)
