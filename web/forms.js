@@ -114,7 +114,9 @@ function pointGroups(body, sources) {
       F("eu_low", "Engineering range, low", "number", {optional: true}), F("eu_high", "Engineering range, high", "number", {optional: true}),
       F("decimals", "Decimals shown", "int", {optional: true, hint: "0 to 6."})]},
     {title: "History", fields: [
-      F("logging", "Log", "select", {options: opts(["ON_CHANGE", "On change"], ["ALL", "Every value"], ["NEVER", "Never"])}),
+      F("logging", "Log", "select", {options: opts(["ON_CHANGE", "On change"], ["ALL", "Every value"], ["INTERVAL", "At fixed intervals"], ["NEVER", "Never"])}),
+      ...(body.logging === "INTERVAL" ? [F("log_interval", "Sample every (seconds)", "number"),
+        F("log_mode", "Sample is", "select", {optional: true, options: opts(["instant", "The last value"], ["avg", "The average of the period"], ["min", "The minimum of the period"], ["max", "The maximum of the period"])})] : []),
       F("tolerance", "Ignore changes of", "number", {optional: true, hint: "With 'on change': moves this small are not logged."}),
       F("retention_days", "Keep history for (days)", "int", {optional: true, hint: "Empty = the database default. 0 = forever."})]},
     {title: "Access and control", fields: [

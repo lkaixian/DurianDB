@@ -294,7 +294,7 @@ function renderPoints(pts, filtered) {
 }
 
 // ---- history chart
-const ROLL = {avg: "Average", min: "Minimum", max: "Maximum", last: "Last value", count: "Sample count"};
+const ROLL = {avg: "Average", min: "Minimum", max: "Maximum", last: "Last value", first: "First value", delta: "Change (last minus first)", sum: "Sum", count: "Sample count"};
 function viewHistory() {
   main.innerHTML = `<section aria-labelledby="h-h"><h2 id="h-h">History</h2><form id="hf" class="row"><label>Point <select id="h-point"></select></label>
     <label>Window <select id="h-win"><option value="300">5 minutes</option><option value="3600" selected>1 hour</option><option value="86400">24 hours</option></select></label>

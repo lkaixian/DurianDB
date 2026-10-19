@@ -112,7 +112,7 @@ assert call(admin, "PUT", "/api/config/publisher/p", {"type": "mqtt", "creds": "
 assert call(admin, "DELETE", "/api/config/source/demo")[0] == 409
 
 # series validation, and unknown routes
-assert call(viewer, "GET", "/api/series", point="hot", rollup="sum")[0] == 400
+assert call(viewer, "GET", "/api/series", point="hot", rollup="median")[0] == 400
 assert call(viewer, "GET", "/api/series", point="hot", window="abc")[0] == 400
 assert call(viewer, "GET", "/api/series", point="hot", window="3600", bucket="10")[0] == 200
 assert call(admin, "GET", "/api/nothing")[0] == 404 and call(admin, "GET", "/etc/passwd")[0] == 404

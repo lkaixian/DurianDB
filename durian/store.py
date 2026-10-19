@@ -14,7 +14,8 @@ from pathlib import Path
 
 from .migrations import MIGRATIONS
 
-ROLLUPS = {"avg": "avg(value)", "min": "min(value)", "max": "max(value)", "count": "count(*)"}
+ROLLUPS = {"avg": "avg(value)", "min": "min(value)", "max": "max(value)", "count": "count(*)", "sum": "sum(value)"}
+ALL_ROLLUPS = tuple(ROLLUPS) + ("last", "first", "delta")  # these three need the order of the samples, so they are written out in series()
 TYPES = {
     "sqlite": {"pk": "integer primary key", "key": "text", "text": "text", "real": "real", "int": "integer"},
     "mysql": {"pk": "bigint auto_increment primary key", "key": "varchar(190)", "text": "longtext", "real": "double", "int": "bigint"},
@@ -142,11 +143,17 @@ class Store:
     def series(self, point, since, bucket, rollup):
         """Bucketed history; bucket start time is returned as ts. Caller validates the arguments."""
         b = "floor(ts / ?)" if self.kind == "mysql" else "cast(ts / ? as int)"
-        if rollup == "last":
+        if rollup in ("last", "first"):
             return self.q(f"select b * ? as ts, value from (select {b} as b, value, "
-                          f"row_number() over (partition by {b} order by ts desc) as rn "
+                          f"row_number() over (partition by {b} order by ts {'desc' if rollup == 'last' else 'asc'}) as rn "
                           "from history where point = ? and ts >= ? and quality < 2) t where rn = 1 order by b",
                           (bucket, bucket, bucket, point, since))
+        if rollup == "delta":  # last minus first of the bucket: what a counter or a meter advanced by
+            return self.q(f"select b * ? as ts, last_v - first_v as value from (select b, max(case when rd = 1 then value end) as last_v, "
+                          f"max(case when ra = 1 then value end) as first_v from (select {b} as b, value, "
+                          f"row_number() over (partition by {b} order by ts desc) as rd, row_number() over (partition by {b} order by ts asc) as ra "
+                          "from history where point = ? and ts >= ? and quality < 2) t group by b) u order by b",
+                          (bucket, bucket, bucket, bucket, point, since))
         return self.q(f"select {b} * ? as ts, {ROLLUPS[rollup]} as value from history "
                       f"where point = ? and ts >= ? and quality < 2 group by {b} order by ts",
                       (bucket, bucket, point, since, bucket))

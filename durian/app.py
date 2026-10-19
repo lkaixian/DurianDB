@@ -22,7 +22,7 @@ from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
 from .testsource import test_source
 from .outputs import Outputs, validate_handler, validate_publisher
-from .store import ROLLUPS
+from .store import ALL_ROLLUPS
 
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance")
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
@@ -688,8 +688,8 @@ class App:
         if point not in self.visible_points(ident):
             raise ApiError(404, "unknown point")
         rollup = q.get("rollup", "avg")
-        if rollup != "last" and rollup not in ROLLUPS:
-            raise ApiError(400, "rollup must be one of avg, min, max, last, count")
+        if rollup not in ALL_ROLLUPS:
+            raise ApiError(400, f"rollup must be one of {', '.join(ALL_ROLLUPS)}")
         try:
             window = int(q.get("window", 3600))
             bucket = int(q.get("bucket", max(1, window // 120)))

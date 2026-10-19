@@ -120,4 +120,12 @@ for bad_cfg in ({"kind": "STATE"}, {"kind": "STATE", "states": []}, {"kind": "ST
         raise AssertionError(bad_cfg)
     except ValueError:
         pass
+
+# ---- interval logging: one sample per period, as the last value or an aggregate, stamped with the period's end
+from durian.core import Logging  # noqa: E402
+for mode, want in (("instant", [(3.0, 4.0), (6.0, 7.0)]), ("avg", [(3.0, 2.5), (6.0, 6.0)]), ("min", [(3.0, 1.0), (6.0, 5.0)]), ("max", [(3.0, 4.0), (6.0, 7.0)])):
+    p = Point("p", logging=Logging.INTERVAL, interval=3.0, interval_mode=mode)
+    for t in range(7):
+        p.update(float(t + 1), float(t), lambda e: None)
+    assert [(a, b) for a, b, _ in p.take_unsaved()] == want, (mode, want)
 print("ok")
