@@ -111,7 +111,15 @@ function viewOverview() {
   $("#points").addEventListener("submit", async ev => {
     ev.preventDefault();
     const name = ev.target.dataset.set, v = ev.target.value.value, out = ev.target.querySelector("output");
-    try { await api("POST", `/api/points/${encodeURIComponent(name)}/set`, {value: ev.submitter?.dataset.release ? null : Number(v)}); out.textContent = "sent"; }
+    try {
+      const url = `/api/points/${encodeURIComponent(name)}/set`, value = ev.submitter?.dataset.release ? null : Number(v);
+      let res = await api("POST", url, {value});
+      if (res && res.confirm) {  // the point asks for a second step: a native dialog, then the same value with the token
+        if (!confirm(`Set ${name} to ${value}?`)) { out.textContent = "cancelled"; return; }
+        res = await api("POST", url, {value, confirm: res.confirm});
+      }
+      out.textContent = "sent";
+    }
     catch (e) { out.textContent = e.message; }
   });
   every(refreshOverview, 2000);
@@ -173,12 +181,12 @@ function renderPoints(pts, filtered) {
   const sig = pts.map(p => p.name + (p.settable ? "*" : "")).join();
   if (sig !== ptSig) {  // rebuild only when the list changes, so typing in a set field is never interrupted
     ptSig = sig;
-    box.innerHTML = pts.map(p => `<div class="pt" data-pt="${esc(p.name)}"><div class="head"><span>${esc(p.name)} <span class="tags">${esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(" "))}</span></span><span class="val num"></span></div><div class="spark"></div>
-      ${p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" type="number" step="any" required placeholder="value" aria-label="New value for ${esc(p.name)}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : ""}</div>`).join("");
+    box.innerHTML = pts.map(p => `<div class="pt" data-pt="${esc(p.name)}"><div class="head"><span>${esc(p.name)} <span class="tags">${esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(" "))}</span>${p.description ? `<small class="note"> ${esc(p.description)}</small>` : ""}</span><span class="val num"></span></div><div class="spark"></div>
+      ${p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" type="number" step="any" required placeholder="${p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : ""}</div>`).join("");
   }
   for (const p of pts) {
     const row = [...box.children].find(r => r.dataset.pt === p.name), v = row.querySelector(".val");
-    v.textContent = p.last == null ? "no value yet" : `${p.last}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
+    v.textContent = p.last == null ? "no value yet" : `${p.decimals == null ? p.last : Number(p.last).toFixed(p.decimals)}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
     v.classList.toggle("over", p.last != null && ((p.limits.high != null && p.last > p.limits.high) || (p.limits.low != null && p.last < p.limits.low)));
     row.querySelector(".spark").innerHTML = spark(p.history, p.limits);
   }
