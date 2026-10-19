@@ -180,6 +180,7 @@ class Source:
     name: str
     points: dict = field(default_factory=dict)
     error: Optional[str] = None  # last poll failure, None when healthy
+    manages_error: bool = False  # True for sources that poll in a thread and set `error` themselves
     meta: dict = field(default_factory=dict)  # type and read roles, filled by config.build_engine
 
     def add(self, point: Point) -> Point:
@@ -201,7 +202,8 @@ class Engine:
         for s in self.sources:
             try:
                 values = s.poll(ts)
-                s.error = None
+                if not s.manages_error:  # background sources report their own failures
+                    s.error = None
             except Exception as e:  # one broken source must not stop the others
                 s.error, values = f"{type(e).__name__}: {e}", {}
             for name, value in values.items():

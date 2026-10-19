@@ -3,6 +3,7 @@
 Run:  python -m durian.modbus_sim [framing] [port]      (framing: tcp | rtu | ascii, default tcp on 1502)
 Units 1 and 2 answer. Unit 99 never answers (to show timeouts). Addresses at or above SIZE are illegal.
 """
+import socket
 import socketserver
 import struct
 import sys
@@ -133,6 +134,7 @@ class Slave(socketserver.ThreadingTCPServer):
         self.framing, self.devices, self.silent = framing, {u: Device() for u in units}, {99}
         self.drop_next = 0  # test hook: close the connection instead of answering this many times
         self.requests = []  # (unit, pdu) log, for tests
+        self.conns = set()
         super().__init__(("127.0.0.1", port), _Handler)
 
     @property
@@ -146,11 +148,24 @@ class Slave(socketserver.ThreadingTCPServer):
     def stop(self):
         self.shutdown()
         self.server_close()
+        for c in list(self.conns):  # a dead device drops its connections too
+            try:
+                c.shutdown(socket.SHUT_RDWR)
+                c.close()
+            except OSError:
+                pass
 
 
 class _Handler(socketserver.BaseRequestHandler):
     def handle(self):
         srv = self.server
+        srv.conns.add(self.request)
+        try:
+            self.serve(srv)
+        finally:
+            srv.conns.discard(self.request)
+
+    def serve(self, srv):
         while True:
             try:
                 ident, pdu = read_request(self.request, srv.framing)

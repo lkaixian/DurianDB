@@ -64,6 +64,8 @@ class TcpLink:
             raise ModbusIOError(f"connect to {self.host}:{self.port} failed: {e}") from e
 
     def send(self, data):
+        if self.sock is None:
+            raise ModbusIOError("link is closed")
         try:
             self.sock.sendall(data)
         except OSError as e:
@@ -71,6 +73,8 @@ class TcpLink:
 
     def recv_exact(self, n):
         buf = b""
+        if self.sock is None:
+            raise ModbusIOError("link is closed")
         try:
             while len(buf) < n:
                 chunk = self.sock.recv(n - len(buf))
