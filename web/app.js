@@ -184,7 +184,7 @@ function bindSetForms(box) {
     ev.preventDefault();
     const name = ev.target.dataset.set, v = ev.target.value.value, out = ev.target.querySelector("output");
     try {
-      const url = `/api/points/${encodeURIComponent(name)}/set`, value = ev.submitter?.dataset.release ? null : Number(v);
+      const url = `/api/points/${encodeURIComponent(name)}/set`, value = ev.submitter?.dataset.release ? null : ev.target.value.type === "text" ? v : Number(v);
       let res = await api("POST", url, {value});
       if (res && res.confirm) {  // the point asks for a second step: a native dialog, then the same value with the token
         if (!confirm(`Set ${name} to ${value}?`)) { out.textContent = "cancelled"; return; }
@@ -198,7 +198,7 @@ function bindSetForms(box) {
 
 function setFormHtml(p) {
   if (p.settable && isUser() && p.states) return `<form data-set="${esc(p.name)}"><label class="inl">New state <select name="value" aria-label="New state for ${esc(p.name)}">${Object.entries(p.states).map(([k, l]) => `<option value="${esc(k)}" ${p.last === Number(k) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>`;
-  return p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" type="number" step="any" required placeholder="${p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : "";
+  return p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" ${p.datatype === "text" ? 'type="text" maxlength="255"' : 'type="number" step="any"'} required placeholder="${p.datatype === "text" ? "" : p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : "";
 }
 
 // ---- one point: what it is doing now, how it got here, what is wrong with it, and what an operator can do about it
@@ -216,8 +216,8 @@ async function viewPoint(name) {
       <section aria-labelledby="pd-s"><h3 id="pd-s">Settings</h3><div id="pd-settings" class="status">Loading...</div></section>
     </div>`;
   const when = t => t == null ? "never" : fmt(t);
-  const fix = (p, v) => v == null ? "none" : p.decimals == null ? String(v) : Number(v).toFixed(p.decimals);
-  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for", SMOOTHNESS: "scatter above", CUSUM: "drift from"};
+  const fix = (p, v) => v == null ? "none" : p.decimals == null || typeof v === "string" ? String(v) : Number(v).toFixed(p.decimals);
+  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for", SMOOTHNESS: "scatter above", CUSUM: "drift from", TEXT: "text"};
   let drawn = "", current = null;  // `current` is what the trend needs for its limit lines
   async function refresh() {
     let p;
@@ -247,7 +247,7 @@ async function viewPoint(name) {
       $("#pd-control-box").hidden = !(p.settable && isUser());
       $("#pd-control").innerHTML = setFormHtml(p) + (p.set_limits ? `<p class="note">${p.set_limits.min != null || p.set_limits.max != null ? `Accepts ${p.set_limits.min ?? "any"} to ${p.set_limits.max ?? "any"}. ` : ""}${p.set_limits.max_step != null ? `At most ${p.set_limits.max_step} away from the present value per write. ` : ""}${p.set_limits.confirm ? "Asks for confirmation. " : ""}Release hands the point back to its source.</p>` : "");
     }
-    const arg = d => d.kind === "STATE" ? (d.states || []).map(x => p.states?.[String(x)] ?? x).join(" or ") : d.kind === "RANGE" ? `${d.mode === "inside" ? "inside" : "outside"} ${d.low} to ${d.high}` : d.kind === "CHANGE" ? "" : d.kind === "CUSUM" ? `${d.target} (sum over ${d.threshold})` : d.limit ?? d.per_second ?? d.seconds;
+    const arg = d => d.kind === "STATE" ? (d.states || []).map(x => p.states?.[String(x)] ?? x).join(" or ") : d.kind === "RANGE" ? `${d.mode === "inside" ? "inside" : "outside"} ${d.low} to ${d.high}` : d.kind === "CHANGE" ? "" : d.kind === "TEXT" ? `${d.mode === "contains" ? "contains " : ""}${d.values.join(" or ")}` : d.kind === "CUSUM" ? `${d.target} (sum over ${d.threshold})` : d.limit ?? d.per_second ?? d.seconds;
     const lim = p.detectors.map(d => `${d.kind === "RANGE" ? "" : kinds[d.kind] || d.kind} ${arg(d)}${["NO_UPDATE", "NO_CHANGE"].includes(d.kind) ? " s" : ["HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE"].includes(d.kind) && p.unit ? " " + p.unit : ""} (${String(d.level || "WARNING").toLowerCase()})`.trim());
     $("#pd-settings").className = "";
     $("#pd-settings").innerHTML = `<dl class="kv"><dt>Alarms</dt><dd>${lim.length ? lim.map(esc).join("; ") : "none set"}</dd>
@@ -261,6 +261,7 @@ async function viewPoint(name) {
   const chart = async () => {
     const box = $("#pd-chart"), win = Number($("#pd-hours").value);
     box._t = 0;
+    if (current?.datatype === "text") { box.textContent = "A text point has no trend. Its changes are in History export."; return; }
     await WIDGETS.chart.render(box, {type: "chart", title: "Average, last " + $("#pd-hours").selectedOptions[0].text, points: [name], window: win, rollup: "avg"}, {points: current ? {[name]: current} : {}});
   };
   bindAlarmActions($("#pd-alarms"), refresh);
@@ -331,7 +332,7 @@ function renderPoints(pts, filtered) {
   }
   for (const p of pts) {
     const row = [...box.children].find(r => r.dataset?.pt === p.name), v = row.querySelector(".val");
-    v.textContent = p.last == null ? "no value yet" : p.text != null ? `${p.text}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}` : `${p.decimals == null ? p.last : Number(p.last).toFixed(p.decimals)}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
+    v.textContent = p.last == null ? "no value yet" : p.text != null ? `${p.text}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}` : `${p.decimals == null || typeof p.last === "string" ? p.last : Number(p.last).toFixed(p.decimals)}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
     v.classList.toggle("over", p.last != null && ((p.limits.high != null && p.last > p.limits.high) || (p.limits.low != null && p.last < p.limits.low)));
     row.querySelector(".spark").innerHTML = spark(p.history, p.limits);
   }
@@ -578,7 +579,7 @@ const yes = v => v ? "Yes" : "No";
 const tagText = t => Object.entries(t || {}).map(([k, v]) => k + ":" + v).join(", ");
 const LISTS = {
   source: {cols: ["Name", "Type", "Enabled", "Points", "State", "Last poll", "Dropped", "Error"], cell: (i, x) => [null, i.type, yes(i.enabled !== false), x.points ?? "", x.down ? "Down: " + x.down : x.name ? "Up" : "Not running", x.poll_ms == null ? "" : `${(x.poll_ms / 1000).toFixed(2)} s${x.overruns ? `, ${x.overruns} too slow` : ""}`, x.dropped ?? "", x.error || ""]},
-  point: {cols: ["Name", "Folder", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.folder || "", i.source, x.last == null ? "no value yet" : `${x.decimals == null ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
+  point: {cols: ["Name", "Folder", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.folder || "", i.source, x.last == null ? "no value yet" : `${x.decimals == null || typeof x.last === "string" ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
   handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.type === "email" ? (i.to || []).join(", ") : i.type === "setpoint" ? `${i.point} = ${i.value}` : i.url || "", i.min_level || "", yes(i.enabled !== false)]},
   publisher: {cols: ["Name", "Type", "Topic prefix", "Points", "Enabled"], cell: i => [null, i.type, i.prefix || "", (i.points || []).join(", "), yes(i.enabled !== false)]},
   maintenance: {cols: ["Name", "Applies to", "During", "When", "Enabled"], cell: i => [null, [...(i.scope?.points || []), ...(i.scope?.sources || []).map(s => "source " + s), tagText(i.scope?.tags)].filter(Boolean).join(", "), {suppress: "Hold alarms", acknowledge: "Acknowledge", drop: "Drop alarms"}[i.mode] || i.mode,

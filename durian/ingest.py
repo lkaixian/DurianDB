@@ -91,17 +91,22 @@ class HttpInSource(Source):
                 if point not in self.points and not self.auto_create:
                     no("unknown point (add it under Config, or turn on auto_create for this source)")
                     continue
-                if isinstance(value, str):
-                    try:
-                        value = float(value)  # query strings and some tools send numbers as text
-                    except ValueError:
-                        no("value must be a number")
+                if getattr(self.points.get(point), "text", False):  # an alphanumeric point takes a short printable string
+                    if not (isinstance(value, str) and 1 <= len(value) <= 255 and value.isprintable()):
+                        no("value must be printable text of 1 to 255 characters")
                         continue
-                if isinstance(value, bool):
-                    value = 1.0 if value else 0.0
-                if not isinstance(value, (int, float)) or not math.isfinite(value):
-                    no("value must be a finite number")
-                    continue
+                else:
+                    if isinstance(value, str):
+                        try:
+                            value = float(value)  # query strings and some tools send numbers as text
+                        except ValueError:
+                            no("value must be a number")
+                            continue
+                    if isinstance(value, bool):
+                        value = 1.0 if value else 0.0
+                    if not isinstance(value, (int, float)) or not math.isfinite(value):
+                        no("value must be a finite number")
+                        continue
                 try:
                     q = parse_quality(*extra)
                 except ValueError as e:
@@ -120,7 +125,7 @@ class HttpInSource(Source):
                     no("older than the newest value already received for this point")
                 else:
                     self._high[point] = t
-                    self._q.append((point, float(value), t, q))
+                    self._q.append((point, value if isinstance(value, str) else float(value), t, q))
                     accepted += 1
         return accepted, rejected
 

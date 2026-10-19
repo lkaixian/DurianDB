@@ -18,6 +18,7 @@ from .mqtt_source import MqttSource
 from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+MAX_TEXT = 255
 SOURCE_TYPES = ("virtual", "mqtt", "modbus", "http_json", "sql", "http_in", "calc")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
@@ -120,7 +121,7 @@ class Virtual(Source):
                 v = self.state.get(n, g.get("start", 0)) + random.uniform(-step, step) + g.get("drift", 0)
                 v = min(g.get("max", math.inf), max(g.get("min", -math.inf), v))
                 self.state[n] = v
-            out[n] = round(v, 3)
+            out[n] = v if isinstance(v, str) else round(v, 3)
         return out
 
     def write(self, name, value):
@@ -222,12 +223,24 @@ def validate_point(name, b, store):
     for p in ("read_roles", "set_roles"):
         if not _roles_ok(b.get(p, [])):
             add(p, "must be a list of role names")
+    text = b.get("datatype", "number")
+    if text not in ("number", "text"):
+        add("datatype", "must be number or text")
+    text = text == "text"
+    if text:
+        if src and src.get("type") not in ("virtual", "http_in"):
+            add("datatype", "text points are supported on virtual and http_in sources")
+        if b.get("logging") == "INTERVAL":
+            add("logging", "a text point is logged on change or always, not at an interval")
     dets = b.get("detectors", [])
     if not isinstance(dets, list) or len(dets) > 10:
         add("detectors", "must be a list of at most 10")
     else:
         for i, d in enumerate(dets):
             try:
+                kind = d.get("kind") if isinstance(d, dict) else None
+                if text != (kind == "TEXT") and not (text and kind in ("NO_UPDATE", "CHANGE")):
+                    raise ValueError("a text point takes TEXT, CHANGE or NO_UPDATE alarms" if text else "the TEXT alarm needs datatype text")
                 make_detector(d)
             except (ValueError, TypeError, AttributeError) as ex:
                 add(f"detectors[{i}]", str(ex))
@@ -262,7 +275,10 @@ def validate_point(name, b, store):
         g = b.get("generator", {"kind": "walk"})
         kind = g.get("kind") if isinstance(g, dict) else None
         need = {"walk": [], "sine": ["amplitude", "period"], "constant": ["value"]}
-        if kind not in need:
+        if text:
+            if not (kind == "constant" and isinstance(g.get("value"), str) and len(g["value"]) <= MAX_TEXT):
+                add("generator", f"a text point on a virtual source needs generator {{kind: constant, value: text of up to {MAX_TEXT} characters}}")
+        elif kind not in need:
             add("generator.kind", "must be walk, sine or constant")
         else:
             for k in need[kind] + [k for k in ("start", "min", "max", "step", "drift", "offset") if k in g]:
@@ -316,6 +332,7 @@ def make_point(name, b, source_name):
     p = Point(name, logging=Logging[b.get("logging", "ON_CHANGE")], tolerance=float(b.get("tolerance", 0)),
               interval=float(b.get("log_interval", 0)), interval_mode=b.get("log_mode", "instant"),
               tags=dict(b.get("tags", {})), detectors=[make_detector(d) for d in b.get("detectors", [])])
+    p.text = b.get("datatype") == "text"
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}

@@ -145,7 +145,7 @@ class App:
         return v if v is not None else p.meta.get("eu_low" if which == "min" else "eu_high")
 
     def check_setpoint(self, p, v):
-        if v is None:  # releasing a point is always allowed
+        if v is None or isinstance(v, str):  # releasing a point is always allowed; a text value has no range
             return
         lo, hi, step = self.set_limit(p, "min"), self.set_limit(p, "max"), p.meta.get("max_step")
         if (lo is not None and v < lo) or (hi is not None and v > hi):
@@ -190,7 +190,7 @@ class App:
             return "maintenance"
         sw = pts[point][0].meta.get("suppress_when") if point in pts else None
         other = pts.get(sw["point"], (None,))[0] if sw else None
-        if other is not None and other.last is not None and other.quality != Quality.BAD:
+        if other is not None and other.last is not None and not other.text and other.quality != Quality.BAD:
             if {">": other.last > sw["value"], "<": other.last < sw["value"], "==": other.last == sw["value"]}[sw["op"]]:
                 return "suppressed"  # suppression by design: the condition that makes this alarm meaningless holds
         return None
@@ -243,7 +243,7 @@ class App:
         cfg = p.meta.get("detector_cfg", [])
         limit = lambda kind: next((d["limit"] for d in cfg if d.get("kind") == kind), None)
         return {"name": p.name, "source": s.name, "unit": p.meta.get("unit", ""), "tags": p.tags, "last": p.last,
-                "description": p.meta.get("description", ""), "decimals": p.meta.get("decimals"),
+                "datatype": "text" if p.text else "number", "description": p.meta.get("description", ""), "decimals": p.meta.get("decimals"),
                 "folder": p.meta.get("folder", ""), "states": p.meta.get("states"), "text": state_label(p, p.last) if p.meta.get("states") and p.last is not None else None,
                 "eu": {"low": p.meta.get("eu_low"), "high": p.meta.get("eu_high")},
                 "set_limits": {"min": self.set_limit(p, "min"), "max": self.set_limit(p, "max"), "max_step": p.meta.get("max_step"), "confirm": bool(p.meta.get("confirm"))} if p.meta.get("settable") else None,
@@ -303,7 +303,10 @@ class App:
                 raise ApiError(404, "unknown point")
             need(p.meta.get("settable") and can(ident["roles"], p.meta.get("set_roles", [])))
             v = (body or {}).get("value", "missing")
-            if v is not None and not (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)):
+            if p.text:
+                if v is not None and not (isinstance(v, str) and 1 <= len(v) <= 255 and v.isprintable()):
+                    raise ApiError(400, "value must be printable text of 1 to 255 characters, or null to release the point")
+            elif v is not None and not (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)):
                 raise ApiError(400, "value must be a number, or null to release the point")
             if not hasattr(s, "write"):
                 raise ApiError(400, "this source cannot write")
@@ -788,6 +791,8 @@ class App:
             raise ApiError(400, "window and bucket must be whole seconds")
         if not 10 <= window <= 7 * 86400 or not 1 <= bucket <= window:
             raise ApiError(400, "window must be 10 s to 7 days and bucket between 1 s and the window")
+        if self.points()[point][0].text:
+            raise ApiError(400, "a text point has no numeric series; use the history export")
         items = self.store.series(point, time.time() - window, bucket, rollup)
         return {"point": point, "rollup": rollup, "window": window, "bucket": bucket, "items": items}
 
