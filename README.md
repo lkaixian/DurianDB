@@ -78,6 +78,8 @@ Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped i
 
 **Console layout.** A left sidebar groups the pages (Monitor, Configure, System, signed-in account) and collapses to a row on a phone; the top bar always shows how many alarms still wait for acknowledgement, as text. Overview is a full-width alarm table with the live points as tiles below it.
 
+**Point page.** Click a point name (overview, alarms, reports) to open `#point/<name>`: the current value with its quality, source and times, a trend with a window picker, the alarms recorded for that point (acknowledge, shelve and unshelve right there), the Set form with its limits and confirm step, the point's alarm limits and range, and an Edit settings link for administrators. `GET /api/points/<name>` and `GET /api/events?point=<name>` feed it.
+
 **Data quality.** Every value carries the source's own timestamp and a quality: `good`, `uncertain` or `bad`. A source that is down or cannot fill a point marks it `bad`: the last value is held, no alarm is evaluated on it, and charts, CSV export and rollups skip it (the history table keeps the row with its quality). A device clock more than a minute ahead, or a sender that says `"quality": "uncertain"`, makes the value `uncertain`. Values older than the newest one already received for a point are dropped. A "no update" alarm counts from when DurianDB received a value, not from the device's clock. Senders may add `ts` and `quality` to ingest and MQTT payloads.
 
 ## Database
