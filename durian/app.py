@@ -14,8 +14,9 @@ from collections import Counter
 from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
-from .config import (build_engine, roles_ok, validate_point, validate_source, validate_watchlist)
-from .core import SOURCE, Event, Level, Quality, alarm_state
+from . import windows
+from .config import (build_engine, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
+from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .dashboards import validate_dashboard
 from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
@@ -23,7 +24,7 @@ from .testsource import test_source
 from .outputs import Outputs, validate_handler, validate_publisher
 from .store import ROLLUPS
 
-KINDS = ("source", "point", "handler", "publisher", "watchlist")
+KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance")
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
 
 
@@ -44,6 +45,7 @@ class App:
         self.maint = Maintenance(store, backup_dir or Path("backups"))
         self.engine, self.outputs, self.open_events = None, None, []
         self.confirms = {}  # token -> ((user, point, value), expiry) for writes waiting for their second step
+        self.windows = []  # maintenance windows, see windows.py
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
         self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
         self.reload()
@@ -65,6 +67,7 @@ class App:
             self.outputs = Outputs(self.store)
             self.engine.publishers.append(self.outputs.on_value)
             self.holds = {h["name"]: h for h in self.store.list("alarmhold")}
+            self.load_windows()
             for name, (p, _) in self.points().items():
                 p.in_service = self.holds.get(name, {}).get("kind") != "oos"
 
@@ -78,8 +81,14 @@ class App:
             self.unstored = []
             for i, ev in enumerate(new):
                 try:
-                    ev.held = self._hold_for(ev.point, self.points(), ts)
+                    pts = self.points()
+                    w = self.window_for(ev.point, pts, ts)
+                    if w and w["mode"] == "drop":
+                        continue  # planned work: not recorded at all
+                    ev.held = self._hold_for(ev.point, pts, ts)
                     ev.id = self.store.add_event(ev)
+                    if w and w["mode"] == "acknowledge" and ev.held == "maintenance":
+                        self.store.ack_event(ev.id, f"maintenance: {w['name']}", ts)
                 except Exception:  # the database is unavailable: keep the rest and try again next tick
                     self.unstored = new[i:]
                     break
@@ -129,11 +138,29 @@ class App:
         got = self.confirms.pop(tok, None) if isinstance(tok, str) else None
         return bool(got and got[1] > time.time() and got[0] == (ident["name"], point, v))
 
+    def load_windows(self):
+        self.windows = self.store.list("maintenance")
+
+    def window_for(self, point, pts, ts):
+        """The first maintenance window in effect that covers this point (or source alarm), or None."""
+        for m in self.windows:
+            if windows.active(m, ts):
+                if point.startswith(SOURCE):
+                    hit = windows.covers(m, point, source=point[len(SOURCE):])
+                else:
+                    p, s = pts.get(point, (None, None))
+                    hit = windows.covers(m, point, p.tags if p else None, s.name if s else None)
+                if hit:
+                    return m
+        return None
+
     def _hold_for(self, point, pts, ts):
         """Why an alarm on this point is recorded but not announced right now, or None."""
         h = self.holds.get(point)
         if h and h["kind"] == "shelved" and h["until"] > ts:
             return "shelved"
+        if self.window_for(point, pts, ts):
+            return "maintenance"
         sw = pts[point][0].meta.get("suppress_when") if point in pts else None
         other = pts.get(sw["point"], (None,))[0] if sw else None
         if other is not None and other.last is not None and other.quality != Quality.BAD:
@@ -190,6 +217,7 @@ class App:
         limit = lambda kind: next((d["limit"] for d in cfg if d.get("kind") == kind), None)
         return {"name": p.name, "source": s.name, "unit": p.meta.get("unit", ""), "tags": p.tags, "last": p.last,
                 "description": p.meta.get("description", ""), "decimals": p.meta.get("decimals"),
+                "states": p.meta.get("states"), "text": state_label(p, p.last) if p.meta.get("states") and p.last is not None else None,
                 "eu": {"low": p.meta.get("eu_low"), "high": p.meta.get("eu_high")},
                 "set_limits": {"min": self.set_limit(p, "min"), "max": self.set_limit(p, "max"), "max_step": p.meta.get("max_step"), "confirm": bool(p.meta.get("confirm"))} if p.meta.get("settable") else None,
                 "last_ts": p.last_ts, "received": p.last_recv, "quality": Quality(p.quality).name.lower(), "settable": p.meta.get("settable", False),
@@ -238,7 +266,8 @@ class App:
             if p is None:
                 raise ApiError(404, "unknown point")
             return 200, {**self.point_view(p, s), "source_type": s.meta.get("type"), "source_down": s.down_reason,
-                         "detectors": p.meta.get("detector_cfg", []), "hold": self.holds.get(b)}
+                         "detectors": p.meta.get("detector_cfg", []), "hold": self.holds.get(b),
+                         "maintenance": [{"name": m["name"], "mode": m["mode"]} for m in self.windows if windows.active(m, time.time()) and windows.covers(m, b, p.tags, s.name)]}
         if (method, a, b) == ("GET", "reports", "summary"):
             return self.report_summary(ident, query)
         if (method, a, c) == ("POST", "points", "set"):
@@ -511,7 +540,7 @@ class App:
     def import_config(self, query, doc, ident):
         validators = {"source": lambda n, b, v: validate_source(n, b), "point": lambda n, b, v: validate_point(n, b, v),
                       "handler": lambda n, b, v: validate_handler(n, b), "publisher": lambda n, b, v: validate_publisher(n, b, v),
-                      "watchlist": lambda n, b, v: validate_watchlist(n, b),
+                      "watchlist": lambda n, b, v: validate_watchlist(n, b), "maintenance": lambda n, b, v: validate_maintenance(n, b),
                       "dashboard": lambda n, b, v: validate_dashboard(n, b, v, roles_ok)[0]}
         apply_ = query.get("apply") == "1"  # a plain call is always a dry run
         errs, summary = self.maint.import_config(doc, validators, query.get("mode", "merge"), not apply_, ident["name"])
@@ -682,12 +711,12 @@ class App:
             errs = {"source": lambda: validate_source(name, body), "point": lambda: validate_point(name, body, self.store),
                     "handler": lambda: validate_handler(name, body),
                     "publisher": lambda: validate_publisher(name, body, self.store),
-                    "watchlist": lambda: validate_watchlist(name, body)}[kind]()
+                    "watchlist": lambda: validate_watchlist(name, body), "maintenance": lambda: validate_maintenance(name, body)}[kind]()
             if errs:
                 raise ApiError(422, "validation failed", errs)
             self.store.put(kind, name, body)
             self.store.audit(ident["name"], "config.put", f"{kind}/{name}")
-            self.reload()
+            self.load_windows() if kind == "maintenance" else self.reload()  # a window changes no engine object, so open alarms are left alone
             return 200, {"saved": name}
         if method == "DELETE":
             if kind == "source" and any(p.get("source") == name for p in self.store.list("point")):
@@ -695,7 +724,7 @@ class App:
             if not self.store.delete(kind, name):
                 self._404()
             self.store.audit(ident["name"], "config.delete", f"{kind}/{name}")
-            self.reload()
+            self.load_windows() if kind == "maintenance" else self.reload()
             return 200, {"deleted": name}
         raise ApiError(405, "method not allowed")
 

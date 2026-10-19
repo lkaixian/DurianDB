@@ -82,6 +82,12 @@ Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped i
 
 **Config lists.** Each Config tab opens as a dense table (sources with their live state, points with live value and quality, handlers, publishers, watch lists), with a filter box once there are more than five rows. A row opens its editor, which has a way back to the list. Source health is now part of the source list.
 
+**Mango-inspired features** (studied from the public documentation, see `docs/research/11-mango-feature-analysis.md`):
+- Sortable list and report tables (click a heading, again to reverse; numbers sort as numbers).
+- Binary and multistate points: `states: {"0": "Stopped", "1": "Running"}` shows labels instead of numbers, and a settable point gets a select instead of a number box.
+- More alarm conditions: `STATE` (alarm while in listed states), `RANGE` (outside or inside a range), `CHANGE` (an informational event on every change) and `NO_CHANGE` (value stuck for N seconds while updates keep arriving).
+- Maintenance windows (config kind `maintenance`): once, weekly (may cross midnight) or switched on by hand, for chosen points, tags or sources. During a window alarms are held, acknowledged at once, or not recorded at all. Ending a window announces alarms that are still active.
+
 **Data quality.** Every value carries the source's own timestamp and a quality: `good`, `uncertain` or `bad`. A source that is down or cannot fill a point marks it `bad`: the last value is held, no alarm is evaluated on it, and charts, CSV export and rollups skip it (the history table keeps the row with its quality). A device clock more than a minute ahead, or a sender that says `"quality": "uncertain"`, makes the value `uncertain`. Values older than the newest one already received for a point are dropped. A "no update" alarm counts from when DurianDB received a value, not from the device's clock. Senders may add `ts` and `quality` to ingest and MQTT payloads.
 
 ## Database

@@ -172,6 +172,7 @@ function bindSetForms(box) {
 }
 
 function setFormHtml(p) {
+  if (p.settable && isUser() && p.states) return `<form data-set="${esc(p.name)}"><label class="inl">New state <select name="value" aria-label="New state for ${esc(p.name)}">${Object.entries(p.states).map(([k, l]) => `<option value="${esc(k)}" ${p.last === Number(k) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>`;
   return p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" type="number" step="any" required placeholder="${p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : "";
 }
 
@@ -191,7 +192,7 @@ async function viewPoint(name) {
     </div>`;
   const when = t => t == null ? "never" : fmt(t);
   const fix = (p, v) => v == null ? "none" : p.decimals == null ? String(v) : Number(v).toFixed(p.decimals);
-  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for"};
+  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for"};
   let drawn = "";
   async function refresh() {
     let p;
@@ -206,10 +207,11 @@ async function viewPoint(name) {
     const notes = [];
     if (p.quality !== "good") notes.push(`Quality is ${p.quality}: ${p.quality === "bad" ? "the source is not supplying this value, so the last known one is shown." : "treat this value with care."}`);
     if (p.source_down) notes.push(`Source ${p.source} is down: ${p.source_down}.`);
+    for (const m of p.maintenance || []) notes.push(`In maintenance window ${m.name}: ${{suppress: "alarms are held", acknowledge: "alarms are acknowledged at once", drop: "alarms are not recorded"}[m.mode]}.`);
     if (p.hold?.kind === "oos") notes.push(`Out of service since ${fmt(p.hold.created)} by ${p.hold.user}: ${p.hold.reason}. Its alarms are not evaluated.`);
     if (p.hold?.kind === "shelved") notes.push(`Alarms shelved by ${p.hold.user} until ${fmt(p.hold.until)}: ${p.hold.reason}.`);
     $("#pd-top").className = "";
-    $("#pd-top").innerHTML = `<p class="pd-val num ${over ? "over" : ""}">${p.last == null ? "no value yet" : esc(fix(p, p.last))}<span class="u"> ${esc(p.unit)}</span></p>
+    $("#pd-top").innerHTML = `<p class="pd-val num ${over ? "over" : ""}">${p.last == null ? "no value yet" : esc(p.text ?? fix(p, p.last))}<span class="u"> ${p.text == null ? esc(p.unit) : ""}</span></p>
       ${p.description ? `<p>${esc(p.description)}</p>` : ""}
       <p class="note">Source ${esc(p.source)} (${esc(p.source_type)}). Value time ${esc(when(p.last_ts))}, received ${esc(when(p.received))}.${Object.keys(p.tags).length ? " Tags: " + esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(", ")) + "." : ""}</p>
       ${notes.map(n => `<p class="err">${esc(n)}</p>`).join("")}`;
@@ -219,7 +221,8 @@ async function viewPoint(name) {
       $("#pd-control-box").hidden = !(p.settable && isUser());
       $("#pd-control").innerHTML = setFormHtml(p) + (p.set_limits ? `<p class="note">${p.set_limits.min != null || p.set_limits.max != null ? `Accepts ${p.set_limits.min ?? "any"} to ${p.set_limits.max ?? "any"}. ` : ""}${p.set_limits.max_step != null ? `At most ${p.set_limits.max_step} away from the present value per write. ` : ""}${p.set_limits.confirm ? "Asks for confirmation. " : ""}Release hands the point back to its source.</p>` : "");
     }
-    const lim = p.detectors.map(d => `${kinds[d.kind] || d.kind} ${d.limit ?? d.per_second ?? d.seconds}${d.kind === "NO_UPDATE" ? " s" : p.unit ? " " + p.unit : ""} (${String(d.level || "WARNING").toLowerCase()})`);
+    const arg = d => d.kind === "STATE" ? (d.states || []).map(x => p.states?.[String(x)] ?? x).join(" or ") : d.kind === "RANGE" ? `${d.mode === "inside" ? "inside" : "outside"} ${d.low} to ${d.high}` : d.kind === "CHANGE" ? "" : d.limit ?? d.per_second ?? d.seconds;
+    const lim = p.detectors.map(d => `${d.kind === "RANGE" ? "" : kinds[d.kind] || d.kind} ${arg(d)}${["NO_UPDATE", "NO_CHANGE"].includes(d.kind) ? " s" : ["HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE"].includes(d.kind) && p.unit ? " " + p.unit : ""} (${String(d.level || "WARNING").toLowerCase()})`.trim());
     $("#pd-settings").className = "";
     $("#pd-settings").innerHTML = `<dl class="kv"><dt>Alarms</dt><dd>${lim.length ? lim.map(esc).join("; ") : "none set"}</dd>
       <dt>Engineering range</dt><dd>${p.eu.low == null && p.eu.high == null ? "not set" : `${p.eu.low ?? "any"} to ${p.eu.high ?? "any"}${p.unit ? " " + esc(p.unit) : ""}`}</dd>
@@ -252,7 +255,7 @@ function renderAlarms(evs) {
 function alarmTableHtml(evs, showPoint = true) {
   const STATE = {active_unacked: e => "Active, not acknowledged", active_acked: e => `Active, acknowledged by ${esc(e.acked_by)} at ${fmt(e.acked_ts)}`,
     rtn_unacked: e => `Returned to normal at ${fmt(e.cleared_ts)}, not acknowledged`, closed: e => `Closed: returned to normal at ${fmt(e.cleared_ts)}, acknowledged by ${esc(e.acked_by)}`};
-  const HELD = {shelved: "Shelved. ", suppressed: "Suppressed by design. "};
+  const HELD = {shelved: "Shelved. ", suppressed: "Suppressed by design. ", maintenance: "In a maintenance window. "};
   const state = e => (e.held && !e.cleared_ts ? HELD[e.held] : "") + STATE[e.state](e);
   const shelving = e => !isUser() || e.cleared_ts != null ? "" : e.held === "shelved"
     ? `<button data-unshelve="${esc(e.point)}" aria-label="Unshelve alarm on ${esc(e.point)}">Unshelve</button>`
@@ -284,7 +287,7 @@ function renderPoints(pts, filtered) {
   }
   for (const p of pts) {
     const row = [...box.children].find(r => r.dataset.pt === p.name), v = row.querySelector(".val");
-    v.textContent = p.last == null ? "no value yet" : `${p.decimals == null ? p.last : Number(p.last).toFixed(p.decimals)}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
+    v.textContent = p.last == null ? "no value yet" : p.text != null ? `${p.text}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}` : `${p.decimals == null ? p.last : Number(p.last).toFixed(p.decimals)}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
     v.classList.toggle("over", p.last != null && ((p.limits.high != null && p.last > p.limits.high) || (p.limits.low != null && p.last < p.limits.low)));
     row.querySelector(".spark").innerHTML = spark(p.history, p.limits);
   }
@@ -343,6 +346,7 @@ function viewReports() {
     box.innerHTML = d.items.length ? `<p class="note">${fmt(d.from)} to ${fmt(d.to)}. Bad samples are counted but left out of every figure.</p><table class="stack"><thead><tr><th>Point</th><th>Samples</th><th>Min</th><th>Max</th><th>Average</th><th>First</th><th>Last</th><th>Bad samples</th><th>Alarms</th></tr></thead><tbody>` +
       d.items.map(i => `<tr><td data-label="Point"><a href="#point/${encodeURIComponent(i.point)}">${esc(i.point)}</a>${i.unit ? ` <small class="note">${esc(i.unit)}</small>` : ""}</td>${["samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms"].map(k => `<td class="num" data-label="${k}">${k === "samples" || k === "bad_samples" || k === "alarms" ? i[k] : f(i[k])}</td>`).join("")}</tr>`).join("") + "</tbody></table>"
       : "No points match, or you can see none.";
+    box.querySelector("table") && makeSortable(box.querySelector("table"));
   };
   $("#rf").addEventListener("submit", ev => { ev.preventDefault(); show().catch(e => showErr(e, $("#rep"))); });
 }
@@ -371,7 +375,7 @@ async function draw(pts) {
 }
 
 // ---- config editor (administrators)
-const KINDS = {source: "Sources", point: "Points", handler: "Handlers", publisher: "Publishers", watchlist: "Watch lists"};
+const KINDS = {source: "Sources", point: "Points", handler: "Handlers", publisher: "Publishers", watchlist: "Watch lists", maintenance: "Maintenance"};
 const POINT_BASE = {unit: "", tags: {}, logging: "ON_CHANGE", tolerance: 0, settable: false, read_roles: ["user"], set_roles: []};
 const MODBUS_POINT = (m, extra = {}) => ({source: "plc", ...POINT_BASE, modbus: {unit: 1, byte_order: "big", word_order: "big", multiplier: 1, additive: 0, ...m}, ...extra});
 const TEMPLATES = {
@@ -399,6 +403,7 @@ const TEMPLATES = {
   handler: {"Webhook": {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true}},
   publisher: {"MQTT over TLS": {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true}},
   watchlist: {"By tag": {tags: {area: "boiler"}, points: [], read_roles: ["user"]}},
+  maintenance: {"Weekly window": {enabled: true, mode: "suppress", reason: "", scope: {points: []}, schedule: {type: "weekly", days: [0, 1, 2, 3, 4], start: "22:00", end: "06:00"}}},
 };
 const firstTemplate = kind => Object.values(TEMPLATES[kind])[0];
 
@@ -456,6 +461,25 @@ async function viewConfig(kind = "source", name) {
   });
 }
 
+// ---- sortable tables: click a column heading to sort by it, again to reverse. Numbers sort as numbers, everything else as text.
+function makeSortable(table) {
+  const heads = [...table.tHead.rows[0].cells];
+  const val = (row, n) => { const t = row.cells[n].textContent.trim(), m = /^-?\d+(?:\.\d+)?(?:\s*\S{1,6})?$/.test(t) ? parseFloat(t) : NaN; return Number.isNaN(m) ? t.toLowerCase() : m; };  // "83.3 C" is a number, "area:boiler" is text
+  heads.forEach((th, n) => {
+    if (!th.textContent.trim()) return;
+    th.setAttribute("aria-sort", "none");
+    th.innerHTML = `<button type="button" class="link sort">${th.innerHTML}</button>`;
+    th.firstChild.addEventListener("click", () => {
+      const dir = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+      heads.forEach(h => h.setAttribute("aria-sort", "none"));
+      th.setAttribute("aria-sort", dir);
+      const body = table.tBodies[0], rows = [...body.rows];
+      rows.sort((a, b) => { const x = val(a, n), y = val(b, n); return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), undefined, {numeric: true})) * (dir === "ascending" ? 1 : -1); });
+      rows.forEach(r => body.append(r));
+    });
+  });
+}
+
 // ---- config lists: one dense, filterable table per kind (rows open the editor)
 const yes = v => v ? "Yes" : "No";
 const tagText = t => Object.entries(t || {}).map(([k, v]) => k + ":" + v).join(", ");
@@ -464,6 +488,8 @@ const LISTS = {
   point: {cols: ["Name", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.source, x.last == null ? "no value yet" : `${x.decimals == null ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
   handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.url || "", i.min_level || "", yes(i.enabled !== false)]},
   publisher: {cols: ["Name", "Type", "Topic prefix", "Points", "Enabled"], cell: i => [null, i.type, i.prefix || "", (i.points || []).join(", "), yes(i.enabled !== false)]},
+  maintenance: {cols: ["Name", "Applies to", "During", "When", "Enabled"], cell: i => [null, [...(i.scope?.points || []), ...(i.scope?.sources || []).map(s => "source " + s), tagText(i.scope?.tags)].filter(Boolean).join(", "), {suppress: "Hold alarms", acknowledge: "Acknowledge", drop: "Drop alarms"}[i.mode] || i.mode,
+    i.schedule?.type === "weekly" ? `${(i.schedule.days || []).map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(" ")} ${i.schedule.start}-${i.schedule.end}` : i.schedule?.type === "once" ? `${fmt(i.schedule.from)} to ${fmt(i.schedule.to)}` : i.active ? "Switched on" : "Switched off", yes(i.enabled !== false)]},
   watchlist: {cols: ["Name", "Tags", "Points", "Who can read"], cell: i => [null, tagText(i.tags), (i.points || []).join(", "), (i.read_roles || []).join(", ")]},
 };
 async function renderConfigList(kind, items) {
@@ -479,6 +505,7 @@ async function renderConfigList(kind, items) {
         ? `<td data-label="${L.cols[0]}"><a href="#config/${kind}/${encodeURIComponent(i.name)}">${esc(i.name)}</a></td>`
         : `<td data-label="${L.cols[n]}" class="${String(c).startsWith("Down") || c === "bad" || (L.cols[n] === "Error" && c) ? "err" : ""}">${esc(String(c))}</td>`).join("")}</tr>`;
     }).join("")}</tbody></table>` : `<p class="status">No ${KINDS[kind].toLowerCase()} yet. ${kind === "source" ? "Add a source first, then points that read from it." : kind === "point" ? "Create a source first, then add points that read from it." : `Use New ${one} to add one.`}</p>`}`;
+  box.querySelector("table.dense") && makeSortable(box.querySelector("table.dense"));
   const count = () => { const rows = [...box.querySelectorAll("tbody tr")]; $("#lcount").textContent = rows.length ? `${rows.filter(r => !r.hidden).length} of ${rows.length}` : ""; };
   count();
   $("#lf")?.addEventListener("input", e => {

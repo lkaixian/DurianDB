@@ -98,4 +98,26 @@ try:
     raise AssertionError("negative off_delay")
 except ValueError:
     pass
+
+# ---- more detector kinds
+from durian.core import state_label  # noqa: E402
+pt = lambda **k: Point("p", detectors=[make_detector(k)], meta={"states": {"0": "Stopped", "1": "Running", "2": "Fault"}})
+eng, _ = run([0, 1, 2, 2, 1, 2], pt(kind="STATE", states=[2], level="URGENT"))
+assert [e.message for e in eng.events] == ["state is Fault", "state is Fault"] and eng.events[0].cleared_ts == 4.0 and eng.events[1].cleared_ts is None
+assert state_label(pt(kind="CHANGE").__class__("x", meta={"states": {"1": "On"}}), 1.0) == "On" and state_label(Point("x"), 3.5) == "3.5"
+eng, _ = run([5, 6, 11, 12, 8, 5], pt(kind="RANGE", low=0, high=10))
+assert len(eng.events) == 1 and eng.events[0].cleared_ts == 4.0 and "outside" in eng.events[0].message
+eng, _ = run([5, 15, 5], pt(kind="RANGE", low=10, high=20, mode="inside"))
+assert len(eng.events) == 1 and "inside" in eng.events[0].message
+eng, _ = run([0, 0, 1, 1, 2], pt(kind="CHANGE"))
+assert [e.message for e in eng.events] == ["changed from Stopped to Running", "changed from Running to Fault"] and all(e.cleared_ts == e.ts for e in eng.events)
+eng, _ = run([5.0, 5.05, 5.1, 5.0, 5.2, 6.0, 7.0], pt(kind="NO_CHANGE", seconds=3, tolerance=0.3))
+assert len(eng.events) == 1 and eng.events[0].ts == 4.0 and eng.events[0].cleared_ts == 5.0, [(e.ts, e.cleared_ts) for e in eng.events]
+for bad_cfg in ({"kind": "STATE"}, {"kind": "STATE", "states": []}, {"kind": "STATE", "states": ["a"]}, {"kind": "RANGE", "low": 5, "high": 5},
+                {"kind": "RANGE", "low": 1, "high": 2, "mode": "near"}, {"kind": "NO_CHANGE", "seconds": 0}, {"kind": "CHANGE", "tolerance": -1}):
+    try:
+        make_detector(bad_cfg)
+        raise AssertionError(bad_cfg)
+    except ValueError:
+        pass
 print("ok")

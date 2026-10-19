@@ -2,6 +2,7 @@
 
 Original teaching implementation of the concepts in docs/research. Not derived from Mango code.
 """
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -150,35 +151,121 @@ class NoUpdate(Detector):
             return self.event
 
 
-DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate)}
-_ARG = {"HIGH_LIMIT": "limit", "LOW_LIMIT": "limit", "RATE_OF_CHANGE": "per_second", "NO_UPDATE": "seconds"}
+def state_label(point, value):
+    """Text for a binary or multistate value from the point's `states` map ({"0": "Stopped", "1": "Running"}), else the number."""
+    labels = point.meta.get("states") or {}
+    key = str(int(value)) if float(value).is_integer() else str(value)
+    return labels.get(key, f"{value:g}" if isinstance(value, float) else str(value))
+
+
+class StateDetector(_Latch):
+    """Alarm while the value is one of `states`: for example a pump that should never be 'Fault', or a valve that must not be 'Open'."""
+    kind = "STATE"
+
+    def __init__(self, states, level=Level.WARNING, duration=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
+        self.states = {float(x) for x in states}
+
+    def evaluate(self, point, value, ts):
+        return f"state is {state_label(point, value)}" if value in self.states else None
+
+
+class RangeDetector(_Latch):
+    """Alarm while the value is outside [low, high] (mode 'outside'), or inside it (mode 'inside')."""
+    kind = "RANGE"
+
+    def __init__(self, low, high, mode="outside", level=Level.WARNING, duration=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
+        self.low, self.high, self.mode = low, high, mode
+
+    def evaluate(self, point, value, ts):
+        inside = self.low <= value <= self.high
+        if self.mode == "outside":
+            return None if inside else f"{value:g} is outside {self.low:g} to {self.high:g}"
+        return f"{value:g} is inside {self.low:g} to {self.high:g}" if inside else None
+
+
+class ChangeDetector(Detector):
+    """One informational event each time the value changes by more than `tolerance`. It returns to normal at once, so it only needs acknowledging."""
+    kind = "CHANGE"
+
+    def __init__(self, tolerance=0.0, level=Level.INFORMATION):
+        self.tolerance, self.level, self.prev = tolerance, level, None
+
+    def reset(self):
+        self.prev = None
+
+    def check(self, point, value, ts):
+        prev, self.prev = self.prev, value
+        if prev is not None and abs(value - prev) > self.tolerance:
+            return Event(point.name, self.level, f"changed from {state_label(point, prev)} to {state_label(point, value)}", ts, cleared_ts=ts)
+
+
+class NoChange(Detector):
+    """Alarm when the value has not moved by more than `tolerance` for `seconds` while updates keep arriving: a frozen sensor or a stuck output."""
+    kind = "NO_CHANGE"
+
+    def __init__(self, seconds, tolerance=0.0, level=Level.WARNING):
+        self.seconds, self.tolerance, self.level = seconds, tolerance, level
+        self.ref = self.changed = self.event = None
+
+    def reset(self):
+        self.ref = self.changed = self.event = None
+
+    def check(self, point, value, ts):
+        if self.ref is None or abs(value - self.ref) > self.tolerance:
+            self.ref, self.changed = value, ts
+            if self.event:
+                self.event.cleared_ts, self.event = ts, None
+
+    def tick(self, point, ts):
+        if self.event is None and self.changed is not None and point.quality != Quality.BAD and ts - self.changed > self.seconds:
+            self.event = Event(point.name, self.level, f"value has not changed for {ts - self.changed:.0f}s", ts)
+            return self.event
+
+
+DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange)}
+LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE")  # these take duration (on-delay) and off_delay
 
 
 def make_detector(cfg: dict) -> Detector:
-    """Build a detector from a config dict: {kind, limit|per_second|seconds, level, duration}."""
+    """Build a detector from a config dict. Raises ValueError naming the first problem."""
     kind = cfg.get("kind")
     if kind not in DETECTORS:
         raise ValueError(f"kind must be one of {sorted(DETECTORS)}")
-    arg = _ARG[kind]
-    if not isinstance(cfg.get(arg), (int, float)) or isinstance(cfg.get(arg), bool):
-        raise ValueError(f"{arg} must be a number")
+
+    def num(key, default=None, lo=None):
+        v = cfg.get(key, default)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or (lo is not None and v < lo):
+            raise ValueError(f"{key} must be a number" + (f", {lo:g} or more" if lo is not None else ""))
+        return v
+
     try:
-        level = Level[str(cfg.get("level", "WARNING")).upper()]
+        level = Level[str(cfg.get("level", "INFORMATION" if kind == "CHANGE" else "WARNING")).upper()]
     except KeyError:
         raise ValueError(f"level must be one of {[l.name for l in Level]}")
-    duration = cfg.get("duration", 0)
-    if not isinstance(duration, (int, float)) or duration < 0:
-        raise ValueError("duration must be a number of seconds, zero or more")
-    off_delay = cfg.get("off_delay", 0)
-    if kind != "NO_UPDATE" and (not isinstance(off_delay, (int, float)) or isinstance(off_delay, bool) or off_delay < 0):
-        raise ValueError("off_delay must be a number of seconds, zero or more")
-    extra = {} if kind == "NO_UPDATE" else {"duration": float(duration), "off_delay": float(off_delay)}
+    late = {"duration": float(num("duration", 0, 0)), "off_delay": float(num("off_delay", 0, 0))} if kind in LATCHING else {}
     if kind in ("HIGH_LIMIT", "LOW_LIMIT"):
-        deadband = cfg.get("deadband", 0)
-        if not isinstance(deadband, (int, float)) or isinstance(deadband, bool) or deadband < 0:
-            raise ValueError("deadband must be a number, zero or more")
-        extra["deadband"] = float(deadband)
-    return DETECTORS[kind](cfg[arg], level, **extra)
+        return DETECTORS[kind](num("limit"), level, deadband=float(num("deadband", 0, 0)), **late)
+    if kind == "RATE_OF_CHANGE":
+        return RateOfChange(num("per_second"), level, **late)
+    if kind == "NO_UPDATE":
+        return NoUpdate(num("seconds"), level)
+    if kind == "STATE":
+        st = cfg.get("states")
+        if not (isinstance(st, list) and 1 <= len(st) <= 20 and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in st)):
+            raise ValueError("states must be a list of 1 to 20 numbers")
+        return StateDetector(st, level, **late)
+    if kind == "RANGE":
+        low, high = num("low"), num("high")
+        if low >= high:
+            raise ValueError("high must be greater than low")
+        if cfg.get("mode", "outside") not in ("outside", "inside"):
+            raise ValueError("mode must be outside or inside")
+        return RangeDetector(low, high, cfg.get("mode", "outside"), level, **late)
+    if kind == "CHANGE":
+        return ChangeDetector(float(num("tolerance", 0, 0)), level)
+    return NoChange(num("seconds", lo=1), float(num("tolerance", 0, 0)), level)
 
 
 @dataclass

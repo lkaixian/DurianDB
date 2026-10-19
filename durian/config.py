@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector
-from . import calc, http_source, sql_source
+from . import calc, http_source, sql_source, windows
 from .http_source import HttpJsonSource
 from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
@@ -244,6 +244,9 @@ def validate_point(name, b, store):
         add("confirm", "must be true or false")
     if not b.get("settable") and any(k in b for k in ("set_min", "set_max", "max_step", "confirm")):
         add("settable", "set limits and confirmation only apply to a settable point")
+    st = b.get("states")
+    if "states" in b and not (isinstance(st, dict) and 1 <= len(st) <= 50 and all(isinstance(k, str) and re.fullmatch(r"-?\d+", k) and isinstance(v, str) and 1 <= len(v) <= 40 for k, v in st.items())):
+        add("states", 'must be {"0": "Stopped", "1": "Running"}: whole-number keys, text labels of 1 to 40 characters, at most 50')
     sw = b.get("suppress_when")
     if sw is not None and not (isinstance(sw, dict) and isinstance(sw.get("point"), str) and sw["point"] != name
                                and sw.get("op") in (">", "<", "==") and _num(sw.get("value"))):
@@ -282,6 +285,10 @@ def validate_point(name, b, store):
     return e
 
 
+def validate_maintenance(name, b):
+    return windows.validate(name, b, NAME)
+
+
 def validate_watchlist(name, b):
     e, add = [], lambda p, m: e.append({"property": p, "message": m})
     if not NAME.match(str(name)):
@@ -304,7 +311,7 @@ def make_point(name, b, source_name):
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc"):
+    for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc", "states"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm"):  # zero is a real value here

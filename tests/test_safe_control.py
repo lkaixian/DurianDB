@@ -66,4 +66,15 @@ assert call(admin, "POST", "/api/points/sp/set", {"value": 7, "confirm": r["conf
 
 # releasing needs neither limits nor confirmation
 assert call(admin, "POST", "/api/points/sp/set", {"value": None})[0] == 200
+
+# ---- binary and multistate points: labels for values, a labelled point view
+ST = {"source": "demo", "generator": {"kind": "constant", "value": 1}, "states": {"0": "Stopped", "1": "Running", "2": "Fault"},
+      "detectors": [{"kind": "STATE", "states": [2], "level": "URGENT"}, {"kind": "NO_CHANGE", "seconds": 600}, {"kind": "RANGE", "low": 0, "high": 5}]}
+assert call(admin, "PUT", "/api/config/point/pump", ST)[0] == 200
+for bad in ({"states": {}}, {"states": {"x": "On"}}, {"states": {"1": ""}}, {"states": {"1": "y" * 41}}, {"states": ["a"]},
+            {"detectors": [{"kind": "STATE", "states": []}]}, {"detectors": [{"kind": "RANGE", "low": 2, "high": 1}]}):
+    assert call(admin, "PUT", "/api/config/point/pump2", {**ST, **bad})[0] == 422, bad
+app.tick(time.time())
+v = next(p for p in call(admin, "GET", "/api/points")[1] if p["name"] == "pump")
+assert v["text"] == "Running" and v["states"]["2"] == "Fault", v
 print("ok")
