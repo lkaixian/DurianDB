@@ -23,7 +23,7 @@ from .store import Store
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
-          "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/dashboards.js": ("dashboards.js", "text/javascript; charset=utf-8"),
+          "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/dashboards.js": ("dashboards.js", "text/javascript; charset=utf-8"), "/admin.js": ("admin.js", "text/javascript; charset=utf-8"),
           "/app.css": ("app.css", "text/css; charset=utf-8")}
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 COOKIE = "durian_session"
