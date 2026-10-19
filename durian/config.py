@@ -9,10 +9,88 @@ import re
 from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector
+from .modbus import RANGES, TYPES
+from .modbus_source import DEFAULTS as MODBUS_KEYS, ModbusSource
 from .mqtt_source import MqttSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-SOURCE_TYPES = ("virtual", "mqtt")
+SOURCE_TYPES = ("virtual", "mqtt", "modbus")
+PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
+
+
+def _int(v, lo, hi):
+    return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+def _modbus_source_errors(b, add):
+    link = b.get("link")
+    if not isinstance(link, dict) or link.get("kind") not in ("tcp", "serial"):
+        add("link.kind", "must be tcp or serial")
+        return
+    if link["kind"] == "tcp":
+        if not (isinstance(link.get("host"), str) and 0 < len(link["host"]) <= 253):
+            add("link.host", "must be a host name or address")
+        if not _int(link.get("port"), 1, 65535):
+            add("link.port", "must be 1 to 65535")
+    else:
+        if not (isinstance(link.get("port"), str) and 0 < len(link["port"]) <= 200):
+            add("link.port", "must be a serial port name such as COM3 or /dev/ttyUSB0")
+        if link.get("baudrate", 9600) not in BAUDS:
+            add("link.baudrate", f"must be one of {list(BAUDS)}")
+        if link.get("parity", "N") not in PARITY:
+            add("link.parity", "must be N, E or O")
+        if link.get("stopbits", 1) not in (1, 2):
+            add("link.stopbits", "must be 1 or 2")
+        if link.get("bytesize", 8) not in (7, 8):
+            add("link.bytesize", "must be 7 or 8")
+    framing = b.get("framing")
+    if framing not in (None, "tcp", "rtu", "ascii") or (framing == "tcp" and link["kind"] == "serial"):
+        add("framing", "must be tcp (TCP links only), rtu or ascii")
+    for k, lo, hi in (("retries", 0, 10), ("max_read_bits", 1, 2000), ("max_read_regs", 1, 125), ("max_write_regs", 1, 123)):
+        if k in b and not _int(b[k], lo, hi):
+            add(k, f"must be a whole number from {lo} to {hi}")
+    for k, lo, hi in (("timeout", 0.05, 30), ("period", 0.2, 86400), ("backoff_max", 1, 86400)):
+        if k in b and not (_num(b[k]) and lo <= b[k] <= hi):
+            add(k, f"must be a number from {lo} to {hi}")
+    if "backoff_scale" in b and not (_num(b["backoff_scale"]) and 1 < b["backoff_scale"] <= 10):
+        add("backoff_scale", "must be greater than 1 and at most 10")
+    for k in ("persistent", "contiguous_only", "multiple_writes_only", "monitor"):
+        if not isinstance(b.get(k, True), bool):
+            add(k, "must be true or false")
+
+
+def _modbus_point_errors(b, add):
+    m = b.get("modbus")
+    if not isinstance(m, dict):
+        add("modbus", "a point on a Modbus source needs a modbus section")
+        return
+    rng, typ = m.get("range"), m.get("type")
+    if not _int(m.get("unit"), 1, 247):
+        add("modbus.unit", "must be a device address from 1 to 247")
+    if rng not in RANGES:
+        add("modbus.range", f"must be one of {sorted(RANGES)}")
+        return
+    if not _int(m.get("address"), 0, 65535):
+        add("modbus.address", "must be 0 to 65535 (zero-based, so register 40001 is holding address 0)")
+        return
+    if rng in ("coil", "discrete"):
+        if typ not in (None, "bool"):
+            add("modbus.type", "coils and discrete inputs are single bits, leave type out")
+    elif typ != "bool" and typ not in TYPES:
+        add("modbus.type", f"must be bool or one of {sorted(TYPES)}")
+    elif typ == "bool" and not _int(m.get("bit", 0), 0, 15):
+        add("modbus.bit", "must be 0 to 15")
+    elif typ != "bool" and m["address"] + TYPES[typ][1] > 65536:
+        add("modbus.address", "the value would run past the last register")
+    for k in ("byte_order", "word_order"):
+        if m.get(k, "big") not in ("big", "little"):
+            add(f"modbus.{k}", "must be big or little")
+    if not (_num(m.get("multiplier", 1)) and m.get("multiplier", 1) != 0):
+        add("modbus.multiplier", "must be a non-zero number")
+    if not _num(m.get("additive", 0)):
+        add("modbus.additive", "must be a number")
+    if b.get("settable") and (rng not in ("coil", "holding") or (rng == "holding" and typ == "bool")):
+        add("settable", "only coils and whole holding-register values can be written")
 
 
 class Virtual(Source):
@@ -88,6 +166,8 @@ def validate_source(name, b):
             add("cmd_prefix", "must not overlap prefix, or commands would come back in as data")
         if not isinstance(b.get("auto_create", True), bool):
             add("auto_create", "must be true or false")
+    if b.get("type") == "modbus":
+        _modbus_source_errors(b, add)
     return e
 
 
@@ -135,6 +215,8 @@ def validate_point(name, b, store):
                     add(f"generator.{k}", "must be a number")
             if kind == "sine" and _num(g.get("period")) and g["period"] <= 0:
                 add("generator.period", "must be greater than zero")
+    if src and src.get("type") == "modbus":
+        _modbus_point_errors(b, add)
     return e
 
 
@@ -160,6 +242,8 @@ def make_point(name, b, source_name):
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
+    if b.get("modbus"):
+        p.meta["modbus"] = b["modbus"]
     return p
 
 
@@ -180,6 +264,11 @@ def build_engine(store):
                     src.gens[n] = p.get("generator", {"kind": "walk"})
                     if n in held:
                         src.override[n] = held[n]
+            elif s["type"] == "modbus":
+                src = ModbusSource(s["name"], {k: v for k, v in s.items() if k in MODBUS_KEYS or k == "link"})
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
+                src.start()  # only after every point is added: the read plan is built once from them
             else:
                 auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create", True) else None
                 src = MqttSource(s["name"], load_creds(s["creds"]), s.get("prefix", "durian/"),

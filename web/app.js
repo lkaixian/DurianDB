@@ -200,14 +200,29 @@ async function draw(pts) {
 
 // ---- config editor (administrators)
 const KINDS = {source: "Sources", point: "Points", handler: "Handlers", publisher: "Publishers", watchlist: "Watch lists"};
-const TEMPLATE = {
-  source: {type: "virtual", enabled: true, read_roles: ["user"]},
-  point: {source: "demo", unit: "", tags: {}, logging: "ON_CHANGE", tolerance: 0, settable: false, read_roles: ["user"], set_roles: [],
-    generator: {kind: "walk", start: 50, min: 0, max: 100, step: 1}, detectors: [{kind: "HIGH_LIMIT", limit: 80, level: "WARNING", duration: 0}]},
-  handler: {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true},
-  publisher: {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true},
-  watchlist: {tags: {area: "boiler"}, points: [], read_roles: ["user"]},
+const POINT_BASE = {unit: "", tags: {}, logging: "ON_CHANGE", tolerance: 0, settable: false, read_roles: ["user"], set_roles: []};
+const MODBUS_POINT = (m, extra = {}) => ({source: "plc", ...POINT_BASE, modbus: {unit: 1, byte_order: "big", word_order: "big", multiplier: 1, additive: 0, ...m}, ...extra});
+const TEMPLATES = {
+  source: {
+    "Virtual generator": {type: "virtual", enabled: true, read_roles: ["user"]},
+    "MQTT over TLS": {type: "mqtt", enabled: true, read_roles: ["user"], creds: "lab/mqtt/creds.json", prefix: "durian/", cmd_prefix: "durian-cmd/", auto_create: true},
+    "Modbus TCP": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "tcp", host: "127.0.0.1", port: 502}, period: 5, timeout: 0.5, retries: 2, monitor: true},
+    "Modbus RTU on a serial port": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "serial", port: "COM3", baudrate: 9600, parity: "N", stopbits: 1, bytesize: 8}, framing: "rtu", period: 5, timeout: 0.5, retries: 2},
+    "Modbus RTU over TCP (serial converter)": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "tcp", host: "192.168.0.50", port: 4001}, framing: "rtu", period: 5},
+  },
+  point: {
+    "Virtual walk": {source: "demo", ...POINT_BASE, generator: {kind: "walk", start: 50, min: 0, max: 100, step: 1}, detectors: [{kind: "HIGH_LIMIT", limit: 80, level: "WARNING", duration: 0}]},
+    "Modbus holding register (uint16)": MODBUS_POINT({range: "holding", address: 0, type: "uint16"}, {settable: true, set_roles: ["user"]}),
+    "Modbus holding register (float32, word-swapped)": MODBUS_POINT({range: "holding", address: 10, type: "float32", word_order: "little"}),
+    "Modbus input register with scaling": MODBUS_POINT({range: "input", address: 0, type: "int16", multiplier: 0.1, additive: -40}, {unit: "C"}),
+    "Modbus coil": MODBUS_POINT({range: "coil", address: 0}, {settable: true, set_roles: ["user"]}),
+    "Modbus bit of a register": MODBUS_POINT({range: "holding", address: 40, type: "bool", bit: 3}),
+  },
+  handler: {"Webhook": {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true}},
+  publisher: {"MQTT over TLS": {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true}},
+  watchlist: {"By tag": {tags: {area: "boiler"}, points: [], read_roles: ["user"]}},
 };
+const firstTemplate = kind => Object.values(TEMPLATES[kind])[0];
 
 async function viewConfig(kind = "source", name) {
   if (!KINDS[kind]) kind = "source";
@@ -220,16 +235,18 @@ async function viewConfig(kind = "source", name) {
     const h = await api("GET", "/api/sources").catch(() => []);
     $("#health").innerHTML = h.length ? `<h3>Source health</h3><table class="stack"><thead><tr><th>Name</th><th>Type</th><th>Points</th><th>Connected</th><th>Dropped</th><th>Error</th></tr></thead><tbody>${h.map(s => `<tr><td data-label="Name">${esc(s.name)}</td><td data-label="Type">${esc(s.type)}</td><td class="num" data-label="Points">${s.points}</td><td data-label="Connected">${s.connected == null ? "n/a" : s.connected ? "yes" : "no"}</td><td class="num" data-label="Dropped">${s.dropped ?? "n/a"}</td><td class="${s.error ? "err" : ""}" data-label="Error">${esc(s.error || "none")}</td></tr>`).join("")}</tbody></table>` : "";
   }
-  const cur = name === "_new" ? {name: "", ...TEMPLATE[kind]} : items.find(i => i.name === name);
+  const cur = name === "_new" ? {name: "", ...firstTemplate(kind)} : items.find(i => i.name === name);
   const {name: _n, ...body} = cur || {};
   $("#cfg").className = "";
   $("#cfg").innerHTML = `<ul class="list">${items.map(i => `<li><a class="btn" href="#config/${kind}/${encodeURIComponent(i.name)}" ${i.name === name ? 'aria-current="page"' : ""}>${esc(i.name)}</a></li>`).join("")}<li><a class="btn" href="#config/${kind}/_new">New ${KINDS[kind].toLowerCase().replace(/s$/, "")}</a></li></ul>
     ${cur ? `<form id="ed"><label>Name <input name="name" value="${esc(cur.name)}" ${name === "_new" ? "" : "readonly"} required pattern="[A-Za-z0-9_.\\-]{1,64}"></label>
+      ${name === "_new" && Object.keys(TEMPLATES[kind]).length > 1 ? `<label>Start from <select id="tpl">${Object.keys(TEMPLATES[kind]).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>` : ""}
       <label>Settings (JSON) <textarea name="body" spellcheck="false">${esc(JSON.stringify(body, null, 2))}</textarea></label>
       <div class="row"><button type="submit">Save</button>${name !== "_new" ? '<button type="button" id="del">Delete</button>' : ""}</div></form><div id="ed-msg" role="status"></div>`
       : '<p class="note">Choose an item, or create a new one. Saving validates every field and reloads the engine.</p>'}`;
   const msg = $("#ed-msg");
   if (!cur) return;
+  $("#tpl")?.addEventListener("change", e => { $("#ed").body.value = JSON.stringify(TEMPLATES[kind][e.target.value], null, 2); });
   const report = (ok, text, errs) => { msg.className = ok ? "" : "err"; msg.innerHTML = esc(text) + (errs ? `<ul class="errors">${errs.map(e => `<li><code>${esc(e.property)}</code>: ${esc(e.message)}</li>`).join("")}</ul>` : ""); };
   $("#ed").addEventListener("submit", async ev => {
     ev.preventDefault();
