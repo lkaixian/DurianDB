@@ -82,4 +82,12 @@ assert v["text"] == "Running" and v["states"]["2"] == "Fault", v
 for bad in ({"logging": "INTERVAL"}, {"logging": "INTERVAL", "log_interval": 0}, {"logging": "INTERVAL", "log_interval": 10, "log_mode": "median"}):
     assert call(admin, "PUT", "/api/config/point/iv", {"source": "demo", **bad})[0] == 422, bad
 assert call(admin, "PUT", "/api/config/point/iv", {"source": "demo", "logging": "INTERVAL", "log_interval": 10, "log_mode": "avg"})[0] == 200
+
+# ---- folders: validated, shown, and usable as a filter (a folder includes what is below it)
+for bad in ("a//b", "/x", "x/", " ", "y" * 65):
+    assert call(admin, "PUT", "/api/config/point/fo", {"source": "demo", "folder": bad})[0] == 422, bad
+for n, f in (("fo-a", "Plant/Boiler"), ("fo-b", "Plant/Boiler/Drum"), ("fo-c", "Plant/Line"), ("fo-d", "Plantation")):
+    assert call(admin, "PUT", f"/api/config/point/{n}", {"source": "demo", "folder": f})[0] == 200
+names = lambda **q: sorted(p["name"] for p in app.handle("GET", "/api/points", q, None, admin)[1] if p["name"].startswith("fo-"))
+assert names(folder="Plant") == ["fo-a", "fo-b", "fo-c"] and names(folder="Plant/Boiler") == ["fo-a", "fo-b"] and names(folder="Plant/Boiler/") == ["fo-a", "fo-b"] and names() == ["fo-a", "fo-b", "fo-c", "fo-d"]
 print("ok")

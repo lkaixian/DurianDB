@@ -102,7 +102,8 @@ function viewOverview() {
     <section aria-labelledby="al-h"><h2 id="al-h">Alarms <small id="al-count"></small></h2><div id="alarms" class="status" data-live>Loading alarms...</div></section>
     <section aria-labelledby="pt-h"><h2 id="pt-h">Live points</h2>
       <form id="filter" class="row"><label>Watch list <select id="f-wl"><option value="">All points</option></select></label>
-      <label>Tag <input id="f-tag" placeholder="area:boiler" autocomplete="off"></label></form>
+      <label>Tag <input id="f-tag" placeholder="area:boiler" autocomplete="off"></label>
+      <label>Folder <input id="f-folder" placeholder="Plant/Boiler" autocomplete="off"></label></form>
       <div id="points" class="status" data-live>Loading points...</div></section>
     <section class="wide" aria-labelledby="kpi-h"><h2 id="kpi-h">Alarm performance, last 24 hours</h2><div id="kpis" class="status" data-live>Loading...</div></section></div>`;
   api("GET", "/api/watchlists").then(w => { $("#f-wl").insertAdjacentHTML("beforeend", w.map(x => `<option>${esc(x.name)}</option>`).join("")); }).catch(() => {});
@@ -130,6 +131,7 @@ async function refreshOverview() {
   const q = new URLSearchParams();
   if ($("#f-wl").value) q.set("watchlist", $("#f-wl").value);
   if ($("#f-tag").value.includes(":")) q.set("tag", $("#f-tag").value.trim());
+  if ($("#f-folder").value.trim()) q.set("folder", $("#f-folder").value.trim());
   const [pts, evs] = await Promise.all([api("GET", "/api/points?" + q), api("GET", "/api/events")]);
   renderPoints(pts, q.size > 0);
   renderAlarms(evs);
@@ -280,14 +282,16 @@ function renderPoints(pts, filtered) {
   const box = $("#points");
   if (!pts.length) { ptSig = ""; box.className = "status"; box.textContent = filtered ? "No points match this filter." : "No points you can see yet. An administrator adds them under Config."; return; }
   box.className = "";
-  const sig = pts.map(p => p.name + (p.settable ? "*" : "")).join();
+  pts = [...pts].sort((a, b) => (a.folder || "\uffff").localeCompare(b.folder || "\uffff") || a.name.localeCompare(b.name));  // foldered points first, in folder order
+  const sig = pts.map(p => p.name + (p.settable ? "*" : "") + "|" + (p.folder || "")).join();
   if (sig !== ptSig) {  // rebuild only when the list changes, so typing in a set field is never interrupted
     ptSig = sig;
-    box.innerHTML = pts.map(p => `<div class="pt" data-pt="${esc(p.name)}"><div class="head"><span><a href="#point/${encodeURIComponent(p.name)}">${esc(p.name)}</a> <span class="tags">${esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(" "))}</span>${p.description ? `<small class="note"> ${esc(p.description)}</small>` : ""}</span><span class="val num"></span></div><div class="spark"></div>
+    const folders = pts.some(p => p.folder);
+    box.innerHTML = pts.map((p, i) => (folders && (i === 0 || (pts[i - 1].folder || "") !== (p.folder || "")) ? `<h3 class="fold">${esc((p.folder || "Not in a folder").split("/").join(" / "))}</h3>` : "") + `<div class="pt" data-pt="${esc(p.name)}"><div class="head"><span><a href="#point/${encodeURIComponent(p.name)}">${esc(p.name)}</a> <span class="tags">${esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(" "))}</span>${p.description ? `<small class="note"> ${esc(p.description)}</small>` : ""}</span><span class="val num"></span></div><div class="spark"></div>
       ${setFormHtml(p)}</div>`).join("");
   }
   for (const p of pts) {
-    const row = [...box.children].find(r => r.dataset.pt === p.name), v = row.querySelector(".val");
+    const row = [...box.children].find(r => r.dataset?.pt === p.name), v = row.querySelector(".val");
     v.textContent = p.last == null ? "no value yet" : p.text != null ? `${p.text}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}` : `${p.decimals == null ? p.last : Number(p.last).toFixed(p.decimals)}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
     v.classList.toggle("over", p.last != null && ((p.limits.high != null && p.last > p.limits.high) || (p.limits.low != null && p.last < p.limits.low)));
     row.querySelector(".spark").innerHTML = spark(p.history, p.limits);
@@ -534,7 +538,7 @@ const yes = v => v ? "Yes" : "No";
 const tagText = t => Object.entries(t || {}).map(([k, v]) => k + ":" + v).join(", ");
 const LISTS = {
   source: {cols: ["Name", "Type", "Enabled", "Points", "State", "Last poll", "Dropped", "Error"], cell: (i, x) => [null, i.type, yes(i.enabled !== false), x.points ?? "", x.down ? "Down: " + x.down : x.name ? "Up" : "Not running", x.poll_ms == null ? "" : `${(x.poll_ms / 1000).toFixed(2)} s${x.overruns ? `, ${x.overruns} too slow` : ""}`, x.dropped ?? "", x.error || ""]},
-  point: {cols: ["Name", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.source, x.last == null ? "no value yet" : `${x.decimals == null ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
+  point: {cols: ["Name", "Folder", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.folder || "", i.source, x.last == null ? "no value yet" : `${x.decimals == null ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
   handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.type === "email" ? (i.to || []).join(", ") : i.type === "setpoint" ? `${i.point} = ${i.value}` : i.url || "", i.min_level || "", yes(i.enabled !== false)]},
   publisher: {cols: ["Name", "Type", "Topic prefix", "Points", "Enabled"], cell: i => [null, i.type, i.prefix || "", (i.points || []).join(", "), yes(i.enabled !== false)]},
   maintenance: {cols: ["Name", "Applies to", "During", "When", "Enabled"], cell: i => [null, [...(i.scope?.points || []), ...(i.scope?.sources || []).map(s => "source " + s), tagText(i.scope?.tags)].filter(Boolean).join(", "), {suppress: "Hold alarms", acknowledge: "Acknowledge", drop: "Drop alarms"}[i.mode] || i.mode,

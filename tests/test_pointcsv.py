@@ -26,8 +26,8 @@ def call(ident, method, path, body=None, **q):
 # ---- export carries the common settings in columns and the rest as JSON
 s, raw = call(admin, "GET", "/api/export/points")
 text = raw.data.decode()
-assert s == 200 and raw.filename == "points.csv" and text.splitlines()[0].startswith("name,source,unit,description,tags,logging")
-assert "boiler-temp,demo,C" in text and "area:boiler" in text and "generator" in text
+assert s == 200 and raw.filename == "points.csv" and text.splitlines()[0].startswith("name,source,folder,unit,description,tags,logging")
+assert "boiler-temp,demo,,C" in text and "area:boiler" in text and "generator" in text
 assert call(ANON, "GET", "/api/export/points")[0] == 401
 
 # ---- round trip: importing what was exported changes nothing

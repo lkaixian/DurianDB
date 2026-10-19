@@ -6,7 +6,7 @@ import csv
 import io
 import json
 
-COLUMNS = ["name", "source", "unit", "description", "tags", "logging", "tolerance", "settable", "read_roles", "set_roles",
+COLUMNS = ["name", "source", "folder", "unit", "description", "tags", "logging", "tolerance", "settable", "read_roles", "set_roles",
            "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "extra"]
 LISTS = ("read_roles", "set_roles")
 NUMBERS = ("tolerance", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step")

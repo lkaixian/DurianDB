@@ -248,6 +248,9 @@ def validate_point(name, b, store):
         add("confirm", "must be true or false")
     if not b.get("settable") and any(k in b for k in ("set_min", "set_max", "max_step", "confirm")):
         add("settable", "set limits and confirmation only apply to a settable point")
+    fo = b.get("folder")
+    if "folder" in b and not (isinstance(fo, str) and len(fo) <= 200 and all(0 < len(x.strip()) <= 64 for x in fo.split("/"))):
+        add("folder", "must be a path such as Plant/Boiler: names separated by /, none empty, each up to 64 characters")
     st = b.get("states")
     if "states" in b and not (isinstance(st, dict) and 1 <= len(st) <= 50 and all(isinstance(k, str) and re.fullmatch(r"-?\d+", k) and isinstance(v, str) and 1 <= len(v) <= 40 for k, v in st.items())):
         add("states", 'must be {"0": "Stopped", "1": "Running"}: whole-number keys, text labels of 1 to 40 characters, at most 50')
@@ -316,7 +319,7 @@ def make_point(name, b, source_name):
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc", "states"):
+    for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm"):  # zero is a real value here

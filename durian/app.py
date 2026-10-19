@@ -244,7 +244,7 @@ class App:
         limit = lambda kind: next((d["limit"] for d in cfg if d.get("kind") == kind), None)
         return {"name": p.name, "source": s.name, "unit": p.meta.get("unit", ""), "tags": p.tags, "last": p.last,
                 "description": p.meta.get("description", ""), "decimals": p.meta.get("decimals"),
-                "states": p.meta.get("states"), "text": state_label(p, p.last) if p.meta.get("states") and p.last is not None else None,
+                "folder": p.meta.get("folder", ""), "states": p.meta.get("states"), "text": state_label(p, p.last) if p.meta.get("states") and p.last is not None else None,
                 "eu": {"low": p.meta.get("eu_low"), "high": p.meta.get("eu_high")},
                 "set_limits": {"min": self.set_limit(p, "min"), "max": self.set_limit(p, "max"), "max_step": p.meta.get("max_step"), "confirm": bool(p.meta.get("confirm"))} if p.meta.get("settable") else None,
                 "last_ts": p.last_ts, "received": p.last_recv, "quality": Quality(p.quality).name.lower(), "settable": p.meta.get("settable", False),
@@ -632,7 +632,9 @@ class App:
     def select_points(self, ident, query):
         """Points the caller may see, narrowed by ?watchlist= and ?tag=key:value."""
         pts = self.visible_points(ident)
-        tag, wl = query.get("tag"), query.get("watchlist")
+        tag, wl, folder = query.get("tag"), query.get("watchlist"), query.get("folder")
+        if folder:  # a folder and everything below it
+            pts = {n: ps for n, ps in pts.items() if (ps[0].meta.get("folder", "") + "/").startswith(folder.strip("/") + "/")}
         if wl:
             w = self.store.get("watchlist", wl)
             if not w or not can(ident["roles"], w.get("read_roles", ["user"])):

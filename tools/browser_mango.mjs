@@ -122,5 +122,11 @@ console.log("csv link:", await ev(`document.querySelector('#aj-csv').getAttribut
 await go("#history"); await sleep(1500);
 await ev(`(()=>{const c=document.querySelector('#h-cmp');for(const o of c.options){if(['line-pressure','jr-hot'].includes(o.value))o.selected=true}c.dispatchEvent(new Event('change',{bubbles:true}))})()`); await sleep(3500);
 console.log("compare lines:", await ev(`document.querySelectorAll('#hist svg path').length`), "| legend:", (await text('#hist')).slice(-80));
+// 9. folders group the overview tiles and filter them
+for (const [n, f] of [["fo-a", "Plant/Boiler"], ["fo-b", "Plant/Line"]]) await call("PUT", `/api/config/point/${n}`, {source: "demo", folder: f, generator: {kind: "constant", value: 1}});
+await sleep(2500); await go("#overview"); await sleep(3000);
+console.log("folder headings:", await ev(`[...document.querySelectorAll('#points h3.fold')].map(h=>h.textContent).join(' | ')`));
+await set('#f-folder', "Plant/Boiler"); await sleep(2500);
+console.log("filtered tiles:", await ev(`[...document.querySelectorAll('#points .pt')].map(t=>t.dataset.pt).join()`));
 console.log("problems:", problems);
 process.exit(0);
