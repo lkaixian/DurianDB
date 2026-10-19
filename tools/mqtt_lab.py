@@ -45,6 +45,13 @@ def main():
            .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost"),
                                                        x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
            .sign(ca_key, hashes.SHA256()))
+    ckey = ec.generate_private_key(ec.SECP256R1())  # client cert for clients that insist on mutual TLS
+    client = (x509.CertificateBuilder().subject_name(name("durian-client")).issuer_name(ca.subject)
+              .public_key(ckey.public_key()).serial_number(x509.random_serial_number())
+              .not_valid_before(now).not_valid_after(now + dt.timedelta(days=365))
+              .sign(ca_key, hashes.SHA256()))
+    (ROOT / "client.pem").write_bytes(client.public_bytes(serialization.Encoding.PEM))
+    (ROOT / "client.key").write_bytes(pem_key(ckey))
     (ROOT / "ca.pem").write_bytes(ca.public_bytes(serialization.Encoding.PEM))
     (ROOT / "server.pem").write_bytes(srv.public_bytes(serialization.Encoding.PEM))
     (ROOT / "server.key").write_bytes(pem_key(key))
