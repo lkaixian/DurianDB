@@ -52,7 +52,9 @@ s, evs = call(viewer, "GET", "/api/events")
 hot = [e for e in evs if e["point"] == "hot"]
 assert len(hot) == 1 and hot[0]["level_name"] == "URGENT" and hot[0]["cleared_ts"] is None
 assert call(ANON, "POST", f"/api/events/{hot[0]['id']}/ack")[0] == 401
+assert hot[0]["state"] == "active_unacked"
 assert call(viewer, "POST", f"/api/events/{hot[0]['id']}/ack")[0] == 200
+assert call(viewer, "GET", "/api/events")[1][0]["state"] == "active_acked"
 assert call(viewer, "POST", f"/api/events/{hot[0]['id']}/ack")[0] == 409  # already acknowledged
 call(admin, "POST", "/api/points/hot/set", None)  # not settable
 assert call(admin, "POST", "/api/points/hot/set", {"value": 1})[0] == 403  # hot is not settable: refused for everyone

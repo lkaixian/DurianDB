@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from .config import (build_engine, roles_ok, validate_point, validate_source, validate_watchlist)
-from .core import Event, Level, Quality
+from .core import Event, Level, Quality, alarm_state
 from .dashboards import validate_dashboard
 from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
@@ -194,7 +194,7 @@ class App:
             ok = self.visible_points(ident)
             rows = [e for e in self.store.events(300) if e["point"] in ok or (e["point"] == SYSTEM and admin)][:100]
             for e in rows:
-                e["level_name"] = Level(e["level"]).name
+                e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
             return 200, rows
         if (method, a, c) == ("POST", "events", "ack"):
             need(user)

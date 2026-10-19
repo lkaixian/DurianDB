@@ -68,7 +68,7 @@ assert bad.error == "RuntimeError: boom" and good.points["p"].last == 1
 # config validation
 assert make_detector({"kind": "HIGH_LIMIT", "limit": 5, "level": "urgent"}).level == Level.URGENT
 for bad_cfg in ({"kind": "NOPE"}, {"kind": "HIGH_LIMIT"}, {"kind": "HIGH_LIMIT", "limit": 1, "level": "x"},
-                {"kind": "HIGH_LIMIT", "limit": 1, "duration": -1}, {"kind": "NO_UPDATE", "seconds": True}):
+                {"kind": "HIGH_LIMIT", "limit": 1, "duration": -1}, {"kind": "LOW_LIMIT", "limit": 1, "deadband": -1}, {"kind": "HIGH_LIMIT", "limit": 1, "deadband": "x"}, {"kind": "NO_UPDATE", "seconds": True}):
     try:
         make_detector(bad_cfg)
         raise AssertionError(bad_cfg)
@@ -79,4 +79,14 @@ from durian.mqtt_source import parse  # noqa: E402
 assert parse(b"21.5") == 21.5 and parse(b'{"value": 3}') == 3.0 and parse(b"-4") == -4.0
 for junk in (b"NaN", b"Infinity", b"-Infinity", b'{"value": NaN}', b"true", b'"12"', b"[1]", b"{}", b"\xff\xfe", b"", b"1e999"):
     assert parse(junk) is None, junk
+
+# ---- hysteresis: a value hovering on the limit raises once; it clears only past the deadband
+for kind, vals in (("HIGH_LIMIT", [9, 11, 10.5, 9.5, 11, 8.9, 11]), ("LOW_LIMIT", [11, 9, 9.5, 10.5, 9, 11.1, 9])):
+    eng, _ = run(vals, Point("p", detectors=[make_detector({"kind": kind, "limit": 10, "deadband": 1})]))
+    assert len(eng.events) == 2 and eng.events[0].cleared_ts is not None and eng.events[1].cleared_ts is None, (kind, eng.events)
+eng, _ = run([9, 11, 9.5, 11], Point("p", detectors=[make_detector({"kind": "HIGH_LIMIT", "limit": 10})]))
+assert len(eng.events) == 2  # without a deadband it chatters, as before
+
+from durian.core import alarm_state  # noqa: E402
+assert [alarm_state(None, None), alarm_state(5, None), alarm_state(None, 6), alarm_state(5, 6)] == ["active_unacked", "active_acked", "rtn_unacked", "closed"]
 print("ok")
