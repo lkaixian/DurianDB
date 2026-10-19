@@ -7,6 +7,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from .core import Engine, HighLimit, Level, Point, Source
 from .mqtt_source import MqttSource
@@ -76,6 +77,39 @@ def rows(sql, args=()):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+ROLLUPS = {"avg": "avg(value)", "min": "min(value)", "max": "max(value)", "count": "count(*)"}
+
+
+def series(point, since, bucket, rollup):
+    """Bucketed history. Bucket start time is returned as ts. Caller validates all arguments."""
+    if rollup == "last":
+        return rows("select b * ? as ts, value from (select cast(ts / ? as int) b, value, "
+                    "row_number() over (partition by cast(ts / ? as int) order by ts desc) rn "
+                    "from history where point = ? and ts >= ?) where rn = 1 order by b",
+                    (bucket, bucket, bucket, point, since))
+    return rows(f"select cast(ts / ? as int) * ? as ts, {ROLLUPS[rollup]} as value from history "
+                "where point = ? and ts >= ? group by cast(ts / ? as int) order by ts",
+                (bucket, bucket, point, since, bucket))
+
+
+def series_request(query):
+    q = {k: v[0] for k, v in parse_qs(query).items()}
+    point, rollup = q.get("point"), q.get("rollup", "avg")
+    if point not in all_points():
+        return 400, {"error": "unknown point"}
+    if rollup != "last" and rollup not in ROLLUPS:
+        return 400, {"error": "rollup must be one of avg, min, max, last, count"}
+    try:
+        window = int(q.get("window", 3600))
+        bucket = int(q.get("bucket", max(1, window // 120)))
+    except ValueError:
+        return 400, {"error": "window and bucket must be whole seconds"}
+    if not 10 <= window <= 7 * 86400 or not 1 <= bucket <= window:
+        return 400, {"error": "window must be 10 s to 7 days and bucket between 1 s and the window"}
+    items = series(point, time.time() - window, bucket, rollup)
+    return 200, {"point": point, "rollup": rollup, "window": window, "bucket": bucket, "items": items}
+
+
 class Handler(BaseHTTPRequestHandler):
     def send(self, code, body, ctype="application/json"):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
@@ -86,7 +120,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        url = urlparse(self.path)
         with lock:
+            if url.path == "/api/series":
+                return self.send(*series_request(url.query))
             if self.path == "/api/points":
                 out = []
                 for n, p in all_points().items():
