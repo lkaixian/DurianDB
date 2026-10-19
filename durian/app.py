@@ -2,7 +2,9 @@
 
 The HTTP layer in server.py only translates requests into App.handle() calls.
 """
+import csv
 import datetime as dt
+import io
 import json
 import math
 import re
@@ -229,18 +231,9 @@ class App:
         if (method, a, b, c) == ("GET", "health", None, None):
             return 200, {"ok": True}
         if (method, a) == ("GET", "points") and b is None:
-            pts = self.visible_points(ident)
-            tag, wl = query.get("tag"), query.get("watchlist")
-            if wl:
-                w = self.store.get("watchlist", wl)
-                if not w or not can(ident["roles"], w.get("read_roles", ["user"])):
-                    raise ApiError(404, "unknown watch list")
-                pts = {n: ps for n, ps in pts.items()
-                       if n in w.get("points", []) or (w.get("tags") and all(ps[0].tags.get(k) == v for k, v in w["tags"].items()))}
-            if tag:
-                k, _, v = tag.partition(":")
-                pts = {n: ps for n, ps in pts.items() if ps[0].tags.get(k) == v}
-            return 200, [self.point_view(p, s) for p, s in pts.values()]
+            return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
+        if (method, a, b) == ("GET", "reports", "summary"):
+            return self.report_summary(ident, query)
         if (method, a, c) == ("POST", "points", "set"):
             p, s = self.points().get(b, (None, None))
             if p is None or not can(ident["roles"], p.meta.get("read_roles", ["user"])):
@@ -322,7 +315,7 @@ class App:
         raise ApiError(404, "not found")
 
     # ---- machine access: scoped tokens, and values pushed in over HTTP
-    READ_AREAS = {"me", "health", "points", "value", "series", "events", "sources", "dashboards", "watchlists"}
+    READ_AREAS = {"me", "health", "points", "value", "series", "events", "sources", "dashboards", "watchlists", "reports"}
 
     @classmethod
     def _scope_allows(cls, scope, ident, method, a, b, c):
@@ -517,6 +510,55 @@ class App:
             self.store.audit(ident["name"], "config.import", json.dumps({k: v for k, v in summary.items() if any(v.values())}))
             self.reload()
         return 200, {"applied": apply_, "summary": summary}
+
+    def select_points(self, ident, query):
+        """Points the caller may see, narrowed by ?watchlist= and ?tag=key:value."""
+        pts = self.visible_points(ident)
+        tag, wl = query.get("tag"), query.get("watchlist")
+        if wl:
+            w = self.store.get("watchlist", wl)
+            if not w or not can(ident["roles"], w.get("read_roles", ["user"])):
+                raise ApiError(404, "unknown watch list")
+            pts = {n: ps for n, ps in pts.items()
+                   if n in w.get("points", []) or (w.get("tags") and all(ps[0].tags.get(k) == v for k, v in w["tags"].items()))}
+        if tag:
+            k, _, v = tag.partition(":")
+            pts = {n: ps for n, ps in pts.items() if ps[0].tags.get(k) == v}
+        return pts
+
+    REPORT_MAX_POINTS = 200
+
+    def report_summary(self, ident, query):
+        """One row per point for a time window: samples, min, max, average, first, last, bad samples and alarms. ?format=csv downloads it."""
+        now = time.time()
+        try:
+            end = float(query.get("to", now))
+            start = float(query.get("from", end - float(query.get("hours", 24)) * 3600))
+        except ValueError:
+            raise ApiError(400, "from, to and hours are numbers")
+        if not 0 < end - start <= 31 * 86400:
+            raise ApiError(400, "the window must be positive and at most 31 days")
+        pts = self.select_points(ident, query)
+        if len(pts) > self.REPORT_MAX_POINTS:
+            raise ApiError(413, f"{len(pts)} points selected, narrow it to {self.REPORT_MAX_POINTS} with a watch list or tag")
+        alarms, items = self.store.alarm_counts(start, end), []
+        for n in sorted(pts):
+            p = pts[n][0]
+            r = self.store.history_summary(n, start, end)
+            items.append({"point": n, "unit": p.meta.get("unit", ""), "description": p.meta.get("description", ""), "samples": r["n"],
+                          "min": r["lo"], "max": r["hi"], "avg": r["mean"], "first": r.get("first"), "last": r.get("last"),
+                          "bad_samples": r["bad"], "alarms": alarms.get(n, 0)})
+        doc = {"from": start, "to": end, "items": items}
+        if query.get("format") != "csv":
+            return 200, doc
+        out = io.StringIO()
+        w = csv.writer(out, lineterminator="\n")
+        iso = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        w.writerow(["point", "unit", "description", "samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms", "from", "to"])
+        for i in items:
+            w.writerow([i["point"], i["unit"], i["description"], i["samples"], *(("" if i[k] is None else repr(float(i[k]))) for k in ("min", "max", "avg", "first", "last")),
+                        i["bad_samples"], i["alarms"], iso(start), iso(end)])
+        return 200, Raw(out.getvalue().encode(), "text/csv; charset=utf-8", "report.csv")
 
     def history_csv(self, ident, query):
         point = query.get("point")
