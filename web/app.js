@@ -34,8 +34,22 @@ function showErr(e, where) {
 // ---- navigation
 const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, reports: viewReports, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount};
 function nav(view) {
-  const items = me.name ? [["overview", "Overview"], ["dashboards", "Dashboards"], ["history", "History"], ["reports", "Reports"], ...(isAdmin() ? [["config", "Config"], ["users", "Users"], ["tokens", "Tokens"], ["database", "Database"], ["audit", "Audit"]] : []), ["account", me.name]] : [["", "Log in"]];
-  $("#nav").innerHTML = items.map(([v, l]) => `<a href="#${v}" ${v === view || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : ""}>${esc(l)}</a>`).join("");
+  const groups = me.name ? [["Monitor", [["overview", "Overview"], ["dashboards", "Dashboards"], ["history", "History"], ["reports", "Reports"]]],
+    ...(isAdmin() ? [["Configure", [["config", "Config"], ["users", "Users"], ["tokens", "Tokens"]]], ["System", [["database", "Database"], ["audit", "Audit"]]]] : []),
+    ["Signed in", [["account", me.name]]]] : [];
+  document.querySelector(".shell").classList.toggle("solo", !me.name);  // before sign-in there is nothing to navigate to
+  const cur = v => v === view || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : "";
+  $("#nav").innerHTML = groups.map(([g, items]) => `<p class="ng">${esc(g)}</p>${items.map(([v, l]) => `<a href="#${v}" ${cur(v)}>${esc(l)}</a>`).join("")}`).join("");
+}
+// The header shows how many alarms still wait for someone, whatever page is open. Text and colour together.
+async function refreshAlarmCount() {
+  const a = $("#alarm-count");
+  if (!me.name) { a.hidden = true; return; }
+  try {
+    const n = (await api("GET", "/api/events")).filter(e => e.acked_ts == null && e.state !== "closed").length;
+    a.hidden = false; a.className = n ? "ac on" : "ac";
+    a.textContent = n ? `${n} alarm${n === 1 ? "" : "s"} not acknowledged` : "No unacknowledged alarms";
+  } catch { a.hidden = true; }
 }
 function route() {
   stopTimers();
@@ -408,8 +422,12 @@ setInterval(async () => {
   if (msg) msg.textContent = "Logged out after 30 minutes without activity.";
 }, 30000);
 
+setInterval(refreshAlarmCount, 10000);
+addEventListener("hashchange", () => { refreshAlarmCount(); });
+
 // ---- start
 (async () => {
   try { me = await api("GET", "/api/me"); } catch (e) { main.innerHTML = ""; const p = document.createElement("p"); p.className = "status err"; p.textContent = e.message; main.append(p); return; }
   route();
+  refreshAlarmCount();
 })();
