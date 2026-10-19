@@ -1,15 +1,15 @@
 {
   "durian/core.py": {
-    "mtime": 1792424338.2013552,
-    "seen": 1792425127.5888443,
-    "ast_hash": "a35f63073cf4a5cd00868c7dcb721f49",
-    "semantic_hash": "a35f63073cf4a5cd00868c7dcb721f49"
+    "mtime": 1792425950.10687,
+    "seen": 1792426496.9292064,
+    "ast_hash": "a62b7275ec78b58a72bb76bc7b49a87a",
+    "semantic_hash": "a62b7275ec78b58a72bb76bc7b49a87a"
   },
   "README.md": {
-    "mtime": 1792424941.876363,
-    "seen": 1792425127.5888634,
-    "ast_hash": "c902c639901bc78b788c9be46f239f82",
-    "semantic_hash": "c902c639901bc78b788c9be46f239f82"
+    "mtime": 1792426342.7201557,
+    "seen": 1792426496.9292588,
+    "ast_hash": "8ca70b366806238fb0a7edf4c6519c7d",
+    "semantic_hash": "8ca70b366806238fb0a7edf4c6519c7d"
   },
   "docs/00-clean-room-policy.md": {
     "mtime": 1792421708.096352,
@@ -24,10 +24,10 @@
     "semantic_hash": "db9b78970475a0acc907bcdceb886047"
   },
   "docs/research/99-open-questions.md": {
-    "mtime": 1792424941.984771,
-    "seen": 1792425127.5888758,
-    "ast_hash": "1a66f8c25803cf630301f82d852d0c14",
-    "semantic_hash": "1a66f8c25803cf630301f82d852d0c14"
+    "mtime": 1792426342.770344,
+    "seen": 1792426496.929279,
+    "ast_hash": "3a489036e8f4c8839a40807fcd1d4905",
+    "semantic_hash": "3a489036e8f4c8839a40807fcd1d4905"
   },
   "durian/__init__.py": {
     "mtime": 1792422022.1201193,
@@ -48,10 +48,10 @@
     "semantic_hash": "c8dabae05be50eb7583a0ee00104183c"
   },
   "durian/config.py": {
-    "mtime": 1792424854.215782,
-    "seen": 1792425127.5888417,
-    "ast_hash": "48ff28b86fb13944e0e60ca542fe8a13",
-    "semantic_hash": "48ff28b86fb13944e0e60ca542fe8a13"
+    "mtime": 1792426257.5743606,
+    "seen": 1792426496.929203,
+    "ast_hash": "14412d064a748c16a822b6301af07473",
+    "semantic_hash": "14412d064a748c16a822b6301af07473"
   },
   "durian/mqtt_source.py": {
     "mtime": 1792425009.2424874,
@@ -60,10 +60,10 @@
     "semantic_hash": "66087762c486ba9ea2cc242f40ad2190"
   },
   "durian/outputs.py": {
-    "mtime": 1792424314.161445,
-    "seen": 1792425127.5888474,
-    "ast_hash": "84631d0e17f4490e52d12bfc824a4d56",
-    "semantic_hash": "84631d0e17f4490e52d12bfc824a4d56"
+    "mtime": 1792426266.1034431,
+    "seen": 1792426496.9292197,
+    "ast_hash": "fb7c8a1211d739d047d6a71a4260bf96",
+    "semantic_hash": "fb7c8a1211d739d047d6a71a4260bf96"
   },
   "durian/server.py": {
     "mtime": 1792424379.3020017,
@@ -126,10 +126,10 @@
     "semantic_hash": "d57746375a9548351508c615fb2af5bf"
   },
   "web/app.js": {
-    "mtime": 1792424753.398758,
-    "seen": 1792425127.588861,
-    "ast_hash": "c995927a94d06f529cecd0f7513fe06a",
-    "semantic_hash": "c995927a94d06f529cecd0f7513fe06a"
+    "mtime": 1792426285.0874233,
+    "seen": 1792426496.9292567,
+    "ast_hash": "6a08df65f40787d8849b71a5e56b45b8",
+    "semantic_hash": "6a08df65f40787d8849b71a5e56b45b8"
   },
   "docs/research/02-observed-access-model.md": {
     "mtime": 1792423446.020379,
@@ -160,5 +160,89 @@
     "seen": 1792425127.5888772,
     "ast_hash": "78958bd464c42846283a2b68850ed899",
     "semantic_hash": "78958bd464c42846283a2b68850ed899"
+  },
+  "durian/http_source.py": {
+    "mtime": 1792426266.152327,
+    "seen": 1792426496.9292085,
+    "ast_hash": "09a3468c5d4e77cdcaea71dee7150128",
+    "semantic_hash": "09a3468c5d4e77cdcaea71dee7150128"
+  },
+  "durian/modbus.py": {
+    "mtime": 1792425901.987215,
+    "seen": 1792426496.9292107,
+    "ast_hash": "4fac5d87d1b21c190599c4d83be3a506",
+    "semantic_hash": "4fac5d87d1b21c190599c4d83be3a506"
+  },
+  "durian/modbus_sim.py": {
+    "mtime": 1792425998.736241,
+    "seen": 1792426496.9292126,
+    "ast_hash": "57f2feeb72be0e48643216777976d47a",
+    "semantic_hash": "57f2feeb72be0e48643216777976d47a"
+  },
+  "durian/modbus_source.py": {
+    "mtime": 1792425950.173142,
+    "seen": 1792426496.9292145,
+    "ast_hash": "a1b453180744f98540a49121ea50d4d3",
+    "semantic_hash": "a1b453180744f98540a49121ea50d4d3"
+  },
+  "durian/polled.py": {
+    "mtime": 1792426265.9824958,
+    "seen": 1792426496.9292219,
+    "ast_hash": "65280905409a64c514184bbc9ac2edd1",
+    "semantic_hash": "65280905409a64c514184bbc9ac2edd1"
+  },
+  "durian/sql_source.py": {
+    "mtime": 1792426219.7809463,
+    "seen": 1792426496.9292262,
+    "ast_hash": "34bcc51a13daaffedb3e2c5c1bce2b31",
+    "semantic_hash": "34bcc51a13daaffedb3e2c5c1bce2b31"
+  },
+  "tests/run_all.py": {
+    "mtime": 1792426125.1226707,
+    "seen": 1792426496.9292307,
+    "ast_hash": "feba3af1b5fdf082decaae5688064665",
+    "semantic_hash": "feba3af1b5fdf082decaae5688064665"
+  },
+  "tests/test_modbus.py": {
+    "mtime": 1792425760.5184908,
+    "seen": 1792426496.9292388,
+    "ast_hash": "670850382342d0f955786c111016e34f",
+    "semantic_hash": "670850382342d0f955786c111016e34f"
+  },
+  "tests/test_modbus_source.py": {
+    "mtime": 1792426014.5312407,
+    "seen": 1792426496.9292402,
+    "ast_hash": "30f28390999f54f06f2ef53b095c1f20",
+    "semantic_hash": "30f28390999f54f06f2ef53b095c1f20"
+  },
+  "tests/test_pull_sources.py": {
+    "mtime": 1792426257.6316538,
+    "seen": 1792426496.929242,
+    "ast_hash": "76831048b64ed419191866fdaa514950",
+    "semantic_hash": "76831048b64ed419191866fdaa514950"
+  },
+  "tools/browser_modbus.mjs": {
+    "mtime": 1792426074.5597541,
+    "seen": 1792426496.929248,
+    "ast_hash": "9b7af74f7c759ee99009d581eb31b2f5",
+    "semantic_hash": "9b7af74f7c759ee99009d581eb31b2f5"
+  },
+  "docs/research/06-observed-enterprise-vs-regular.md": {
+    "mtime": 1792425488.704418,
+    "seen": 1792426496.9292738,
+    "ast_hash": "81598668ab75431c36cd255d34d8ccb7",
+    "semantic_hash": "81598668ab75431c36cd255d34d8ccb7"
+  },
+  "docs/research/07-modbus.md": {
+    "mtime": 1792426160.9327092,
+    "seen": 1792426496.9292753,
+    "ast_hash": "af9f47dde3e1ba472b3be010a9f3beb2",
+    "semantic_hash": "af9f47dde3e1ba472b3be010a9f3beb2"
+  },
+  "docs/research/08-http-and-sql-sources.md": {
+    "mtime": 1792426342.2622063,
+    "seen": 1792426496.9292772,
+    "ast_hash": "1fe70e1dcbca1beea64518226a75608e",
+    "semantic_hash": "1fe70e1dcbca1beea64518226a75608e"
   }
 }
