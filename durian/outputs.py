@@ -13,16 +13,12 @@ import urllib.request
 from .config import load_creds
 from .core import Level
 from .mqtt_source import tls_client
+from .polled import NoRedirect
 
 log = logging.getLogger("durian.outputs")
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **k):  # a webhook must not be bounced to another host
-        return None
-
-
-_opener = urllib.request.build_opener(_NoRedirect)
+opener = urllib.request.build_opener(NoRedirect)
 
 
 def validate_handler(name, b):
@@ -106,7 +102,7 @@ class Outputs:
             req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                          headers={"Content-Type": "application/json"})
             try:
-                _opener.open(req, timeout=5).read(1024)
+                opener.open(req, timeout=5).read(1024)
             except (urllib.error.URLError, OSError, ValueError) as ex:
                 log.warning("webhook failed: %s", type(ex).__name__)
 

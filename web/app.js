@@ -209,6 +209,8 @@ const TEMPLATES = {
     "Modbus TCP": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "tcp", host: "127.0.0.1", port: 502}, period: 5, timeout: 0.5, retries: 2, monitor: true},
     "Modbus RTU on a serial port": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "serial", port: "COM3", baudrate: 9600, parity: "N", stopbits: 1, bytesize: 8}, framing: "rtu", period: 5, timeout: 0.5, retries: 2},
     "Modbus RTU over TCP (serial converter)": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "tcp", host: "192.168.0.50", port: 4001}, framing: "rtu", period: 5},
+    "HTTP JSON document": {type: "http_json", enabled: true, read_roles: ["user"], url: "http://127.0.0.1:8000/data", period: 10, timeout: 5},
+    "SQL query (SQLite file, read-only)": {type: "sql", enabled: true, read_roles: ["user"], path: "plant.db", query: "select name, value from readings", period: 10},
   },
   point: {
     "Virtual walk": {source: "demo", ...POINT_BASE, generator: {kind: "walk", start: 50, min: 0, max: 100, step: 1}, detectors: [{kind: "HIGH_LIMIT", limit: 80, level: "WARNING", duration: 0}]},
@@ -217,6 +219,8 @@ const TEMPLATES = {
     "Modbus input register with scaling": MODBUS_POINT({range: "input", address: 0, type: "int16", multiplier: 0.1, additive: -40}, {unit: "C"}),
     "Modbus coil": MODBUS_POINT({range: "coil", address: 0}, {settable: true, set_roles: ["user"]}),
     "Modbus bit of a register": MODBUS_POINT({range: "holding", address: 40, type: "bool", bit: 3}),
+    "HTTP JSON value": {source: "web", ...POINT_BASE, http: {path: "sensors.temp"}, scale: {multiplier: 1, additive: 0}},
+    "SQL row by key": {source: "sql", ...POINT_BASE, sql: {key: "tank1"}, scale: {multiplier: 1, additive: 0}},
   },
   handler: {"Webhook": {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true}},
   publisher: {"MQTT over TLS": {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true}},
