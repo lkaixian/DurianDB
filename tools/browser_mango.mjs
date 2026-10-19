@@ -96,5 +96,15 @@ await ev(`(()=>{const s=document.querySelector('#tpl');s.value='Set a point';s.d
 console.log("setpoint fields:", await ev(`[...document.querySelectorAll('#fe-fields [data-path]')].map(e=>e.dataset.path).join()`));
 await go("#config/handler");
 console.log("handler list:", await text('table.dense tbody'));
+// 6. points CSV: a file with a mistake is refused row by row, a good one is checked and then applied on request
+const upload = text => ev(`(()=>{const i=document.querySelector('#csv');const d=new DataTransfer();d.items.add(new File([${JSON.stringify(text)}],'points.csv',{type:'text/csv'}));i.files=d.files;i.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+await go("#config/point");
+console.log("export link:", await ev(`document.querySelector('a[href="/api/export/points"]')?.textContent`));
+await upload(["name,source,tolerance", "csv-x,nosuch,abc", ""].join("\n")); await sleep(1200);
+console.log("bad file:", await text('#csv-out'));
+await upload(["name,source,unit,extra", 'csv-ok,demo,bar,"{""generator"":{""kind"":""constant"",""value"":2}}"', ""].join("\n")); await sleep(1200);
+console.log("good file:", await text('#csv-out'));
+await ev(`document.querySelector('#csv-go').click()`); await sleep(2500);
+console.log("after apply:", await ev(`[...document.querySelectorAll('table.dense tbody tr')].some(r=>r.cells[0].textContent==='csv-ok')`));
 console.log("problems:", problems);
 process.exit(0);

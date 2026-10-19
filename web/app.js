@@ -7,11 +7,11 @@ let me = {name: null, roles: ["anonymous"]}, timers = [];
 const isUser = () => me.roles.includes("user");
 const isAdmin = () => me.roles.includes("superadmin");
 
-async function api(method, path, body) {
+async function api(method, path, body, type) {  // `type` sends `body` as it is, with that content type, instead of as JSON
   let r;
   try {
-    r = await fetch(path, {method, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body),
-      headers: method === "GET" ? {} : {"X-Requested-With": "durian", "Content-Type": "application/json"}});
+    r = await fetch(path, {method, credentials: "same-origin", body: body === undefined ? undefined : type ? body : JSON.stringify(body),
+      headers: method === "GET" ? {} : {"X-Requested-With": "durian", "Content-Type": type || "application/json"}});
   } catch {
     throw Object.assign(new Error("Cannot reach the DurianDB server. Is `python -m durian.server` running?"), {status: 0});
   }
@@ -500,7 +500,8 @@ async function renderConfigList(kind, items) {
   const box = $("#cfg");
   box.className = "";
   box.innerHTML = `<div class="row"><a class="btn" href="#config/${kind}/_new">New ${one}</a>
-    ${items.length > 5 ? `<label>Filter <input id="lf" type="search" placeholder="name, source, tag" autocomplete="off"></label>` : ""}<span id="lcount" class="note" role="status"></span></div>
+    ${kind === "point" ? `<a class="btn" href="/api/export/points" download>Export CSV</a><label>Import CSV <input id="csv" type="file" accept=".csv,text/csv"></label>` : ""}
+    ${items.length > 5 ? `<label>Filter <input id="lf" type="search" placeholder="name, source, tag" autocomplete="off"></label>` : ""}<span id="lcount" class="note" role="status"></span></div><div id="csv-out" role="status"></div>
     ${items.length ? `<table class="stack dense"><thead><tr>${L.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${items.map(i => {
       const cells = L.cell(i, by[i.name] || {});
       return `<tr data-q="${esc((i.name + " " + cells.join(" ")).toLowerCase())}">${cells.map((c, n) => n === 0
@@ -508,6 +509,22 @@ async function renderConfigList(kind, items) {
         : `<td data-label="${L.cols[n]}" class="${String(c).startsWith("Down") || c === "bad" || (L.cols[n] === "Error" && c) ? "err" : ""}">${esc(String(c))}</td>`).join("")}</tr>`;
     }).join("")}</tbody></table>` : `<p class="status">No ${KINDS[kind].toLowerCase()} yet. ${kind === "source" ? "Add a source first, then points that read from it." : kind === "point" ? "Create a source first, then add points that read from it." : `Use New ${one} to add one.`}</p>`}`;
   box.querySelector("table.dense") && makeSortable(box.querySelector("table.dense"));
+  $("#csv")?.addEventListener("change", async ev => {  // check the whole file first; nothing is written until the person applies it
+    const out = $("#csv-out"), file = ev.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    const show = (ok, html) => { out.className = ok ? "" : "err"; out.innerHTML = html; };
+    try {
+      const r = await api("POST", "/api/import/points", text, "text/csv");
+      show(true, `<p>${esc(file.name)} is valid: ${r.created} point(s) would be created and ${r.updated} updated.</p><button type="button" id="csv-go">Apply to ${r.created + r.updated} point(s)</button>`);
+      $("#csv-go").addEventListener("click", async () => {
+        try { const d = await api("POST", "/api/import/points?apply=1", text, "text/csv"); show(true, `<p>Imported: ${d.created} created, ${d.updated} updated.</p>`); setTimeout(route, 800); }
+        catch (e) { show(false, esc(e.message)); }
+      });
+    } catch (e) {
+      show(false, `<p>${esc(e.status === 422 ? "Nothing was imported. Fix these rows:" : e.message)}</p>` + (e.errors ? `<table class="stack dense"><thead><tr><th>Line</th><th>Point</th><th>Column</th><th>Problem</th></tr></thead><tbody>${e.errors.map(x => `<tr><td data-label="Line" class="num">${x.line}</td><td data-label="Point">${esc(x.point ?? "")}</td><td data-label="Column"><code>${esc(x.property)}</code></td><td data-label="Problem">${esc(x.message)}</td></tr>`).join("")}</tbody></table>` : ""));
+    }
+  });
   const count = () => { const rows = [...box.querySelectorAll("tbody tr")]; $("#lcount").textContent = rows.length ? `${rows.filter(r => !r.hidden).length} of ${rows.length}` : ""; };
   count();
   $("#lf")?.addEventListener("input", e => {
