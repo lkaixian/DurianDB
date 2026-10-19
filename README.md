@@ -8,3 +8,8 @@ An educational reference for how a SCADA / IoT data-acquisition platform fits to
 - `graphify-out/`: knowledge graph of this repo (research and code), for future maintenance.
 
 Status: early. See `docs/research/99-open-questions.md` for what is not yet understood.
+
+## Run
+
+`python -m durian.server` then open http://127.0.0.1:8765. Python 3 standard library only. Data is simulated; see `durian/server.py`.
+
