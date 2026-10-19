@@ -80,6 +80,8 @@ Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped i
 
 **Point page.** Click a point name (overview, alarms, reports) to open `#point/<name>`: the current value with its quality, source and times, a trend with a window picker, the alarms recorded for that point (acknowledge, shelve and unshelve right there), the Set form with its limits and confirm step, the point's alarm limits and range, and an Edit settings link for administrators. `GET /api/points/<name>` and `GET /api/events?point=<name>` feed it.
 
+**Personal watch lists.** On the overview, "Save view as my watch list" keeps the points shown as a list only its owner can see (`PUT/DELETE /api/mylists/<name>`, listed in `/api/watchlists` with `mine: true`). Shared watch lists stay an administrator's Config item. `tools/browser_mylists.mjs` checks it in a browser.
+
 **Config lists.** Each Config tab opens as a dense table (sources with their live state, points with live value and quality, handlers, publishers, watch lists), with a filter box once there are more than five rows. A row opens its editor, which has a way back to the list. Source health is now part of the source list.
 
 **Mango-inspired features** (studied from the public documentation, see `docs/research/11-mango-feature-analysis.md`):

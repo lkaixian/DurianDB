@@ -363,7 +363,10 @@ class App:
             return 200, [self.source_view(s) for s in self.engine.sources
                          if can(ident["roles"], s.meta.get("read_roles", ["user"]))]
         if (method, a) == ("GET", "watchlists") and b is None:
-            return 200, [w for w in self.store.list("watchlist") if can(ident["roles"], w.get("read_roles", ["user"]))]
+            return 200, [{**w, "mine": w.get("owner") == ident["name"]} for w in self.store.list("watchlist") if self.watch_visible(ident, w)]
+        if a == "mylists" and b and c is None and method in ("PUT", "DELETE"):
+            need(user)
+            return self.my_list(method, b, body, ident)
         if a == "dashboards" and c is None:
             return self.dashboards(method, b, body, ident)
         if (method, a) == ("POST", "password") and b is None:
@@ -643,6 +646,33 @@ class App:
                 self.reload()
         return 200, {"applied": query.get("apply") == "1", **summary}
 
+    @staticmethod
+    def watch_visible(ident, w):
+        """A shared watch list follows its read roles; a personal one (it has an owner) is seen only by that user."""
+        return w.get("owner") == ident["name"] if w.get("owner") else can(ident["roles"], w.get("read_roles", ["user"]))
+
+    MAX_MY_LISTS = 50
+
+    def my_list(self, method, name, body, ident):
+        """A user's own watch list, kept in the same table as the shared ones: only its owner can change or see it."""
+        old = self.store.get("watchlist", name)
+        if old is not None and old.get("owner") != ident["name"]:
+            raise ApiError(409, "a watch list with that name already exists, choose another name")
+        if method == "DELETE":
+            if old is None:
+                raise ApiError(404, "no such watch list")
+            self.store.delete("watchlist", name)
+            return 200, {"deleted": name}
+        if not isinstance(body, dict):
+            raise ApiError(400, "send {tags, points}")
+        errs = validate_watchlist(name, {"tags": body.get("tags", {}), "points": body.get("points", [])})
+        if errs:
+            raise ApiError(422, "invalid watch list", errs)
+        if old is None and sum(w.get("owner") == ident["name"] for w in self.store.list("watchlist")) >= self.MAX_MY_LISTS:
+            raise ApiError(409, f"at most {self.MAX_MY_LISTS} personal watch lists")
+        self.store.put("watchlist", name, {"owner": ident["name"], "read_roles": [], "tags": body.get("tags", {}), "points": body.get("points", [])[:500]})
+        return 200, {"saved": name}
+
     def select_points(self, ident, query):
         """Points the caller may see, narrowed by ?watchlist= and ?tag=key:value."""
         pts = self.visible_points(ident)
@@ -651,7 +681,7 @@ class App:
             pts = {n: ps for n, ps in pts.items() if (ps[0].meta.get("folder", "") + "/").startswith(folder.strip("/") + "/")}
         if wl:
             w = self.store.get("watchlist", wl)
-            if not w or not can(ident["roles"], w.get("read_roles", ["user"])):
+            if not w or not self.watch_visible(ident, w):
                 raise ApiError(404, "unknown watch list")
             pts = {n: ps for n, ps in pts.items()
                    if n in w.get("points", []) or (w.get("tags") and all(ps[0].tags.get(k) == v for k, v in w["tags"].items()))}

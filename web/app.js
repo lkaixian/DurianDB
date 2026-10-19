@@ -125,12 +125,31 @@ function viewOverview() {
     <section aria-labelledby="pt-h"><h2 id="pt-h">Live points</h2>
       <form id="filter" class="row"><label>Watch list <select id="f-wl"><option value="">All points</option></select></label>
       <label>Tag <input id="f-tag" placeholder="area:boiler" autocomplete="off"></label>
-      <label>Folder <input id="f-folder" placeholder="Plant/Boiler" autocomplete="off"></label></form>
+      <label>Folder <input id="f-folder" placeholder="Plant/Boiler" autocomplete="off"></label>
+      ${isUser() ? `<button type="button" id="f-save" title="Keep the points shown now as a watch list only you can see">Save view as my watch list</button> <button type="button" id="f-del" hidden>Delete my list</button> <output id="f-out" role="status"></output>` : ""}</form>
       <div id="points" class="status" data-live>Loading points...</div></section>
     <section class="wide" aria-labelledby="kpi-h"><h2 id="kpi-h">Alarm performance, last 24 hours</h2><div id="kpis" class="status" data-live>Loading...</div></section></div>`;
-  api("GET", "/api/watchlists").then(w => { $("#f-wl").insertAdjacentHTML("beforeend", w.map(x => `<option>${esc(x.name)}</option>`).join("")); }).catch(() => {});
+  const lists = async pick => {
+    const w = await api("GET", "/api/watchlists");
+    $("#f-wl").innerHTML = `<option value="">All points</option>` + w.map(x => `<option value="${esc(x.name)}" ${x.mine ? "data-mine" : ""}>${esc(x.name)}${x.mine ? " (mine)" : ""}</option>`).join("");
+    if (pick) $("#f-wl").value = pick;
+    if ($("#f-del")) $("#f-del").hidden = !($("#f-wl").selectedOptions[0]?.hasAttribute("data-mine"));
+  };
+  lists().catch(() => {});
+  $("#f-save")?.addEventListener("click", async () => {
+    const name = prompt("Name for this watch list (letters, digits, dot, dash, underscore):");
+    if (!name) return;
+    try { await api("PUT", `/api/mylists/${encodeURIComponent(name.trim())}`, {points: lastPts.map(p => p.name)}); $("#f-out").textContent = "saved"; await lists(name.trim()); ptSig = ""; refreshOverview().catch(showErr); }
+    catch (e) { $("#f-out").textContent = e.message; }
+  });
+  $("#f-del")?.addEventListener("click", async () => {
+    const name = $("#f-wl").value;
+    if (!name || !confirm(`Delete your watch list ${name}?`)) return;
+    try { await api("DELETE", `/api/mylists/${encodeURIComponent(name)}`); $("#f-out").textContent = "deleted"; await lists(); ptSig = ""; refreshOverview().catch(showErr); }
+    catch (e) { $("#f-out").textContent = e.message; }
+  });
   ptSig = "";
-  $("#filter").addEventListener("input", () => { ptSig = ""; refreshOverview().catch(showErr); });
+  $("#filter").addEventListener("input", () => { if ($("#f-del")) $("#f-del").hidden = !($("#f-wl").selectedOptions[0]?.hasAttribute("data-mine")); ptSig = ""; refreshOverview().catch(showErr); });
   bindAlarmActions($("#alarms"), refreshOverview);
   bindAckAll($("#alarms"), refreshOverview);
   bindSetForms($("#points"));
@@ -150,12 +169,14 @@ async function refreshKpis() {
   $("#kpis").innerHTML = `<table class="stack"><tbody>${rows.map(([n, v]) => `<tr><th scope="row">${n}</th><td class="num">${typeof v === "string" ? v : esc(String(v))}</td></tr>`).join("")}</tbody></table>`;
 }
 
+let lastPts = [];  // what the overview is showing, for "save view"
 async function refreshOverview() {
   const q = new URLSearchParams();
   if ($("#f-wl").value) q.set("watchlist", $("#f-wl").value);
   if ($("#f-tag").value.includes(":")) q.set("tag", $("#f-tag").value.trim());
   if ($("#f-folder").value.trim()) q.set("folder", $("#f-folder").value.trim());
   const [pts, evs] = await Promise.all([api("GET", "/api/points?" + q), api("GET", "/api/events")]);
+  lastPts = pts;
   renderPoints(pts, q.size > 0);
   renderAlarms(evs);
 }
@@ -421,7 +442,7 @@ function viewReports() {
     <label>Window <select id="r-hours"><option value="1">1 hour</option><option value="8">8 hours</option><option value="24" selected>24 hours</option><option value="168">7 days</option><option value="720">30 days</option></select></label>
     <button type="submit">Show report</button> <a id="r-csv" class="btn" href="#reports" download>Download CSV</a></form>
     <div id="rep" class="status" data-live>Choose a window and show the report.</div></section>`;
-  api("GET", "/api/watchlists").then(w => { $("#r-wl").insertAdjacentHTML("beforeend", w.map(x => `<option>${esc(x.name)}</option>`).join("")); }).catch(() => {});
+  api("GET", "/api/watchlists").then(w => { $("#r-wl").insertAdjacentHTML("beforeend", w.map(x => `<option value="${esc(x.name)}">${esc(x.name)}${x.mine ? " (mine)" : ""}</option>`).join("")); }).catch(() => {});
   const qs = () => { const q = new URLSearchParams({hours: $("#r-hours").value}); if ($("#r-wl").value) q.set("watchlist", $("#r-wl").value); if ($("#r-tag").value.includes(":")) q.set("tag", $("#r-tag").value.trim()); return q; };
   const show = async () => {
     const box = $("#rep"), q = qs();
