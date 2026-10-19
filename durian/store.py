@@ -203,6 +203,27 @@ class Store:
     def set_hash(self, name, pw_hash):
         return self.run("update users set hash=? where name=?", (pw_hash, name)).rowcount
 
+    # ---- machine tokens
+    def add_token(self, name, token_hash, owner, scope, source, expires):
+        self.run("insert into api_tokens(name, token_hash, owner, scope, source, created, expires) values (?,?,?,?,?,?,?)",
+                 (name, token_hash, owner, scope, source, time.time(), expires))
+
+    def token_by_hash(self, token_hash):
+        r = self.q("select * from api_tokens where token_hash=?", (token_hash,))
+        return r[0] if r else None
+
+    def tokens(self):
+        return self.q("select id, name, owner, scope, source, created, expires, last_used, disabled from api_tokens order by name")
+
+    def touch_token(self, token_id, ts):
+        self.run("update api_tokens set last_used=? where id=?", (ts, token_id))
+
+    def set_token_disabled(self, name, disabled):
+        return self.run("update api_tokens set disabled=? where name=?", (1 if disabled else 0, name)).rowcount
+
+    def delete_token(self, name):
+        return self.run("delete from api_tokens where name=?", (name,)).rowcount
+
     # ---- audit
     def audit(self, user, action, detail=""):
         self.run("insert into audit(ts,user,action,detail) values (?,?,?,?)", (time.time(), user, action, detail))

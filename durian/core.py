@@ -206,10 +206,15 @@ class Engine:
                     s.error = None
             except Exception as e:  # one broken source must not stop the others
                 s.error, values = f"{type(e).__name__}: {e}", {}
-            for name, value in values.items():
-                s.points[name].update(value, ts, self._event)
+            if isinstance(values, dict):  # {name: value} or {name: (value, source_time)}
+                values = [(n, *(v if isinstance(v, tuple) else (v, ts))) for n, v in values.items()]
+            for name, value, t in values:  # a list of (name, value, time) keeps several samples of one point, each with its own time
+                p = s.points.get(name)
+                if p is None:  # removed by a config change while the value was in flight
+                    continue
+                p.update(value, t, self._event)
                 for pub in self.publishers:
-                    pub(s.points[name], value, ts)
+                    pub(p, value, t)
             for p in list(s.points.values()):
                 for d in p.detectors:
                     ev = d.tick(p, ts)

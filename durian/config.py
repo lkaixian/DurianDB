@@ -11,13 +11,14 @@ from pathlib import Path
 from .core import Engine, Logging, Point, Source, make_detector
 from . import http_source, sql_source
 from .http_source import HttpJsonSource
+from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
 from .modbus_source import DEFAULTS as MODBUS_KEYS, ModbusSource
 from .mqtt_source import MqttSource
 from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-SOURCE_TYPES = ("virtual", "mqtt", "modbus", "http_json", "sql")
+SOURCE_TYPES = ("virtual", "mqtt", "modbus", "http_json", "sql", "http_in")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -178,6 +179,11 @@ def validate_source(name, b):
         http_source.validate_source(b, add)
     elif b.get("type") == "sql":
         sql_source.validate_source(b, add)
+    elif b.get("type") == "http_in":
+        if not isinstance(b.get("auto_create", False), bool):
+            add("auto_create", "must be true or false")
+        if "max_age_days" in b and not _int(b["max_age_days"], 1, 365):
+            add("max_age_days", "must be a whole number from 1 to 365")
     return e
 
 
@@ -238,7 +244,7 @@ def validate_point(name, b, store):
     if src and src.get("type") in ("http_json", "sql") and not (
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
-    if b.get("settable") and src and src.get("type") in ("http_json", "sql"):
+    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in"):
         add("settable", "this source type is read-only")
     return e
 
@@ -293,6 +299,11 @@ def build_engine(store):
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 src.start()
+            elif s["type"] == "http_in":
+                auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create") else None
+                src = HttpInSource(s["name"], bool(s.get("auto_create")), auto, s.get("max_age_days", 7))
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
             elif s["type"] == "modbus":
                 src = ModbusSource(s["name"], {k: v for k, v in s.items() if k in MODBUS_KEYS or k == "link"})
                 for n, p in mine.items():

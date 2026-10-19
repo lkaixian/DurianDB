@@ -143,8 +143,8 @@ assert app3.pending == [] and st3.history_stats()["rows"] >= base + queued
 assert [e for e in c3("GET", "/api/events")[1] if e["point"] == SYSTEM][0]["cleared_ts"] is not None
 # and the buffer is capped, counting what it had to drop
 import durian.app as A  # noqa: E402
-A.PENDING_MAX = 3
+A.PENDING_MAX = 1  # the sine-wave point alone logs a sample every tick, so two ticks always overflow a buffer of one
 st3.add_history = broken
 app3.tick(1008.0); app3.tick(1010.0)
-assert len(app3.pending) == 3 and app3.lost > 0
+assert len(app3.pending) == 1 and app3.lost > 0
 print("ok")

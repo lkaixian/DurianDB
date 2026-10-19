@@ -27,4 +27,10 @@ def v2_settings(s):
     s.ddl("create table if not exists settings(skey {key} primary key, svalue {text} not null)")
 
 
-MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings)]
+def v3_api_tokens(s):
+    # only a hash of each token is stored: a leaked database does not leak working credentials
+    s.ddl("create table if not exists api_tokens(id {pk}, name {key} not null unique, token_hash {key} not null unique, owner {key} not null, "
+          "scope {key} not null, source {key}, created {real}, expires {real}, last_used {real}, disabled {int} not null default 0)")
+
+
+MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens)]
