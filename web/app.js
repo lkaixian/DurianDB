@@ -150,7 +150,7 @@ function renderPoints(pts, filtered) {
   }
   for (const p of pts) {
     const row = [...box.children].find(r => r.dataset.pt === p.name), v = row.querySelector(".val");
-    v.textContent = p.last == null ? "no value yet" : `${p.last}${p.unit ? " " + p.unit : ""}`;
+    v.textContent = p.last == null ? "no value yet" : `${p.last}${p.unit ? " " + p.unit : ""}${p.quality && p.quality !== "good" ? " (" + p.quality + ")" : ""}`;
     v.classList.toggle("over", p.last != null && ((p.limits.high != null && p.last > p.limits.high) || (p.limits.low != null && p.last < p.limits.low)));
     row.querySelector(".spark").innerHTML = spark(p.history, p.limits);
   }
