@@ -13,6 +13,7 @@ from .auth import Auth, AuthError, can, check_password_strength, hash_password, 
 from .config import (build_engine, roles_ok, validate_point, validate_source, validate_watchlist)
 from .core import Event, Level
 from .dashboards import validate_dashboard
+from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
 from .outputs import Outputs, validate_handler, validate_publisher
 from .store import ROLLUPS
@@ -139,6 +140,16 @@ class App:
             if not ok:
                 raise ApiError(403 if ident["name"] else 401, "not allowed" if ident["name"] else "log in first")
 
+        scope = ident.get("scope")  # set only for machine tokens: they get the data plane, never administration
+        if scope and not self._scope_allows(scope, ident, method, a, b, c):
+            raise ApiError(403, f"this {scope} token does not allow that")
+        if a == "ingest" and b:
+            return self.ingest(method, b, query, body, ident)
+        if (method, a) == ("GET", "value") and b and c is None:
+            p, s = self.visible_points(ident).get(b, (None, None))
+            if p is None:
+                raise ApiError(404, "unknown point")
+            return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "unit": p.meta.get("unit", ""), "tags": p.tags, "source": s.name}
         if (method, a, b, c) == ("GET", "me", None, None):
             return 200, {"name": ident["name"], "roles": sorted(ident["roles"])}
         if (method, a, b, c) == ("GET", "health", None, None):
@@ -173,7 +184,7 @@ class App:
                 raise ApiError(502, str(ex))
             if hasattr(s, "override"):  # keep held values across engine rebuilds and restarts
                 self.store.put("override", p.name, {"value": v}) if v is not None else self.store.delete("override", p.name)
-            self.store.audit(ident["name"], "set", f"{p.name}={v}")
+            self.store.audit(ident["name"], "set", f"{p.name}={v}" + (f" via token {ident['token']}" if scope else ""))
             return 200, {"ok": True}
         if (method, a) == ("GET", "series"):
             return 200, self.series(ident, query)
@@ -217,6 +228,8 @@ class App:
             return self.users(method, b, body, ident)
         if (method, a) == ("GET", "audit"):
             return 200, self.store.audit_log()
+        if a == "tokens" and c is None:
+            return self.tokens(method, b, body, ident)
         if a == "database":
             return self.database(method, b, c, body, ident)
         if (method, a) == ("GET", "export") and b is None:
@@ -227,6 +240,75 @@ class App:
         if (method, a, b) == ("POST", "import", "history"):
             return self.import_history(query, body, ident)
         raise ApiError(404, "not found")
+
+    # ---- machine access: scoped tokens, and values pushed in over HTTP
+    READ_AREAS = {"me", "health", "points", "value", "series", "events", "sources", "dashboards", "watchlists"}
+
+    @classmethod
+    def _scope_allows(cls, scope, ident, method, a, b, c):
+        if scope == "ingest":
+            return a == "ingest" and b == ident["source"]  # an ingest token can reach exactly one source, nothing else
+        if method == "GET":
+            return a in cls.READ_AREAS or (a == "export" and b == "history")
+        return scope == "write" and (method, a, c) == ("POST", "points", "set")
+
+    def ingest(self, method, source, query, body, ident):
+        if ident.get("scope") != "ingest":  # also keeps browser sessions out: a page could otherwise be made to push values
+            raise ApiError(403 if ident.get("name") else 401, "pushing values needs an ingest token, not a browser session")
+        s = next((x for x in self.engine.sources if x.name == source and isinstance(x, HttpInSource)), None)
+        if s is None:
+            raise ApiError(404, "unknown ingest source")
+        try:
+            candidates = parse_payload(body if method == "POST" else None, query)
+        except ValueError as e:
+            raise ApiError(400, str(e))
+        accepted, rejected = s.submit(candidates)
+        return (200 if accepted else 422), {"accepted": accepted, "rejected": rejected}
+
+    def tokens(self, method, name, body, ident):
+        now = time.time()
+        if method == "GET" and name is None:
+            return 200, [{**t, "state": "disabled" if t["disabled"] else "expired" if t["expires"] and t["expires"] < now else "active"}
+                         for t in self.store.tokens()]
+        if method == "POST" and name is None:
+            b = body if isinstance(body, dict) else {}
+            errs, add = [], lambda p, m: errs.append({"property": p, "message": m})
+            tname, owner, scope, source, days = b.get("name"), b.get("owner") or ident["name"], b.get("scope"), b.get("source"), b.get("days")
+            if not (isinstance(tname, str) and re.match(r"^[A-Za-z0-9_.-]{1,64}$", tname)):
+                add("name", "use 1 to 64 letters, digits, dot, dash or underscore")
+            if scope not in Auth.TOKEN_SCOPES:
+                add("scope", f"must be one of {list(Auth.TOKEN_SCOPES)}")
+            if not (isinstance(owner, str) and self.store.user(owner)):
+                add("owner", "must be an existing user: the token acts with that user's roles")
+            src = self.store.get("source", source) if isinstance(source, str) else None
+            if scope == "ingest" and not (src and src.get("type") == "http_in"):
+                add("source", "an ingest token needs the name of a configured http_in source")
+            if scope != "ingest" and source is not None:
+                add("source", "only ingest tokens are tied to a source")
+            if days is not None and not (isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= 3650):
+                add("days", "must be 1 to 3650, or leave out for a token that does not expire")
+            if errs:
+                raise ApiError(422, "validation failed", errs)
+            if any(t["name"] == tname for t in self.store.tokens()):
+                raise ApiError(409, "a token with that name exists")
+            token = self.auth.create_token(tname, owner, scope, source if scope == "ingest" else None, days)
+            self.store.audit(ident["name"], "token.create", f"{tname} ({scope}, owner {owner})")
+            return 201, {"name": tname, "token": token, "note": "Copy it now. It is shown once and only its hash is kept."}
+        if name is None:
+            raise ApiError(400, "give a token name in the URL")
+        if method == "PUT":
+            if not (isinstance(body, dict) and isinstance(body.get("disabled"), bool)):
+                raise ApiError(422, "validation failed", [{"property": "disabled", "message": "must be true or false"}])
+            if not self.store.set_token_disabled(name, body["disabled"]):
+                raise ApiError(404, "unknown token")
+            self.store.audit(ident["name"], "token.disable" if body["disabled"] else "token.enable", name)
+            return 200, {"name": name, "disabled": body["disabled"]}
+        if method == "DELETE":
+            if not self.store.delete_token(name):
+                raise ApiError(404, "unknown token")
+            self.store.audit(ident["name"], "token.delete", name)
+            return 200, {"deleted": name}
+        raise ApiError(405, "method not allowed")
 
     # ---- database health, retention, backups, import and export (superadmin)
     def database(self, method, what, name, body, ident):
@@ -430,6 +512,7 @@ class App:
                 raise ApiError(409, "you cannot delete yourself")
             if not self.store.delete_user(name):
                 self._404()
+            self.store.run("delete from api_tokens where owner=?", (name,))  # a token must not outlive the account it acts as
             self.store.audit(ident["name"], "user.delete", name)
             return 200, {"deleted": name}
         raise ApiError(405, "method not allowed")

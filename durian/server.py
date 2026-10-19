@@ -60,7 +60,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, (WEB / name).read_bytes(), ctype)
         if not url.path.startswith("/api/"):
             return self.send(404, {"error": "not found"})
-        if method != "GET" and self.headers.get("X-Requested-With") != "durian":
+        auth = self.headers.get("Authorization", "")
+        bearer = auth[7:].strip() if auth[:7].lower() == "bearer " else None
+        if method != "GET" and not bearer and self.headers.get("X-Requested-With") != "durian":  # a token is not sent by browsers on their own
             return self.send(403, {"error": "missing X-Requested-With header"})
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -91,7 +93,13 @@ class Handler(BaseHTTPRequestHandler):
                 app.auth.logout(self.token())
                 return self.send(200, {"ok": True}, extra=[("Set-Cookie", f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")])
             query = {k: v[0] for k, v in parse_qs(url.query).items()}
-            status, payload = app.handle(method, url.path, query, body, app.auth.identity(self.token()))
+            if bearer:  # a presented token is used or refused, never silently replaced by a cookie session
+                ident = app.auth.token_identity(bearer)
+                if ident is None:
+                    return self.send(401, {"error": "invalid, expired or disabled token"}, extra=[("WWW-Authenticate", "Bearer")])
+            else:
+                ident = app.auth.identity(self.token())
+            status, payload = app.handle(method, url.path, query, body, ident)
             self.send(status, payload)
         except AuthError as ex:
             self.send(ex.status, {"error": str(ex)})

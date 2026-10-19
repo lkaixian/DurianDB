@@ -88,6 +88,29 @@ class Auth:
     def logout(self, token):
         self.sessions.pop(token, None)
 
+    # ---- machine tokens: for Node-RED, scripts and other systems. Scoped, expiring, revocable, stored only as a hash.
+    TOKEN_SCOPES = ("read", "write", "ingest")  # read: look at data. write: also set points. ingest: push values into one source only.
+
+    def create_token(self, name, owner, scope, source=None, days=None):
+        """Returns the token. It is shown once and cannot be recovered: only its hash is kept."""
+        token = "dtk_" + secrets.token_urlsafe(32)
+        self.store.add_token(name, hashlib.sha256(token.encode()).hexdigest(), owner, scope, source,
+                             time.time() + days * 86400 if days else None)
+        return token
+
+    def token_identity(self, token):
+        if not (isinstance(token, str) and token.startswith("dtk_") and len(token) < 100):
+            return None
+        row = self.store.token_by_hash(hashlib.sha256(token.encode()).hexdigest())
+        if not row or row["disabled"] or (row["expires"] and row["expires"] < time.time()):
+            return None
+        user = self.store.user(row["owner"])
+        if not user:
+            return None
+        if time.time() - (row["last_used"] or 0) > 60:  # at most one write a minute per token
+            self.store.touch_token(row["id"], time.time())
+        return {"name": row["owner"], "roles": held(user["roles"]), "scope": row["scope"], "source": row["source"], "token": row["name"]}
+
     def identity(self, token):
         """{'name': str|None, 'roles': set}. Unknown or expired tokens are anonymous."""
         name, exp = self.sessions.get(token, (None, 0))
