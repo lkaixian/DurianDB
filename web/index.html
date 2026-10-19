@@ -39,6 +39,15 @@ button:hover{background:var(--ink);color:var(--paper)}
 svg{width:100%;height:56px;display:block;margin-top:6px}
 svg .line{fill:none;stroke:var(--ink);stroke-width:1.5}
 svg .lim{stroke:var(--accent);stroke-width:1;stroke-dasharray:4 3}
+.wide{grid-column:1/-1}
+.controls{display:flex;flex-wrap:wrap;gap:12px 20px;margin-bottom:8px}
+label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
+select{font:inherit;min-height:44px;padding:0 10px;border:1px solid var(--ink);background:var(--paper);color:var(--ink);border-radius:3px}
+#hist svg{height:260px}
+#hist svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+#hist svg .axis{stroke:var(--rule);stroke-width:1}
+#hist svg .line{stroke-width:2}
+#hist p{margin:8px 0 0;color:var(--muted);font-size:.9rem}
 </style>
 </head>
 <body>
@@ -54,6 +63,15 @@ svg .lim{stroke:var(--accent);stroke-width:1;stroke-dasharray:4 3}
   <section aria-labelledby="pts-h">
     <h2 id="pts-h">Live points <small>last 2 minutes, dashed line is the alarm limit</small></h2>
     <div id="points" class="status">Loading points...</div>
+  </section>
+  <section aria-labelledby="hist-h" class="wide">
+    <h2 id="hist-h">History</h2>
+    <form id="hist-form" class="controls">
+      <label>Point <select id="h-point"></select></label>
+      <label>Window <select id="h-window"><option value="300">5 minutes</option><option value="3600" selected>1 hour</option><option value="86400">24 hours</option></select></label>
+      <label>Rollup <select id="h-rollup"><option value="avg">Average</option><option value="min">Minimum</option><option value="max">Maximum</option><option value="last">Last value</option><option value="count">Sample count</option></select></label>
+    </form>
+    <div id="hist" class="status">Loading history...</div>
   </section>
 </main>
 <script>
@@ -102,8 +120,47 @@ function showErr(e){
   for(const id of ["alarms","points"]){$(id).className="status err";$(id).textContent="Cannot reach the DurianDB server ("+e.message+"). Is `python -m durian.server` running? Retrying every 2 seconds."}
 }
 
+const ROLLUP_NAME={avg:"Average",min:"Minimum",max:"Maximum",last:"Last value",count:"Sample count"};
+let known=[];
+
+function syncPointSelect(pts){
+  const names=pts.map(p=>p.name).join();
+  if(names===known.map(p=>p.name).join()){known=pts;return}
+  const sel=$("h-point"), cur=sel.value;
+  sel.innerHTML=pts.map(p=>`<option>${esc(p.name)}</option>`).join("");
+  if(pts.some(p=>p.name===cur)) sel.value=cur;
+  known=pts;
+}
+
+async function loadHistory(){
+  const point=$("h-point").value, box=$("hist");
+  if(!point){box.className="status";box.textContent="No points yet. They appear here as soon as a data source reports a value.";return}
+  const win=$("h-window").value, roll=$("h-rollup").value;
+  const bucket=Math.max(1,Math.floor(win/120));
+  const r=await api(`/api/series?point=${encodeURIComponent(point)}&window=${win}&rollup=${roll}&bucket=${bucket}`);
+  const title=`${ROLLUP_NAME[roll]} of ${point}, per ${bucket} s, last ${$("h-window").selectedOptions[0].text}`;
+  if(r.items.length<2){box.className="status";box.textContent=`${title}: not enough history yet (${r.items.length} bucket${r.items.length===1?"":"s"}). Values arrive about every 2 seconds.`;return}
+  const lim=(known.find(p=>p.name===point)||{}).limit, hasLim=lim!=null&&roll!=="count";
+  const vs=r.items.map(i=>i.value).concat(hasLim?[lim]:[]);
+  let lo=Math.min(...vs), hi=Math.max(...vs); if(hi===lo){hi+=1;lo-=1}
+  const L=48,R=8,T=8,B=22,W=720,H=260, t0=r.items[0].ts, t1=r.items[r.items.length-1].ts||t0+1;
+  const x=t=>L+((t-t0)/((t1-t0)||1))*(W-L-R), y=v=>T+(1-(v-lo)/(hi-lo))*(H-T-B);
+  const d=r.items.map((i,k)=>(k?"L":"M")+x(i.ts).toFixed(1)+" "+y(i.value).toFixed(1)).join("");
+  const f=v=>Math.abs(v)>=100?v.toFixed(0):v.toFixed(1);
+  const vals=r.items.map(i=>i.value), now=vals[vals.length-1];
+  box.className="";
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(title)}">
+    <line class="axis" x1="${L}" x2="${W-R}" y1="${H-B}" y2="${H-B}"/><line class="axis" x1="${L}" x2="${L}" y1="${T}" y2="${H-B}"/>
+    <text x="${L-6}" y="${T+9}" text-anchor="end">${f(hi)}</text><text x="${L-6}" y="${H-B}" text-anchor="end">${f(lo)}</text>
+    <text x="${L}" y="${H-6}">${fmt(t0)}</text><text x="${W-R}" y="${H-6}" text-anchor="end">${fmt(t1)}</text>
+    ${hasLim?`<line class="lim" x1="${L}" x2="${W-R}" y1="${y(lim)}" y2="${y(lim)}"/>`:""}
+    <path class="line" d="${d}"/></svg>
+    <p>${esc(title)}. Latest ${f(now)}, range ${f(Math.min(...vals))} to ${f(Math.max(...vals))}${hasLim?`, dashed line is the alarm limit ${f(lim)}`:""}.</p>`;
+}
+$("hist-form").addEventListener("change",()=>loadHistory().catch(showErr));
+
 async function refresh(){
-  try{const [p,e]=await Promise.all([api("/api/points"),api("/api/events")]);renderPoints(p);renderAlarms(e)}
+  try{const [p,e]=await Promise.all([api("/api/points"),api("/api/events")]);renderPoints(p);renderAlarms(e);syncPointSelect(p);await loadHistory()}
   catch(e){showErr(e)}
 }
 refresh();setInterval(refresh,2000);
