@@ -30,7 +30,7 @@ python tools/sim_publisher.py       # sends durian/mqtt-temp and durian/mqtt-flo
 | `durian/modbus.py`, `modbus_source.py` | Modbus client (TCP, RTU, ASCII, serial) and the polling source |
 | `durian/modbus_sim.py` | Modbus slave for tests: `python -m durian.modbus_sim tcp 1502` |
 | `durian/polled.py`, `http_source.py`, `sql_source.py` | Pull-source base, HTTP JSON source, SQLite source |
-| `durian/outputs.py` | Webhook handler, MQTT publisher |
+| `durian/outputs.py` | Webhook, email and set-point handlers; MQTT publisher; HTTP sender (posts values to another DurianDB or any JSON endpoint) |
 | `durian/store.py`, `migrations.py` | SQLite or MySQL/MariaDB: history, rollups, events, users, audit, tokens, config objects, versioned migrations |
 | `durian/maintenance.py` | Retention, backups, config export and import, history CSV |
 | `durian/ingest.py` | HTTP ingest source (values pushed by Node-RED and others) |
