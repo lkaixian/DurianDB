@@ -323,6 +323,8 @@ class App:
             return self.import_points(query, body, ident)
         if (method, a, b) == ("GET", "export", "history"):
             return self.history_csv(ident, query)
+        if (method, a, b, c) == ("GET", "events", "search", None):
+            return self.event_journal(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
             ok = self.event_points(ident)
             point = query.get("point")
@@ -502,6 +504,36 @@ class App:
             self._apply_holds(now)
         self.store.audit(ident["name"], "alarm." + action, f"{point}: {reason}" if reason else point)
         return 200, {"point": point, "action": action}
+
+    def event_journal(self, ident, q):
+        """GET /api/events/search: ?state=all|unacked|active|closed &level=WARNING &hours=24 &q=text &limit=50 &offset=0 &format=csv"""
+        state = q.get("state", "all")
+        if state not in ("all", "unacked", "active", "closed"):
+            raise ApiError(400, "state must be all, unacked, active or closed")
+        try:
+            level = Level[q["level"].upper()] if q.get("level") else Level.NONE
+            hours = float(q["hours"]) if q.get("hours") else None
+            limit, offset = min(int(q.get("limit", 50)), 200 if q.get("format") != "csv" else 5000), max(int(q.get("offset", 0)), 0)
+        except (KeyError, ValueError):
+            raise ApiError(400, "level must be an alarm level name; hours, limit and offset must be numbers")
+        allowed = self.event_points(ident)
+        if len(allowed) > 900:  # too many for an IN list: ask for everything and filter here
+            rows, total = self.store.events_search(None, int(level), state, time.time() - hours * 3600 if hours else None, None, q.get("q"), 100000, 0)
+            rows = [e for e in rows if e["point"] in allowed]
+            total, rows = len(rows), rows[offset:offset + limit]
+        else:
+            rows, total = self.store.events_search(allowed, int(level), state, time.time() - hours * 3600 if hours else None, None, q.get("q"), limit, offset)
+        for e in rows:
+            e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
+        if q.get("format") != "csv":
+            return 200, {"items": rows, "total": total, "offset": offset, "limit": limit}
+        out = io.StringIO()
+        w = csv.writer(out, lineterminator="\n")
+        iso = lambda t: "" if t is None else dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        w.writerow(["raised_utc", "point", "level", "message", "state", "held", "acknowledged_by", "acknowledged_utc", "returned_to_normal_utc"])
+        for e in rows:
+            w.writerow([iso(e["ts"]), e["point"], e["level_name"], e["message"], e["state"], e["held"] or "", e["acked_by"] or "", iso(e["acked_ts"]), iso(e["cleared_ts"])])
+        return 200, Raw(out.getvalue().encode(), "text/csv; charset=utf-8", "alarms.csv")
 
     def event_points(self, ident):
         """Names an identity may see alarms for: its points, the sources it may read, and DurianDB itself for a superadmin."""
