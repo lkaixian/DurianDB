@@ -202,6 +202,10 @@ def validate_point(name, b, store):
         add("source", "unknown source")
     if b.get("logging", "ON_CHANGE") not in Logging.__members__:
         add("logging", f"must be one of {list(Logging.__members__)}")
+    if b.get("logging") == "INTERVAL" and not (_num(b.get("log_interval")) and 1 <= b["log_interval"] <= 86400):
+        add("log_interval", "give the seconds between samples, 1 to 86400")
+    if b.get("log_mode", "instant") not in ("instant", "avg", "min", "max"):
+        add("log_mode", "must be instant, avg, min or max")
     if not (_num(b.get("tolerance", 0)) and b.get("tolerance", 0) >= 0):
         add("tolerance", "must be a number, zero or more")
     tags = b.get("tags", {})
@@ -307,6 +311,7 @@ def validate_watchlist(name, b):
 
 def make_point(name, b, source_name):
     p = Point(name, logging=Logging[b.get("logging", "ON_CHANGE")], tolerance=float(b.get("tolerance", 0)),
+              interval=float(b.get("log_interval", 0)), interval_mode=b.get("log_mode", "instant"),
               tags=dict(b.get("tags", {})), detectors=[make_detector(d) for d in b.get("detectors", [])])
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),

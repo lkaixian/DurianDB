@@ -19,5 +19,8 @@ assert got("min") == [(100, 10), (110, 5)]
 assert got("max") == [(100, 60), (110, 5)]
 assert got("last") == [(100, 60), (110, 5)]
 assert got("count") == [(100, 3), (110, 1)]
+assert got("first") == [(100, 10), (110, 5)]
+assert got("sum") == [(100, 90), (110, 5)]
+assert got("delta") == [(100, 50), (110, 0)]  # last minus first of each bucket
 assert st.series("other", 0, 10, "avg") == []
 print("ok")

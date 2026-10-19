@@ -77,4 +77,9 @@ for bad in ({"states": {}}, {"states": {"x": "On"}}, {"states": {"1": ""}}, {"st
 app.tick(time.time())
 v = next(p for p in call(admin, "GET", "/api/points")[1] if p["name"] == "pump")
 assert v["text"] == "Running" and v["states"]["2"] == "Fault", v
+
+# ---- interval logging config
+for bad in ({"logging": "INTERVAL"}, {"logging": "INTERVAL", "log_interval": 0}, {"logging": "INTERVAL", "log_interval": 10, "log_mode": "median"}):
+    assert call(admin, "PUT", "/api/config/point/iv", {"source": "demo", **bad})[0] == 422, bad
+assert call(admin, "PUT", "/api/config/point/iv", {"source": "demo", "logging": "INTERVAL", "log_interval": 10, "log_mode": "avg"})[0] == 200
 print("ok")

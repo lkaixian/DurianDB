@@ -7,7 +7,7 @@ Studied behavior and the reasons for the differences are in docs/research/09.
 import math
 import re
 
-from .store import ROLLUPS
+from .store import ALL_ROLLUPS
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 TONES = ("normal", "warn", "alarm")  # fixed styles: the page keeps one accent colour and a strict content policy
@@ -92,8 +92,8 @@ def _chart(w, p, c):
         c.points.update(pts)
     if w.get("window", 3600) not in WINDOWS:
         c.err(f"{p}.window", f"must be one of {list(WINDOWS)} seconds")
-    if w.get("rollup", "avg") != "last" and w.get("rollup", "avg") not in ROLLUPS:
-        c.err(f"{p}.rollup", "must be one of avg, min, max, last, count")
+    if w.get("rollup", "avg") not in ALL_ROLLUPS:
+        c.err(f"{p}.rollup", f"must be one of {', '.join(ALL_ROLLUPS)}")
 
 
 @widget("alarms")

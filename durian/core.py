@@ -23,6 +23,7 @@ class Logging(IntEnum):
     NEVER = 0
     ON_CHANGE = 1
     ALL = 2
+    INTERVAL = 3  # one sample every `interval` seconds: the last value, or the average, minimum or maximum of the period
 
 
 class Quality(IntEnum):
@@ -283,8 +284,12 @@ class Point:
     quality: int = Quality.GOOD
     in_service: bool = True  # False: detectors are not evaluated (set by an administrator, see App)
     meta: dict = field(default_factory=dict)  # presentation and access data: unit, source, roles, settable
+    interval: float = 0.0  # seconds between samples when logging is INTERVAL
+    interval_mode: str = "instant"  # instant, avg, min or max
     _logged: object = None
     _logged_q: int = Quality.GOOD
+    _period: list = field(default_factory=list)  # values received in the current interval
+    _period_start: Optional[float] = None
 
     def update(self, value, ts, on_event: Callable[[Event], None], quality=Quality.GOOD, recv=None):
         """`ts` is the source's time for the value, `recv` ours (defaults to ts). A BAD update only marks the point."""
@@ -296,12 +301,19 @@ class Point:
                 self.unsaved.append((ts, value, int(quality)))
             self.quality = quality
             return
-        log = self.logging == Logging.ALL or (
-            self.logging == Logging.ON_CHANGE and (self._logged is None or self._logged_q == Quality.BAD or abs(value - self._logged) > self.tolerance))
+        log, logged = self.logging == Logging.ALL or (
+            self.logging == Logging.ON_CHANGE and (self._logged is None or self._logged_q == Quality.BAD or abs(value - self._logged) > self.tolerance)), value
+        if self.logging == Logging.INTERVAL:
+            self._period.append(value)
+            if self._period_start is None:
+                self._period_start = ts
+            if ts - self._period_start >= self.interval:  # the period is over: one sample, stamped with its end
+                logged = {"instant": value, "avg": sum(self._period) / len(self._period), "min": min(self._period), "max": max(self._period)}[self.interval_mode]
+                log, self._period, self._period_start = True, [], ts
         if log:
-            self._logged, self._logged_q = value, Quality.GOOD
-            self.cache.append((ts, value))
-            self.unsaved.append((ts, value, int(quality)))
+            self._logged, self._logged_q = logged, Quality.GOOD
+            self.cache.append((ts, logged))
+            self.unsaved.append((ts, logged, int(quality)))
         self.last, self.last_ts, self.last_recv, self.quality = value, ts, ts if recv is None else recv, quality
         for d in self.detectors if self.in_service else ():
             ev = d.check(self, value, ts)
