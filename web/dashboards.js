@@ -17,6 +17,7 @@ function toneOf(rules, v) {  // the most severe matching rule wins
 const tagMatch = (p, tag) => { const [k, ...v] = tag.split(":"); return p.tags[k] === v.join(":"); };
 const heading = w => `<h3 class="wt">${esc(w.title || w.point || w.type)}</h3>`;
 const noAccess = name => `<p class="note">No access to ${esc(name)}, or it does not exist.</p>`;
+const QUALITY_NOTE = {bad: "Bad: the source is not supplying this value, showing the last known one", uncertain: "Uncertain: treat this value with care"};
 const formatted = (p, w) => p.last == null ? "no value yet" : w.decimals == null ? String(p.last) : Number(p.last).toFixed(w.decimals);
 
 registerWidget("value", {
@@ -24,9 +25,10 @@ registerWidget("value", {
   render(box, w, ctx) {
     const p = ctx.points[w.point];
     if (!p) { box.innerHTML = heading(w) + noAccess(w.point); return; }
-    const stale = p.last_ts && Date.now() / 1000 - p.last_ts > (w.stale_after || 60);
+    const seen = p.received || p.last_ts, stale = seen && Date.now() / 1000 - seen > (w.stale_after || 60);
     box.innerHTML = heading(w) + `<p class="big num tone-${toneOf(w.rules, p.last)}">${esc(formatted(p, w))}<span class="u"> ${esc(p.unit)}</span></p>` +
-      (stale ? `<p class="note">No update for ${Math.round(Date.now() / 1000 - p.last_ts)} s</p>` : "");
+      (QUALITY_NOTE[p.quality] ? `<p class="note">${QUALITY_NOTE[p.quality]}</p>` : "") +
+      (stale ? `<p class="note">No update for ${Math.round(Date.now() / 1000 - seen)} s</p>` : "");
   },
 });
 
