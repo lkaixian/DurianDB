@@ -207,6 +207,28 @@ class Store:
         return self.run("update events set acked_ts=?, acked_by=? where id=? and acked_ts is null",
                         (ts, user, event_id)).rowcount
 
+    def events_search(self, allowed, level_min=0, state="all", since=None, until=None, q=None, limit=50, offset=0):
+        """Alarm journal: newest first, filtered, with the total. `allowed` is the set of event point names the caller may see."""
+        where, args = ["level >= ?"], [level_min]
+        if allowed is not None:
+            if not allowed:
+                return [], 0
+            where.append(f"point in ({', '.join('?' * len(allowed))})")
+            args += sorted(allowed)
+        where += {"all": [], "unacked": ["acked_ts is null"], "active": ["cleared_ts is null"], "closed": ["cleared_ts is not null and acked_ts is not null"]}[state]
+        if since is not None:
+            where.append("ts >= ?")
+            args.append(since)
+        if until is not None:
+            where.append("ts <= ?")
+            args.append(until)
+        if q:  # instr instead of LIKE: no wildcard characters to escape, and both databases have it
+            where.append("(instr(lower(point), ?) > 0 or instr(lower(message), ?) > 0)")
+            args += [q.lower(), q.lower()]
+        clause = " and ".join(where)
+        total = self.q(f"select count(*) as n from events where {clause}", args)[0]["n"]
+        return self.q(f"select * from events where {clause} order by ts desc, id desc limit ? offset ?", args + [limit, offset]), total
+
     def events_for_kpis(self, since):
         """Alarms raised since `since`, plus every alarm still active however old."""
         return self.q("select point, ts, cleared_ts, acked_ts, held from events where ts >= ? or cleared_ts is null", (since,))

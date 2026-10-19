@@ -106,5 +106,17 @@ await upload(["name,source,unit,extra", 'csv-ok,demo,bar,"{""generator"":{""kind
 console.log("good file:", await text('#csv-out'));
 await ev(`document.querySelector('#csv-go').click()`); await sleep(2500);
 console.log("after apply:", await ev(`[...document.querySelectorAll('table.dense tbody tr')].some(r=>r.cells[0].textContent==='csv-ok')`));
+// 7. alarm journal: filter, search, sort and the CSV link
+await call("PUT", "/api/config/point/jr-hot", {source: "demo", generator: {kind: "constant", value: 95}, detectors: [{kind: "HIGH_LIMIT", limit: 90, level: "URGENT"}]}); await sleep(3000);
+await go("#alarms");
+const rowsN = () => ev(`document.querySelectorAll('#aj-out tbody tr').length`);
+console.log("journal rows:", await rowsN(), "| nav:", await text('nav a[aria-current=page]'));
+await set('#aj [name=level]', "URGENT"); await sleep(1200);
+console.log("urgent only:", await ev(`[...new Set([...document.querySelectorAll('#aj-out td.lvl')].map(e=>e.textContent))].join()`));
+await set('#aj [name=q]', "jr-hot"); await sleep(1500);
+console.log("search jr-hot:", await ev(`[...new Set([...document.querySelectorAll('#aj-out td:nth-child(2)')].map(e=>e.textContent))].join()`));
+await set('#aj [name=state]', "closed"); await sleep(1200);
+console.log("closed + search:", await text('#aj-out'));
+console.log("csv link:", await ev(`document.querySelector('#aj-csv').getAttribute('href')`));
 console.log("problems:", problems);
 process.exit(0);

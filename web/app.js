@@ -32,9 +32,9 @@ function showErr(e, where) {
 }
 
 // ---- navigation
-const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, reports: viewReports, point: viewPoint, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount};
+const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, reports: viewReports, point: viewPoint, alarms: viewAlarms, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount};
 function nav(view) {
-  const groups = me.name ? [["Monitor", [["overview", "Overview"], ["dashboards", "Dashboards"], ["history", "History"], ["reports", "Reports"]]],
+  const groups = me.name ? [["Monitor", [["overview", "Overview"], ["alarms", "Alarms"], ["dashboards", "Dashboards"], ["history", "History"], ["reports", "Reports"]]],
     ...(isAdmin() ? [["Configure", [["config", "Config"], ["users", "Users"], ["tokens", "Tokens"]]], ["System", [["database", "Database"], ["audit", "Audit"]]]] : []),
     ["Signed in", [["account", me.name]]]] : [];
   document.querySelector(".shell").classList.toggle("solo", !me.name);  // before sign-in there is nothing to navigate to
@@ -325,6 +325,43 @@ async function drawService(name) {
     try { await api("POST", `/api/alarms/${encodeURIComponent(name)}/${h ? "in-service" : "out-of-service"}`, h ? {} : {reason: $("#svc-r").value}); await drawService(name); }
     catch (e) { $("#svc-e").textContent = e.message; }
   };
+}
+
+// ---- alarm journal: every alarm ever raised that you may see, filtered and paged, with a CSV export
+function viewAlarms() {
+  main.innerHTML = `<section aria-labelledby="aj-h"><h2 id="aj-h">Alarms</h2>
+    <form id="aj" class="row">
+      <label>Show <select name="state"><option value="all">All alarms</option><option value="unacked">Not acknowledged</option><option value="active">Still active</option><option value="closed">Closed (returned to normal and acknowledged)</option></select></label>
+      <label>From level <select name="level"><option value="">Any</option>${["INFORMATION", "IMPORTANT", "WARNING", "URGENT", "CRITICAL", "LIFE_SAFETY"].map(l => `<option>${l}</option>`).join("")}</select></label>
+      <label>Raised in <select name="hours"><option value="24">the last 24 hours</option><option value="168">the last 7 days</option><option value="720">the last 30 days</option><option value="">any time</option></select></label>
+      <label>Search <input name="q" type="search" placeholder="point or message" autocomplete="off"></label>
+      <a id="aj-csv" class="btn" href="#alarms" download>Download CSV</a></form>
+    <div id="aj-out" class="status" data-live>Loading alarms...</div>
+    <div class="row" id="aj-pager" hidden><button type="button" id="aj-newer">Newer</button><button type="button" id="aj-older">Older</button><span id="aj-range" class="note" role="status"></span></div></section>`;
+  const PAGE = 50;
+  let offset = 0;
+  const params = () => { const f = new FormData($("#aj")), q = new URLSearchParams({limit: PAGE, offset}); for (const [k, v] of f) if (v) q.set(k, v); return q; };
+  const load = async () => {
+    const q = params(), r = await api("GET", "/api/events/search?" + q);
+    q.delete("limit"); q.delete("offset"); q.set("format", "csv");
+    $("#aj-csv").href = "/api/events/search?" + q;
+    const box = $("#aj-out");
+    box.className = r.items.length ? "" : "status";
+    box.innerHTML = r.items.length ? alarmTableHtml(r.items) : "No alarms match. Widen the time range or clear the search.";
+    $("#aj-pager").hidden = r.total <= PAGE;
+    $("#aj-newer").disabled = offset === 0;
+    $("#aj-older").disabled = offset + PAGE >= r.total;
+    $("#aj-range").textContent = r.total ? `${offset + 1} to ${Math.min(offset + PAGE, r.total)} of ${r.total}` : "";
+    if (r.items.length) makeSortable(box.querySelector("table"));
+  };
+  const reload = () => load().catch(e => showErr(e, $("#aj-out")));
+  $("#aj").addEventListener("change", () => { offset = 0; reload(); });
+  $("#aj").addEventListener("input", e => { if (e.target.name === "q") { offset = 0; clearTimeout(viewAlarms.t); viewAlarms.t = setTimeout(reload, 300); } });
+  $("#aj").addEventListener("submit", e => e.preventDefault());
+  $("#aj-newer").addEventListener("click", () => { offset = Math.max(0, offset - PAGE); reload(); });
+  $("#aj-older").addEventListener("click", () => { offset += PAGE; reload(); });
+  bindAlarmActions($("#aj-out"), load);
+  reload();  // no timer: a refresh would undo the sort you chose
 }
 
 // ---- reports: one row per point for a window
