@@ -1,15 +1,15 @@
 {
   "durian/core.py": {
-    "mtime": 1792421719.8322196,
-    "seen": 1792421841.0367723,
-    "ast_hash": "ab6d1a2f14b173a1be66d3d2610756fd",
-    "semantic_hash": "ab6d1a2f14b173a1be66d3d2610756fd"
+    "mtime": 1792424338.2013552,
+    "seen": 1792425127.5888443,
+    "ast_hash": "a35f63073cf4a5cd00868c7dcb721f49",
+    "semantic_hash": "a35f63073cf4a5cd00868c7dcb721f49"
   },
   "README.md": {
-    "mtime": 1792421708.0169208,
-    "seen": 1792421841.0367777,
-    "ast_hash": "aefe7580a404c1126e0fe4b97ae57f60",
-    "semantic_hash": "aefe7580a404c1126e0fe4b97ae57f60"
+    "mtime": 1792424941.876363,
+    "seen": 1792425127.5888634,
+    "ast_hash": "c902c639901bc78b788c9be46f239f82",
+    "semantic_hash": "c902c639901bc78b788c9be46f239f82"
   },
   "docs/00-clean-room-policy.md": {
     "mtime": 1792421708.096352,
@@ -24,9 +24,141 @@
     "semantic_hash": "db9b78970475a0acc907bcdceb886047"
   },
   "docs/research/99-open-questions.md": {
-    "mtime": 1792421708.5238283,
-    "seen": 1792421841.0367837,
-    "ast_hash": "69357f7dba35f2926421fba6b00e5dfa",
-    "semantic_hash": "69357f7dba35f2926421fba6b00e5dfa"
+    "mtime": 1792424941.984771,
+    "seen": 1792425127.5888758,
+    "ast_hash": "1a66f8c25803cf630301f82d852d0c14",
+    "semantic_hash": "1a66f8c25803cf630301f82d852d0c14"
+  },
+  "durian/__init__.py": {
+    "mtime": 1792422022.1201193,
+    "seen": 1792425127.588833,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "durian/app.py": {
+    "mtime": 1792424854.089791,
+    "seen": 1792425127.5888379,
+    "ast_hash": "2bf138d50855359f1bfdcad8e20c5ce3",
+    "semantic_hash": "2bf138d50855359f1bfdcad8e20c5ce3"
+  },
+  "durian/auth.py": {
+    "mtime": 1792424402.857662,
+    "seen": 1792425127.5888405,
+    "ast_hash": "c8dabae05be50eb7583a0ee00104183c",
+    "semantic_hash": "c8dabae05be50eb7583a0ee00104183c"
+  },
+  "durian/config.py": {
+    "mtime": 1792424854.215782,
+    "seen": 1792425127.5888417,
+    "ast_hash": "48ff28b86fb13944e0e60ca542fe8a13",
+    "semantic_hash": "48ff28b86fb13944e0e60ca542fe8a13"
+  },
+  "durian/mqtt_source.py": {
+    "mtime": 1792425009.2424874,
+    "seen": 1792425127.588846,
+    "ast_hash": "66087762c486ba9ea2cc242f40ad2190",
+    "semantic_hash": "66087762c486ba9ea2cc242f40ad2190"
+  },
+  "durian/outputs.py": {
+    "mtime": 1792424314.161445,
+    "seen": 1792425127.5888474,
+    "ast_hash": "84631d0e17f4490e52d12bfc824a4d56",
+    "semantic_hash": "84631d0e17f4490e52d12bfc824a4d56"
+  },
+  "durian/server.py": {
+    "mtime": 1792424379.3020017,
+    "seen": 1792425127.5888488,
+    "ast_hash": "335579d37852d43f1f7f9cfe9cc2111a",
+    "semantic_hash": "335579d37852d43f1f7f9cfe9cc2111a"
+  },
+  "durian/store.py": {
+    "mtime": 1792424203.6924195,
+    "seen": 1792425127.58885,
+    "ast_hash": "aa0834f614d168fb336e397363d77e93",
+    "semantic_hash": "aa0834f614d168fb336e397363d77e93"
+  },
+  "tests/test_app.py": {
+    "mtime": 1792424854.272377,
+    "seen": 1792425127.5888512,
+    "ast_hash": "0cf8091e1d55c6308ed1f22e3356f547",
+    "semantic_hash": "0cf8091e1d55c6308ed1f22e3356f547"
+  },
+  "tests/test_auth.py": {
+    "mtime": 1792424223.9163685,
+    "seen": 1792425127.5888524,
+    "ast_hash": "f75f1f4499cf71103cf2d96cdc070f8c",
+    "semantic_hash": "f75f1f4499cf71103cf2d96cdc070f8c"
+  },
+  "tests/test_core.py": {
+    "mtime": 1792425009.2895293,
+    "seen": 1792425127.588854,
+    "ast_hash": "5727196657d4083c7eb1bf5f1d587a1c",
+    "semantic_hash": "5727196657d4083c7eb1bf5f1d587a1c"
+  },
+  "tests/test_series.py": {
+    "mtime": 1792424203.89182,
+    "seen": 1792425127.588855,
+    "ast_hash": "f223df02ac1705ed141e129a8005d35a",
+    "semantic_hash": "f223df02ac1705ed141e129a8005d35a"
+  },
+  "tools/browser_check.mjs": {
+    "mtime": 1792424778.7808204,
+    "seen": 1792425127.5888565,
+    "ast_hash": "938f82274cafbe1a2f00428cbf49b4b1",
+    "semantic_hash": "938f82274cafbe1a2f00428cbf49b4b1"
+  },
+  "tools/e2e_check.py": {
+    "mtime": 1792424882.793365,
+    "seen": 1792425127.5888577,
+    "ast_hash": "66f10adc9e22eee4172c4ffa78c3d2c2",
+    "semantic_hash": "66f10adc9e22eee4172c4ffa78c3d2c2"
+  },
+  "tools/mqtt_lab.py": {
+    "mtime": 1792424073.7788415,
+    "seen": 1792425127.5888588,
+    "ast_hash": "8e854a28e1a11d7a92d4bb114ab80cd6",
+    "semantic_hash": "8e854a28e1a11d7a92d4bb114ab80cd6"
+  },
+  "tools/sim_publisher.py": {
+    "mtime": 1792423652.3803825,
+    "seen": 1792425127.5888598,
+    "ast_hash": "d57746375a9548351508c615fb2af5bf",
+    "semantic_hash": "d57746375a9548351508c615fb2af5bf"
+  },
+  "web/app.js": {
+    "mtime": 1792424753.398758,
+    "seen": 1792425127.588861,
+    "ast_hash": "c995927a94d06f529cecd0f7513fe06a",
+    "semantic_hash": "c995927a94d06f529cecd0f7513fe06a"
+  },
+  "docs/research/02-observed-access-model.md": {
+    "mtime": 1792423446.020379,
+    "seen": 1792425127.5888708,
+    "ast_hash": "04efd8503a82f3406cf23cb54ced181e",
+    "semantic_hash": "04efd8503a82f3406cf23cb54ced181e"
+  },
+  "docs/research/03-observed-lab-instance.md": {
+    "mtime": 1792423893.7349317,
+    "seen": 1792425127.588872,
+    "ast_hash": "4b87da8fbca24865ad9d1b21adf5797f",
+    "semantic_hash": "4b87da8fbca24865ad9d1b21adf5797f"
+  },
+  "docs/research/04-observed-mqtt-and-detectors.md": {
+    "mtime": 1792424118.7162142,
+    "seen": 1792425127.5888731,
+    "ast_hash": "19fe5bf7fd4ce7464aa956b2ce929003",
+    "semantic_hash": "19fe5bf7fd4ce7464aa956b2ce929003"
+  },
+  "docs/research/05-design-mapping.md": {
+    "mtime": 1792424941.936322,
+    "seen": 1792425127.5888743,
+    "ast_hash": "0a878570d6fb8772df2ac375072d5f95",
+    "semantic_hash": "0a878570d6fb8772df2ac375072d5f95"
+  },
+  "web/index.html": {
+    "mtime": 1792424462.1642873,
+    "seen": 1792425127.5888772,
+    "ast_hash": "78958bd464c42846283a2b68850ed899",
+    "semantic_hash": "78958bd464c42846283a2b68850ed899"
   }
 }
