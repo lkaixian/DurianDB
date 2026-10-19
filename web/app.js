@@ -89,7 +89,8 @@ function viewOverview() {
     <section aria-labelledby="pt-h"><h2 id="pt-h">Live points</h2>
       <form id="filter" class="row"><label>Watch list <select id="f-wl"><option value="">All points</option></select></label>
       <label>Tag <input id="f-tag" placeholder="area:boiler" autocomplete="off"></label></form>
-      <div id="points" class="status" data-live>Loading points...</div></section></div>`;
+      <div id="points" class="status" data-live>Loading points...</div></section>
+    <section class="wide" aria-labelledby="kpi-h"><h2 id="kpi-h">Alarm performance, last 24 hours</h2><div id="kpis" class="status" data-live>Loading...</div></section></div>`;
   api("GET", "/api/watchlists").then(w => { $("#f-wl").insertAdjacentHTML("beforeend", w.map(x => `<option>${esc(x.name)}</option>`).join("")); }).catch(() => {});
   ptSig = "";
   $("#filter").addEventListener("input", () => { ptSig = ""; refreshOverview().catch(showErr); });
@@ -114,6 +115,19 @@ function viewOverview() {
     catch (e) { out.textContent = e.message; }
   });
   every(refreshOverview, 2000);
+  every(refreshKpis, 30000);
+}
+
+async function refreshKpis() {
+  const k = await api("GET", "/api/alarms/kpis?hours=24");
+  const mins = k.median_seconds_to_acknowledge == null ? "none acknowledged" : k.median_seconds_to_acknowledge < 90 ? `${Math.round(k.median_seconds_to_acknowledge)} s` : `${Math.round(k.median_seconds_to_acknowledge / 60)} min`;
+  const list = (a, key, unit) => a.length ? a.map(x => `${esc(x.point)} (${x[key]} ${unit})`).join(", ") : "none";
+  const rows = [["Alarms raised", k.alarms], ["Average per hour", k.per_hour], ["Peak in 10 minutes", k.peak_per_10min], ["10-minute periods over 10 alarms", k.flood_10min_periods],
+    ["Median time to acknowledge", mins], ["Active now / not acknowledged", `${k.active_now} / ${k.unacknowledged_now}`], ["Active over 24 hours", k.stale_now],
+    ["Held now (shelved or suppressed)", k.held_now], ["Shelved points / out of service", `${k.shelved_points} / ${k.out_of_service_points}`],
+    ["Most frequent", list(k.top_points, "alarms", "alarms")], ["Chattering (3+ in 10 minutes)", list(k.chattering_points, "periods", "periods")]];
+  $("#kpis").className = "";
+  $("#kpis").innerHTML = `<table class="stack"><tbody>${rows.map(([n, v]) => `<tr><th scope="row">${n}</th><td class="num">${typeof v === "string" ? v : esc(String(v))}</td></tr>`).join("")}</tbody></table>`;
 }
 
 async function refreshOverview() {
