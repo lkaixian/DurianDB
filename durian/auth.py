@@ -36,8 +36,8 @@ def verify_password(pw: str, stored: str) -> bool:
 
 
 def held(roles) -> set:
-    """Every role a user effectively holds, following inheritance."""
-    out = set()
+    """Every role a user effectively holds, following inheritance. Everyone holds anonymous: public means everyone."""
+    out = {"anonymous"}
     for r in roles:
         out |= INHERIT.get(r, {r})
     return out
