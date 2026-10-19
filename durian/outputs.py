@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 
 from .config import load_creds
-from .core import Level
+from .core import Level, Quality
 from .mqtt_source import tls_client
 from .polled import NoRedirect
 
@@ -82,7 +82,7 @@ class Outputs:
     def on_value(self, point, value, ts):
         for cl, prefix, names in self.publishers:
             if "*" in names or point.name in names:
-                cl.publish(prefix + point.name, json.dumps({"value": value, "ts": ts}), qos=1)
+                cl.publish(prefix + point.name, json.dumps({"value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}), qos=1)
 
     def on_event(self, ev, kind):
         for h in self.webhooks:

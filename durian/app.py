@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from .config import (build_engine, roles_ok, validate_point, validate_source, validate_watchlist)
-from .core import Event, Level
+from .core import Event, Level, Quality
 from .dashboards import validate_dashboard
 from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
@@ -61,7 +61,7 @@ class App:
         with self.store.lock:
             ts = ts or time.time()
             self.engine.tick(ts)
-            self.pending.extend((p.name, t, v) for s in self.engine.sources for p in s.points.values() for t, v in p.take_unsaved())
+            self.pending.extend((p.name, t, v, q) for s in self.engine.sources for p in s.points.values() for t, v, q in p.take_unsaved())
             self._flush_history(ts)
             new, self.engine.events = self.unstored + self.engine.events, []
             self.unstored = []
@@ -115,7 +115,7 @@ class App:
         cfg = p.meta.get("detector_cfg", [])
         limit = lambda kind: next((d["limit"] for d in cfg if d.get("kind") == kind), None)
         return {"name": p.name, "source": s.name, "unit": p.meta.get("unit", ""), "tags": p.tags, "last": p.last,
-                "last_ts": p.last_ts, "settable": p.meta.get("settable", False),
+                "last_ts": p.last_ts, "received": p.last_recv, "quality": Quality(p.quality).name.lower(), "settable": p.meta.get("settable", False),
                 "limits": {"high": limit("HIGH_LIMIT"), "low": limit("LOW_LIMIT")},
                 "history": [{"ts": t, "value": v} for t, v in list(p.cache)[-60:]]}
 
@@ -149,7 +149,7 @@ class App:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:
                 raise ApiError(404, "unknown point")
-            return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "unit": p.meta.get("unit", ""), "tags": p.tags, "source": s.name}
+            return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "quality": Quality(p.quality).name.lower(), "unit": p.meta.get("unit", ""), "tags": p.tags, "source": s.name}
         if (method, a, b, c) == ("GET", "me", None, None):
             return 200, {"name": ident["name"], "roles": sorted(ident["roles"])}
         if (method, a, b, c) == ("GET", "health", None, None):

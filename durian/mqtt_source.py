@@ -9,7 +9,7 @@ import ssl
 
 import paho.mqtt.client as mqtt
 
-from .core import Point, Source
+from .core import Point, Quality, Source
 
 
 def parse(payload: bytes):
@@ -23,6 +23,25 @@ def parse(payload: bytes):
         return float(v)
     except (UnicodeDecodeError, ValueError):
         return None
+
+
+def stamp(payload: bytes):
+    """(source time, quality) from a {"value", "ts", "quality"} payload; either is None when absent or unusable."""
+    from .ingest import parse_quality, parse_time  # ingest imports core only; deferred to keep this module's import light
+    try:
+        d = json.loads(payload.decode())
+    except (UnicodeDecodeError, ValueError):
+        return None, Quality.GOOD
+    if not isinstance(d, dict):
+        return None, Quality.GOOD
+    try:
+        t = parse_time(d["ts"]) if "ts" in d else None
+    except ValueError:
+        t = None
+    try:
+        return t, parse_quality(d.get("quality"))
+    except ValueError:
+        return t, Quality.UNCERTAIN  # a quality we cannot read is itself a reason to doubt
 
 
 def tls_client(c: dict, client_id=""):
@@ -72,7 +91,8 @@ class MqttSource(Source):
                     self.dropped += 1  # unknown topic, like Mango's "unknown topic" event
                     continue
                 self.add(self.factory(name))
-            out[name] = v
+            t, q = stamp(payload)
+            out[name] = (v, t or ts, q)
 
     def write(self, name, value):
         info = self.client.publish(self.cmd_prefix + name, json.dumps({"value": value}), qos=1)

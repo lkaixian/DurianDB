@@ -52,6 +52,8 @@ Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every 
 
 Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped ingest token), publish over MQTT with TLS, read values (`/api/value/<point>`) and set points with scoped tokens, and receive DurianDB's alarms through a webhook or MQTT. Example flows, a step-by-step guide and an end-to-end check against a real Node-RED are in `integrations/node-red/`. Create tokens under **Tokens**.
 
+**Data quality.** Every value carries the source's own timestamp and a quality: `good`, `uncertain` or `bad`. A source that is down or cannot fill a point marks it `bad`: the last value is held, no alarm is evaluated on it, and charts, CSV export and rollups skip it (the history table keeps the row with its quality). A device clock more than a minute ahead, or a sender that says `"quality": "uncertain"`, makes the value `uncertain`. Values older than the newest one already received for a point are dropped. A "no update" alarm counts from when DurianDB received a value, not from the device's clock. Senders may add `ts` and `quality` to ingest and MQTT payloads.
+
 ## Database
 
 SQLite by default, MySQL or MariaDB with `DURIAN_DB=mysql://user:password@host:3306/database` (the whole test suite passes on both). Schema changes are versioned migrations that upgrade an existing database in place. Under **Database**: size and health, retention (global, and per point with `retention_days`), scheduled purge and backups (SQLite), configuration export and import with a preview, and CSV export and import of a point's history. If the database fails, samples wait in a buffer and a system alarm is raised.

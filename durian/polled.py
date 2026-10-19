@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.request
 
-from .core import Source
+from .core import Quality, Source
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -66,13 +66,17 @@ class PolledSource(Source):
             wait = min(self.period * self.backoff_scale ** self.fails, self.backoff_max)
             self.next_try = time.time() + wait
             self.error, self.connected = f"{type(e).__name__}: {e} (retry in {wait:.0f}s)", False
+            with self._lock:
+                self._latest.update({n: (None, time.time(), Quality.BAD) for n in self.points})
             return
         if self._stop.is_set():
             return
         self.fails, self.next_try, self.connected = 0, 0.0, True
         self.error = f"{len(rejected)} point(s) rejected: " + "; ".join(rejected[:3]) if rejected else None
+        now = time.time()
         with self._lock:
-            self._latest.update(values)
+            self._latest.update({n: (v, now, Quality.GOOD) for n, v in values.items()})
+            self._latest.update({n: (None, now, Quality.BAD) for n in self.points if n not in values})  # fetch could not fill these
 
     def poll(self, ts):
         with self._lock:

@@ -24,6 +24,16 @@ class Logging(IntEnum):
     ALL = 2
 
 
+class Quality(IntEnum):
+    """How far a value can be trusted. BAD keeps the last good value but is never alarmed on, logged as a reading or charted."""
+    GOOD = 0
+    UNCERTAIN = 1  # the value arrived but something about it is doubtful (a device clock in the future, a sender's own flag)
+    BAD = 2  # the source is down or could not supply this point
+
+
+FUTURE_SLACK = 60  # seconds a source clock may run ahead before its timestamp is not believed
+
+
 @dataclass
 class Event:
     point: str
@@ -114,8 +124,8 @@ class NoUpdate(Detector):
             self.event.cleared_ts, self.event = ts, None
 
     def tick(self, point, ts):
-        if self.event is None and point.last_ts is not None and ts - point.last_ts > self.seconds:
-            self.event = Event(point.name, self.level, f"no update for {ts - point.last_ts:.0f}s", ts)
+        if self.event is None and point.last_recv is not None and ts - point.last_recv > self.seconds:  # our clock, not the device's
+            self.event = Event(point.name, self.level, f"no update for {ts - point.last_recv:.0f}s", ts)
             return self.event
 
 
@@ -150,20 +160,32 @@ class Point:
     tags: dict = field(default_factory=dict)
     detectors: list = field(default_factory=list)
     cache: deque = field(default_factory=lambda: deque(maxlen=100))  # recent (ts, value), bounded
-    unsaved: list = field(default_factory=list)  # logged samples waiting for the store
+    unsaved: list = field(default_factory=list)  # logged (ts, value, quality) waiting for the store
     last: object = None
-    last_ts: Optional[float] = None
+    last_ts: Optional[float] = None  # when the source says the value was taken
+    last_recv: Optional[float] = None  # when we received it
+    quality: int = Quality.GOOD
     meta: dict = field(default_factory=dict)  # presentation and access data: unit, source, roles, settable
     _logged: object = None
+    _logged_q: int = Quality.GOOD
 
-    def update(self, value, ts, on_event: Callable[[Event], None]):
+    def update(self, value, ts, on_event: Callable[[Event], None], quality=Quality.GOOD, recv=None):
+        """`ts` is the source's time for the value, `recv` ours (defaults to ts). A BAD update only marks the point."""
+        if quality == Quality.BAD:
+            if value is None:
+                value = self.last
+            if self.logging != Logging.NEVER and value is not None and (self.logging == Logging.ALL or self._logged_q != quality):
+                self._logged_q = quality
+                self.unsaved.append((ts, value, int(quality)))
+            self.quality = quality
+            return
         log = self.logging == Logging.ALL or (
-            self.logging == Logging.ON_CHANGE and (self._logged is None or abs(value - self._logged) > self.tolerance))
+            self.logging == Logging.ON_CHANGE and (self._logged is None or self._logged_q == Quality.BAD or abs(value - self._logged) > self.tolerance))
         if log:
-            self._logged = value
+            self._logged, self._logged_q = value, Quality.GOOD
             self.cache.append((ts, value))
-            self.unsaved.append((ts, value))
-        self.last, self.last_ts = value, ts
+            self.unsaved.append((ts, value, int(quality)))
+        self.last, self.last_ts, self.last_recv, self.quality = value, ts, ts if recv is None else recv, quality
         for d in self.detectors:
             ev = d.check(self, value, ts)
             if ev:
@@ -206,15 +228,22 @@ class Engine:
                     s.error = None
             except Exception as e:  # one broken source must not stop the others
                 s.error, values = f"{type(e).__name__}: {e}", {}
-            if isinstance(values, dict):  # {name: value} or {name: (value, source_time)}
-                values = [(n, *(v if isinstance(v, tuple) else (v, ts))) for n, v in values.items()]
-            for name, value, t in values:  # a list of (name, value, time) keeps several samples of one point, each with its own time
+            if isinstance(values, dict):  # {name: value} or {name: (value, source_time[, quality])}
+                values = [(n, *(v if isinstance(v, tuple) else (v,))) for n, v in values.items()]
+            for name, value, *rest in values:  # a list of (name, value[, time[, quality]]) keeps several samples of one point
+                t, q = (rest[0] if rest else ts), (rest[1] if len(rest) > 1 else Quality.GOOD)
                 p = s.points.get(name)
                 if p is None:  # removed by a config change while the value was in flight
                     continue
-                p.update(value, t, self._event)
-                for pub in self.publishers:
-                    pub(p, value, t)
+                if q != Quality.BAD:
+                    if t > ts + FUTURE_SLACK:  # a clock that runs ahead: keep the value, stamp it with our time, say it is doubtful
+                        t, q = ts, max(q, Quality.UNCERTAIN)
+                    elif p.last_ts is not None and t < p.last_ts:  # older than what we already have
+                        continue
+                p.update(value, t, self._event, q, ts)
+                if p.last is not None:
+                    for pub in self.publishers:
+                        pub(p, p.last, t)
             for p in list(s.points.values()):
                 for d in p.detectors:
                     ev = d.tick(p, ts)

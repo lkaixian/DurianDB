@@ -134,10 +134,10 @@ class Store:
 
     # ---- history
     def add_history(self, rows):
-        self.many("insert into history(point, ts, value) values (?,?,?)", rows)
+        self.many("insert into history(point, ts, value, quality) values (?,?,?,?)", [(*r, 0)[:4] for r in rows])  # rows without a quality are good
 
     def recent(self, point, n=60):
-        return self.q("select ts, value from history where point=? order by ts desc limit ?", (point, n))[::-1]
+        return self.q("select ts, value from history where point=? and quality < 2 order by ts desc limit ?", (point, n))[::-1]
 
     def series(self, point, since, bucket, rollup):
         """Bucketed history; bucket start time is returned as ts. Caller validates the arguments."""
@@ -145,14 +145,14 @@ class Store:
         if rollup == "last":
             return self.q(f"select b * ? as ts, value from (select {b} as b, value, "
                           f"row_number() over (partition by {b} order by ts desc) as rn "
-                          "from history where point = ? and ts >= ?) t where rn = 1 order by b",
+                          "from history where point = ? and ts >= ? and quality < 2) t where rn = 1 order by b",
                           (bucket, bucket, bucket, point, since))
         return self.q(f"select {b} * ? as ts, {ROLLUPS[rollup]} as value from history "
-                      f"where point = ? and ts >= ? group by {b} order by ts",
+                      f"where point = ? and ts >= ? and quality < 2 group by {b} order by ts",
                       (bucket, bucket, point, since, bucket))
 
     def history_range(self, point, start, end, limit):
-        return self.q("select ts, value from history where point=? and ts>=? and ts<=? order by ts limit ?", (point, start, end, limit))
+        return self.q("select ts, value, quality from history where point=? and ts>=? and ts<=? and quality < 2 order by ts limit ?", (point, start, end, limit))
 
     def purge_history(self, cutoff, point=None, except_points=(), limit=5000):
         """Delete up to `limit` rows older than cutoff, for one point or for all but the listed ones. Returns rows deleted."""
