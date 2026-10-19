@@ -14,6 +14,7 @@ from durian.auth import hash_password  # noqa: E402
 from durian.http_source import dig  # noqa: E402
 from durian.sql_source import SqlSource  # noqa: E402
 from durian.store import Store  # noqa: E402
+from _support import new_store  # noqa: E402
 
 tmp = Path(tempfile.mkdtemp())
 
@@ -65,7 +66,7 @@ web = HTTPServer(("127.0.0.1", 0), H)
 threading.Thread(target=web.serve_forever, daemon=True).start()
 URL = f"http://127.0.0.1:{web.server_port}"
 
-app = App(Store())
+app = App(new_store())
 app.auth.bootstrap("admin-password-123")
 admin = app.auth.identity(app.auth.login("admin", "admin-password-123"))
 

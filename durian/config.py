@@ -201,6 +201,9 @@ def validate_point(name, b, store):
         add("unit", "must be text, up to 16 characters")
     if not isinstance(b.get("settable", False), bool):
         add("settable", "must be true or false")
+    r = b.get("retention_days")
+    if "retention_days" in b and not (isinstance(r, int) and not isinstance(r, bool) and 0 <= r <= 36500):
+        add("retention_days", "must be a whole number of days, 0 to keep forever (leave out to use the database default)")
     for p in ("read_roles", "set_roles"):
         if not _roles_ok(b.get(p, [])):
             add(p, "must be a list of role names")

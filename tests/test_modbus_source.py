@@ -9,8 +9,9 @@ from durian.app import ApiError, App  # noqa: E402
 from durian.modbus import encode  # noqa: E402
 from durian.modbus_sim import Slave  # noqa: E402
 from durian.store import Store  # noqa: E402
+from _support import new_store  # noqa: E402
 
-app = App(Store())
+app = App(new_store())
 app.auth.bootstrap("admin-password-123")
 admin = app.auth.identity(app.auth.login("admin", "admin-password-123"))
 from durian.auth import hash_password  # noqa: E402
