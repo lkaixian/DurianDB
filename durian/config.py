@@ -9,12 +9,15 @@ import re
 from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector
+from . import http_source, sql_source
+from .http_source import HttpJsonSource
 from .modbus import RANGES, TYPES
 from .modbus_source import DEFAULTS as MODBUS_KEYS, ModbusSource
 from .mqtt_source import MqttSource
+from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-SOURCE_TYPES = ("virtual", "mqtt", "modbus")
+SOURCE_TYPES = ("virtual", "mqtt", "modbus", "http_json", "sql")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -168,6 +171,10 @@ def validate_source(name, b):
             add("auto_create", "must be true or false")
     if b.get("type") == "modbus":
         _modbus_source_errors(b, add)
+    elif b.get("type") == "http_json":
+        http_source.validate_source(b, add)
+    elif b.get("type") == "sql":
+        sql_source.validate_source(b, add)
     return e
 
 
@@ -217,6 +224,16 @@ def validate_point(name, b, store):
                 add("generator.period", "must be greater than zero")
     if src and src.get("type") == "modbus":
         _modbus_point_errors(b, add)
+    elif src and src.get("type") == "http_json":
+        http_source.validate_point(b, add)
+    elif src and src.get("type") == "sql":
+        sql_source.validate_point(b, add)
+    sc = b.get("scale", {})
+    if src and src.get("type") in ("http_json", "sql") and not (
+            isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
+        add("scale", "must be {multiplier: non-zero number, additive: number}")
+    if b.get("settable") and src and src.get("type") in ("http_json", "sql"):
+        add("settable", "this source type is read-only")
     return e
 
 
@@ -242,8 +259,9 @@ def make_point(name, b, source_name):
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    if b.get("modbus"):
-        p.meta["modbus"] = b["modbus"]
+    for k in ("modbus", "http", "sql", "scale"):
+        if b.get(k):
+            p.meta[k] = b[k]
     return p
 
 
@@ -264,6 +282,11 @@ def build_engine(store):
                     src.gens[n] = p.get("generator", {"kind": "walk"})
                     if n in held:
                         src.override[n] = held[n]
+            elif s["type"] in ("http_json", "sql"):
+                src = (HttpJsonSource if s["type"] == "http_json" else SqlSource)(s["name"], s)
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
+                src.start()
             elif s["type"] == "modbus":
                 src = ModbusSource(s["name"], {k: v for k, v in s.items() if k in MODBUS_KEYS or k == "link"})
                 for n, p in mine.items():
