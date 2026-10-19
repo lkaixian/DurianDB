@@ -52,9 +52,9 @@ await go("#config/source", 2500); console.log("CONFIG SOURCE", await summary());
 await go("#config/point/hot2", 1500);
 // create a new point with bad config to see validation, then a valid one
 await go("#config/point/_new", 2000);
-await ev(`(()=>{const f=document.querySelector('#ed');f.name.value='ui-test';f.body.value=JSON.stringify({source:'ghost',tolerance:-1,detectors:[{kind:'HIGH_LIMIT'}]});f.requestSubmit()})()`); await sleep(1200);
+await ev(`(()=>{const f=document.querySelector('#ed');f.name.value='ui-test';(()=>{const a=document.querySelector('#adv');a.value=JSON.stringify({source:'ghost',tolerance:-1,detectors:[{kind:'HIGH_LIMIT'}]});a.dispatchEvent(new Event('input',{bubbles:true}))})();f.requestSubmit()})()`); await sleep(1200);
 console.log("VALIDATION:", await ev(`document.querySelector('#ed-msg').innerText`)); await shot("06-validation");
-await ev(`(()=>{const f=document.querySelector('#ed');f.body.value=JSON.stringify({source:'demo',unit:'C',tags:{area:'ui'},generator:{kind:'sine',offset:50,amplitude:10,period:60},detectors:[{kind:'LOW_LIMIT',limit:45,level:'WARNING'}]});f.requestSubmit()})()`); await sleep(2500);
+await ev(`(()=>{const f=document.querySelector('#ed');(()=>{const a=document.querySelector('#adv');a.value=JSON.stringify({source:'demo',unit:'C',tags:{area:'ui'},generator:{kind:'sine',offset:50,amplitude:10,period:60},detectors:[{kind:'LOW_LIMIT',limit:45,level:'WARNING'}]});a.dispatchEvent(new Event('input',{bubbles:true}))})();f.requestSubmit()})()`); await sleep(2500);
 console.log("AFTER SAVE:", await summary());
 await go("#users", 2000); console.log("USERS", await summary()); await shot("07-users");
 await go("#audit", 2000); console.log("AUDIT", await summary()); await shot("08-audit");

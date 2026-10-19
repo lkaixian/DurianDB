@@ -302,26 +302,32 @@ async function viewConfig(kind = "source", name) {
     const h = await api("GET", "/api/sources").catch(() => []);
     $("#health").innerHTML = h.length ? `<h3>Source health</h3><table class="stack"><thead><tr><th>Name</th><th>Type</th><th>Points</th><th>State</th><th>Connected</th><th>Dropped</th><th>Error</th></tr></thead><tbody>${h.map(s => `<tr><td data-label="Name">${esc(s.name)}</td><td data-label="Type">${esc(s.type)}</td><td class="num" data-label="Points">${s.points}</td><td class="${s.down ? "err" : ""}" data-label="State">${s.down ? "Down: " + esc(s.down) : "Up"}</td><td data-label="Connected">${s.connected == null ? "n/a" : s.connected ? "yes" : "no"}</td><td class="num" data-label="Dropped">${s.dropped ?? "n/a"}</td><td class="${s.error ? "err" : ""}" data-label="Error">${esc(s.error || "none")}</td></tr>`).join("")}</tbody></table>` : "";
   }
-  const cur = name === "_new" ? {name: "", ...firstTemplate(kind)} : items.find(i => i.name === name);
+  const sources = kind === "point" ? await api("GET", "/api/config/source").catch(() => []) : [];
+  const newPoint = () => { const s = sources[0], start = s ? POINT_PARTS[s.type].start() : {}; return {source: s ? s.name : "", ...POINT_BASE, ...start}; };
+  const cur = name === "_new" ? {name: "", ...(kind === "point" ? newPoint() : firstTemplate(kind))} : items.find(i => i.name === name);
   const {name: _n, ...body} = cur || {};
   $("#cfg").className = "";
   $("#cfg").innerHTML = `<ul class="list">${items.map(i => `<li><a class="btn" href="#config/${kind}/${encodeURIComponent(i.name)}" ${i.name === name ? 'aria-current="page"' : ""}>${esc(i.name)}</a></li>`).join("")}<li><a class="btn" href="#config/${kind}/_new">New ${KINDS[kind].toLowerCase().replace(/s$/, "")}</a></li></ul>
     ${cur ? `<form id="ed"><label>Name <input name="name" value="${esc(cur.name)}" ${name === "_new" ? "" : "readonly"} required pattern="[A-Za-z0-9_.\\-]{1,64}"></label>
-      ${name === "_new" && Object.keys(TEMPLATES[kind]).length > 1 ? `<label>Start from <select id="tpl">${Object.keys(TEMPLATES[kind]).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>` : ""}
-      <label>Settings (JSON) <textarea name="body" spellcheck="false">${esc(JSON.stringify(body, null, 2))}</textarea></label>
+      ${name === "_new" && kind !== "point" && Object.keys(TEMPLATES[kind]).length > 1 ? `<label>${kind === "source" ? "Source type" : "Start from"} <select id="tpl">${Object.keys(TEMPLATES[kind]).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>` : ""}
+      <div id="editor"></div>
       <div class="row"><button type="submit">Save</button>${name !== "_new" ? '<button type="button" id="del">Delete</button>' : ""}</div></form><div id="ed-msg" role="status"></div>`
       : '<p class="note">Choose an item, or create a new one. Saving validates every field and reloads the engine.</p>'}`;
   const msg = $("#ed-msg");
   if (!cur) return;
-  $("#tpl")?.addEventListener("change", e => { $("#ed").body.value = JSON.stringify(TEMPLATES[kind][e.target.value], null, 2); });
+  const mount = b => mountEditor($("#editor"), {kind, body: structuredClone(b), sources});
+  let editor = mount(body);
+  $("#tpl")?.addEventListener("change", e => { editor = mount(TEMPLATES[kind][e.target.value]); });
   const report = (ok, text, errs) => { msg.className = ok ? "" : "err"; msg.innerHTML = esc(text) + (errs ? `<ul class="errors">${errs.map(e => `<li><code>${esc(e.property)}</code>: ${esc(e.message)}</li>`).join("")}</ul>` : ""); };
   $("#ed").addEventListener("submit", async ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    let parsed;
-    try { parsed = JSON.parse(f.get("body")); } catch (e) { return report(false, "Settings are not valid JSON: " + e.message); }
+    const parsed = editor.body();
     try { await api("PUT", `/api/config/${kind}/${encodeURIComponent(f.get("name"))}`, parsed); location.hash = `#config/${kind}/${encodeURIComponent(f.get("name"))}`; if (name !== "_new") route(); }
-    catch (e) { report(false, e.status === 422 ? "Not saved. Fix these:" : e.message, e.errors); }
+    catch (e) {
+      const loose = e.status === 422 ? editor.showErrors(e.errors) : [];
+      report(false, e.status === 422 ? (loose.length ? "Not saved. Fix these:" : "Not saved. The problems are marked on the fields above.") : e.message, loose.length ? loose : null);
+    }
   });
   $("#del")?.addEventListener("click", async () => {
     if (!confirm(`Delete ${kind} "${name}"?`)) return;
