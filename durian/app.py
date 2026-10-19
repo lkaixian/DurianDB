@@ -131,6 +131,8 @@ class App:
                     s.write(p.name, v)
             except RuntimeError as ex:
                 raise ApiError(502, str(ex))
+            if hasattr(s, "override"):  # keep held values across engine rebuilds and restarts
+                self.store.put("override", p.name, {"value": v}) if v is not None else self.store.delete("override", p.name)
             self.store.audit(ident["name"], "set", f"{p.name}={v}")
             return 200, {"ok": True}
         if (method, a) == ("GET", "series"):

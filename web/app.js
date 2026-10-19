@@ -1,0 +1,286 @@
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const fmt = t => new Date(t * 1000).toLocaleTimeString();
+const main = $("#main");
+let me = {name: null, roles: ["anonymous"]}, timers = [];
+const isUser = () => me.roles.includes("user");
+const isAdmin = () => me.roles.includes("superadmin");
+
+async function api(method, path, body) {
+  let r;
+  try {
+    r = await fetch(path, {method, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body),
+      headers: method === "GET" ? {} : {"X-Requested-With": "durian", "Content-Type": "application/json"}});
+  } catch {
+    throw Object.assign(new Error("Cannot reach the DurianDB server. Is `python -m durian.server` running?"), {status: 0});
+  }
+  let data = null;
+  try { data = await r.json(); } catch { /* empty body */ }
+  if (!r.ok) throw Object.assign(new Error((data && data.error) || r.statusText), {status: r.status, errors: data && data.errors});
+  return data;
+}
+
+function stopTimers() { timers.forEach(clearInterval); timers = []; }
+function every(fn, ms) {
+  const run = async () => { try { await fn(); } catch (e) { if (e.status === 401 && me.name) { me = {name: null, roles: ["anonymous"]}; route(); } else showErr(e); } };
+  run();
+  timers.push(setInterval(run, ms));
+}
+function showErr(e, where) {
+  for (const el of where ? [where] : main.querySelectorAll("[data-live]")) { el.className = "status err"; el.textContent = e.message + " Retrying every few seconds."; }
+}
+
+// ---- navigation
+const VIEWS = {overview: viewOverview, history: viewHistory, config: viewConfig, users: viewUsers, audit: viewAudit, account: viewAccount};
+function nav(view) {
+  const items = me.name ? [["overview", "Overview"], ["history", "History"], ...(isAdmin() ? [["config", "Config"], ["users", "Users"], ["audit", "Audit"]] : []), ["account", me.name]] : [];
+  $("#nav").innerHTML = items.map(([v, l]) => `<a href="#${v}" ${v === view ? 'aria-current="page"' : ""}>${esc(l)}</a>`).join("");
+}
+function route() {
+  stopTimers();
+  const [view, ...rest] = (location.hash.slice(1) || "overview").split("/");
+  if (!me.name) { nav(""); return viewLogin(); }
+  const v = VIEWS[view] ? view : "overview";
+  if (["config", "users", "audit"].includes(v) && !isAdmin()) { location.hash = "#overview"; return; }
+  nav(v);
+  VIEWS[v](...rest.map(decodeURIComponent));
+  main.focus({preventScroll: true});
+}
+window.addEventListener("hashchange", route);
+
+// ---- login and account
+function viewLogin() {
+  main.innerHTML = `<section class="login" aria-labelledby="li-h"><h2 id="li-h">Log in</h2>
+    <form id="login"><label>Username <input name="username" autocomplete="username" required></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit">Log in</button><p id="li-msg" role="alert" class="err"></p></form></section>`;
+  $("#login").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    try { me = await api("POST", "/api/login", {username: f.get("username"), password: f.get("password")}); location.hash = "#overview"; route(); }
+    catch (e) { $("#li-msg").textContent = e.status === 429 ? "Too many failed attempts. Wait a few minutes." : e.message; }
+  });
+  $("#login input").focus();
+}
+
+function viewAccount() {
+  main.innerHTML = `<section aria-labelledby="ac-h"><h2 id="ac-h">Account: ${esc(me.name)}</h2>
+    <p class="note">Roles: ${esc(me.roles.join(", "))}</p>
+    <form id="pw" class="row"><input class="sr" name="username" value="${esc(me.name)}" autocomplete="username" readonly tabindex="-1" aria-hidden="true"><label>Current password <input name="old" type="password" autocomplete="current-password" required></label>
+    <label>New password (10+ characters) <input name="new" type="password" autocomplete="new-password" minlength="10" required></label>
+    <button type="submit">Change password</button></form><p id="pw-msg" role="status"></p>
+    <button id="logout" type="button">Log out</button></section>`;
+  $("#pw").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target), out = $("#pw-msg");
+    try { await api("POST", "/api/password", {old: f.get("old"), new: f.get("new")}); out.className = ""; out.textContent = "Password changed."; ev.target.reset(); }
+    catch (e) { out.className = "err"; out.textContent = (e.errors || []).map(x => x.message).join(" ") || e.message; }
+  });
+  $("#logout").addEventListener("click", async () => { await api("POST", "/api/logout", {}).catch(() => {}); me = {name: null, roles: ["anonymous"]}; location.hash = ""; route(); });
+}
+
+// ---- overview: alarms and live points
+function viewOverview() {
+  main.innerHTML = `<div class="grid">
+    <section aria-labelledby="al-h"><h2 id="al-h">Alarms <small id="al-count"></small></h2><div id="alarms" class="status" data-live>Loading alarms...</div></section>
+    <section aria-labelledby="pt-h"><h2 id="pt-h">Live points</h2>
+      <form id="filter" class="row"><label>Watch list <select id="f-wl"><option value="">All points</option></select></label>
+      <label>Tag <input id="f-tag" placeholder="area:boiler" autocomplete="off"></label></form>
+      <div id="points" class="status" data-live>Loading points...</div></section></div>`;
+  api("GET", "/api/watchlists").then(w => { $("#f-wl").insertAdjacentHTML("beforeend", w.map(x => `<option>${esc(x.name)}</option>`).join("")); }).catch(() => {});
+  ptSig = "";
+  $("#filter").addEventListener("input", () => { ptSig = ""; refreshOverview().catch(showErr); });
+  $("#alarms").addEventListener("click", async ev => {
+    const id = ev.target.dataset.ack;
+    if (!id) return;
+    ev.target.disabled = true;
+    try { await api("POST", `/api/events/${id}/ack`); await refreshOverview(); } catch (e) { ev.target.disabled = false; showErr(e, $("#alarms")); }
+  });
+  $("#points").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const name = ev.target.dataset.set, v = ev.target.value.value, out = ev.target.querySelector("output");
+    try { await api("POST", `/api/points/${encodeURIComponent(name)}/set`, {value: ev.submitter?.dataset.release ? null : Number(v)}); out.textContent = "sent"; }
+    catch (e) { out.textContent = e.message; }
+  });
+  every(refreshOverview, 2000);
+}
+
+async function refreshOverview() {
+  const q = new URLSearchParams();
+  if ($("#f-wl").value) q.set("watchlist", $("#f-wl").value);
+  if ($("#f-tag").value.includes(":")) q.set("tag", $("#f-tag").value.trim());
+  const [pts, evs] = await Promise.all([api("GET", "/api/points?" + q), api("GET", "/api/events")]);
+  renderPoints(pts, q.size > 0);
+  renderAlarms(evs);
+}
+
+function renderAlarms(evs) {
+  const box = $("#alarms"), open = evs.filter(e => e.acked_ts == null).length;
+  $("#al-count").textContent = evs.length ? `${open} unacknowledged of ${evs.length}` : "";
+  if (!evs.length) { box.className = "status"; box.textContent = "No alarms. One is raised when a point breaks a limit or stops reporting, and it stays here until someone acknowledges it."; return; }
+  box.className = "";
+  const state = e => e.acked_ts != null ? `Acknowledged by ${esc(e.acked_by)} at ${fmt(e.acked_ts)}` : e.cleared_ts != null ? `Returned to normal at ${fmt(e.cleared_ts)}` : "Active";
+  box.innerHTML = `<table class="stack"><thead><tr><th>Level</th><th>Point</th><th>Detail</th><th>Raised</th><th>State</th><th><span class="sr">Action</span></th></tr></thead><tbody>` +
+    evs.map(e => `<tr class="${e.acked_ts == null ? "open" : "done"}"><td class="lvl" data-label="Level">${esc(e.level_name)}</td><td data-label="Point">${esc(e.point)}</td>
+      <td class="num" data-label="Detail">${esc(e.message)}</td><td class="num" data-label="Raised">${fmt(e.ts)}</td><td data-label="State">${state(e)}</td>
+      <td>${e.acked_ts == null && isUser() ? `<button data-ack="${e.id}" aria-label="Acknowledge alarm on ${esc(e.point)} raised at ${fmt(e.ts)}">Acknowledge</button>` : ""}</td></tr>`).join("") + "</tbody></table>";
+}
+
+function spark(h, lim) {
+  if (h.length < 2) return "";
+  const vs = h.map(p => p.value).concat([lim.high, lim.low].filter(x => x != null)), lo = Math.min(...vs), hi = Math.max(...vs), span = (hi - lo) || 1;
+  const y = v => 52 - ((v - lo) / span) * 48, x = i => (i / (h.length - 1)) * 300;
+  const line = v => v == null ? "" : `<line class="lim" x1="0" x2="300" y1="${y(v)}" y2="${y(v)}"/>`;
+  return `<svg viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Recent values">${line(lim.high)}${line(lim.low)}<path class="line" d="${h.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.value).toFixed(1)).join("")}"/></svg>`;
+}
+
+let ptSig = "";
+function renderPoints(pts, filtered) {
+  const box = $("#points");
+  if (!pts.length) { ptSig = ""; box.className = "status"; box.textContent = filtered ? "No points match this filter." : "No points you can see yet. An administrator adds them under Config."; return; }
+  box.className = "";
+  const sig = pts.map(p => p.name + (p.settable ? "*" : "")).join();
+  if (sig !== ptSig) {  // rebuild only when the list changes, so typing in a set field is never interrupted
+    ptSig = sig;
+    box.innerHTML = pts.map(p => `<div class="pt" data-pt="${esc(p.name)}"><div class="head"><span>${esc(p.name)} <span class="tags">${esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(" "))}</span></span><span class="val num"></span></div><div class="spark"></div>
+      ${p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" type="number" step="any" required placeholder="value" aria-label="New value for ${esc(p.name)}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : ""}</div>`).join("");
+  }
+  for (const p of pts) {
+    const row = [...box.children].find(r => r.dataset.pt === p.name), v = row.querySelector(".val");
+    v.textContent = p.last == null ? "no value yet" : `${p.last}${p.unit ? " " + p.unit : ""}`;
+    v.classList.toggle("over", p.last != null && ((p.limits.high != null && p.last > p.limits.high) || (p.limits.low != null && p.last < p.limits.low)));
+    row.querySelector(".spark").innerHTML = spark(p.history, p.limits);
+  }
+}
+
+// ---- history chart
+const ROLL = {avg: "Average", min: "Minimum", max: "Maximum", last: "Last value", count: "Sample count"};
+function viewHistory() {
+  main.innerHTML = `<section aria-labelledby="h-h"><h2 id="h-h">History</h2><form id="hf" class="row"><label>Point <select id="h-point"></select></label>
+    <label>Window <select id="h-win"><option value="300">5 minutes</option><option value="3600" selected>1 hour</option><option value="86400">24 hours</option></select></label>
+    <label>Rollup <select id="h-roll">${Object.entries(ROLL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label></form>
+    <div id="hist" class="status" data-live>Loading history...</div></section>`;
+  let known = [];
+  $("#hf").addEventListener("change", () => draw(known).catch(e => showErr(e)));
+  every(async () => {
+    const pts = await api("GET", "/api/points");
+    if (pts.map(p => p.name).join() !== known.map(p => p.name).join()) {
+      const cur = $("#h-point").value;
+      $("#h-point").innerHTML = pts.map(p => `<option>${esc(p.name)}</option>`).join("");
+      if (pts.some(p => p.name === cur)) $("#h-point").value = cur;
+    }
+    known = pts;
+    await draw(pts);
+  }, 5000);
+}
+
+async function draw(pts) {
+  const box = $("#hist"), point = $("#h-point").value;
+  if (!point) { box.className = "status"; box.textContent = "No points yet. They appear here as soon as a data source reports a value."; return; }
+  const win = $("#h-win").value, roll = $("#h-roll").value, bucket = Math.max(1, Math.floor(win / 120));
+  const r = await api("GET", `/api/series?point=${encodeURIComponent(point)}&window=${win}&rollup=${roll}&bucket=${bucket}`);
+  const title = `${ROLL[roll]} of ${point}, per ${bucket} s, last ${$("#h-win").selectedOptions[0].text}`;
+  if (r.items.length < 2) { box.className = "status"; box.textContent = `${title}: not enough history yet (${r.items.length} bucket${r.items.length === 1 ? "" : "s"}).`; return; }
+  const lim = (pts.find(p => p.name === point) || {limits: {}}).limits, lims = roll === "count" ? [] : [lim.high, lim.low].filter(x => x != null);
+  const vals = r.items.map(i => i.value), all = vals.concat(lims);
+  let lo = Math.min(...all), hi = Math.max(...all); if (hi === lo) { hi += 1; lo -= 1; }
+  const L = 48, R = 8, T = 8, B = 22, W = 720, H = 260, t0 = r.items[0].ts, t1 = r.items[r.items.length - 1].ts;
+  const x = t => L + ((t - t0) / ((t1 - t0) || 1)) * (W - L - R), y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const f = v => Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1);
+  box.className = "";
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(title)}">
+    <line class="axis" x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}"/><line class="axis" x1="${L}" x2="${L}" y1="${T}" y2="${H - B}"/>
+    <text x="${L - 6}" y="${T + 9}" text-anchor="end">${f(hi)}</text><text x="${L - 6}" y="${H - B}" text-anchor="end">${f(lo)}</text>
+    <text x="${L}" y="${H - 6}">${fmt(t0)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${fmt(t1)}</text>
+    ${lims.map(v => `<line class="lim" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>`).join("")}
+    <path class="line" d="${r.items.map((i, k) => (k ? "L" : "M") + x(i.ts).toFixed(1) + " " + y(i.value).toFixed(1)).join("")}"/></svg>
+    <p class="note">${esc(title)}. Latest ${f(vals[vals.length - 1])}, range ${f(Math.min(...vals))} to ${f(Math.max(...vals))}${lims.length ? ", dashed lines are alarm limits" : ""}.</p>`;
+}
+
+// ---- config editor (administrators)
+const KINDS = {source: "Sources", point: "Points", handler: "Handlers", publisher: "Publishers", watchlist: "Watch lists"};
+const TEMPLATE = {
+  source: {type: "virtual", enabled: true, read_roles: ["user"]},
+  point: {source: "demo", unit: "", tags: {}, logging: "ON_CHANGE", tolerance: 0, settable: false, read_roles: ["user"], set_roles: [],
+    generator: {kind: "walk", start: 50, min: 0, max: 100, step: 1}, detectors: [{kind: "HIGH_LIMIT", limit: 80, level: "WARNING", duration: 0}]},
+  handler: {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true},
+  publisher: {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true},
+  watchlist: {tags: {area: "boiler"}, points: [], read_roles: ["user"]},
+};
+
+async function viewConfig(kind = "source", name) {
+  if (!KINDS[kind]) kind = "source";
+  main.innerHTML = `<section aria-labelledby="c-h"><h2 id="c-h">Config</h2>
+    <ul class="list">${Object.entries(KINDS).map(([k, l]) => `<li><a class="btn" href="#config/${k}" ${k === kind ? 'aria-current="page"' : ""}>${l}</a></li>`).join("")}</ul>
+    <div id="health"></div><div id="cfg" class="status" data-live>Loading...</div></section>`;
+  const items = await api("GET", `/api/config/${kind}`).catch(e => { showErr(e); return null; });
+  if (!items) return;
+  if (kind === "source") {
+    const h = await api("GET", "/api/sources").catch(() => []);
+    $("#health").innerHTML = h.length ? `<h3>Source health</h3><table class="stack"><thead><tr><th>Name</th><th>Type</th><th>Points</th><th>Connected</th><th>Dropped</th><th>Error</th></tr></thead><tbody>${h.map(s => `<tr><td data-label="Name">${esc(s.name)}</td><td data-label="Type">${esc(s.type)}</td><td class="num" data-label="Points">${s.points}</td><td data-label="Connected">${s.connected == null ? "n/a" : s.connected ? "yes" : "no"}</td><td class="num" data-label="Dropped">${s.dropped ?? "n/a"}</td><td class="${s.error ? "err" : ""}" data-label="Error">${esc(s.error || "none")}</td></tr>`).join("")}</tbody></table>` : "";
+  }
+  const cur = name === "_new" ? {name: "", ...TEMPLATE[kind]} : items.find(i => i.name === name);
+  const {name: _n, ...body} = cur || {};
+  $("#cfg").className = "";
+  $("#cfg").innerHTML = `<ul class="list">${items.map(i => `<li><a class="btn" href="#config/${kind}/${encodeURIComponent(i.name)}" ${i.name === name ? 'aria-current="page"' : ""}>${esc(i.name)}</a></li>`).join("")}<li><a class="btn" href="#config/${kind}/_new">New ${KINDS[kind].toLowerCase().replace(/s$/, "")}</a></li></ul>
+    ${cur ? `<form id="ed"><label>Name <input name="name" value="${esc(cur.name)}" ${name === "_new" ? "" : "readonly"} required pattern="[A-Za-z0-9_.\\-]{1,64}"></label>
+      <label>Settings (JSON) <textarea name="body" spellcheck="false">${esc(JSON.stringify(body, null, 2))}</textarea></label>
+      <div class="row"><button type="submit">Save</button>${name !== "_new" ? '<button type="button" id="del">Delete</button>' : ""}</div></form><div id="ed-msg" role="status"></div>`
+      : '<p class="note">Choose an item, or create a new one. Saving validates every field and reloads the engine.</p>'}`;
+  const msg = $("#ed-msg");
+  if (!cur) return;
+  const report = (ok, text, errs) => { msg.className = ok ? "" : "err"; msg.innerHTML = esc(text) + (errs ? `<ul class="errors">${errs.map(e => `<li><code>${esc(e.property)}</code>: ${esc(e.message)}</li>`).join("")}</ul>` : ""); };
+  $("#ed").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    let parsed;
+    try { parsed = JSON.parse(f.get("body")); } catch (e) { return report(false, "Settings are not valid JSON: " + e.message); }
+    try { await api("PUT", `/api/config/${kind}/${encodeURIComponent(f.get("name"))}`, parsed); location.hash = `#config/${kind}/${encodeURIComponent(f.get("name"))}`; if (name !== "_new") route(); }
+    catch (e) { report(false, e.status === 422 ? "Not saved. Fix these:" : e.message, e.errors); }
+  });
+  $("#del")?.addEventListener("click", async () => {
+    if (!confirm(`Delete ${kind} "${name}"?`)) return;
+    try { await api("DELETE", `/api/config/${kind}/${encodeURIComponent(name)}`); location.hash = `#config/${kind}`; }
+    catch (e) { report(false, e.message); }
+  });
+}
+
+// ---- users and audit
+async function viewUsers() {
+  main.innerHTML = `<section aria-labelledby="u-h"><h2 id="u-h">Users</h2><div id="ul" class="status" data-live>Loading users...</div>
+    <h2>Add or update a user</h2><p class="note">Leave the password empty to keep an existing user's password. Roles: superadmin, user, or your own names used in point read and set roles.</p>
+    <form id="uf" class="row"><label>Name <input name="name" autocomplete="off" required pattern="[A-Za-z0-9_.\\-]{1,32}"></label><label>Roles (comma separated) <input name="roles" value="user" autocomplete="off" required></label>
+    <label>Password (10+ characters) <input name="password" type="password" autocomplete="new-password"></label><button type="submit">Save user</button></form><p id="um" role="status"></p></section>`;
+  const load = async () => {
+    const us = await api("GET", "/api/users");
+    $("#ul").className = "";
+    $("#ul").innerHTML = `<table class="stack"><thead><tr><th>Name</th><th>Roles</th><th><span class="sr">Action</span></th></tr></thead><tbody>${us.map(u => `<tr><td data-label="Name">${esc(u.name)}</td><td data-label="Roles">${esc(u.roles.join(", "))}</td><td>${u.name === me.name ? "" : `<button data-del="${esc(u.name)}" aria-label="Delete user ${esc(u.name)}">Delete</button>`}</td></tr>`).join("")}</tbody></table>`;
+  };
+  $("#ul").addEventListener("click", async ev => {
+    const n = ev.target.dataset.del;
+    if (n && confirm(`Delete user "${n}"?`)) { try { await api("DELETE", `/api/users/${encodeURIComponent(n)}`); await load(); } catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; } }
+  });
+  $("#uf").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target), out = $("#um"), body = {roles: f.get("roles").split(",").map(s => s.trim()).filter(Boolean)};
+    if (f.get("password")) body.password = f.get("password");
+    try { await api("PUT", `/api/users/${encodeURIComponent(f.get("name"))}`, body); out.className = ""; out.textContent = "Saved."; ev.target.reset(); await load(); }
+    catch (e) { out.className = "err"; out.textContent = (e.errors || []).map(x => `${x.property}: ${x.message}`).join(". ") || e.message; }
+  });
+  await load().catch(e => showErr(e));
+}
+
+async function viewAudit() {
+  main.innerHTML = `<section aria-labelledby="a-h"><h2 id="a-h">Audit trail <small>newest first, last 200</small></h2><div id="au" class="status" data-live>Loading...</div></section>`;
+  const rows = await api("GET", "/api/audit").catch(e => { showErr(e); return null; });
+  if (!rows) return;
+  $("#au").className = rows.length ? "" : "status";
+  $("#au").innerHTML = rows.length ? `<table class="stack"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Detail</th></tr></thead><tbody>${rows.map(r => `<tr><td class="num" data-label="Time">${new Date(r.ts * 1000).toLocaleString()}</td><td data-label="User">${esc(r.user)}</td><td data-label="Action">${esc(r.action)}</td><td data-label="Detail">${esc(r.detail)}</td></tr>`).join("")}</tbody></table>` : "Nothing recorded yet. Config changes, set-value commands, acknowledgements and user changes appear here.";
+}
+
+// ---- start
+(async () => {
+  try { me = await api("GET", "/api/me"); } catch (e) { main.innerHTML = ""; const p = document.createElement("p"); p.className = "status err"; p.textContent = e.message; main.append(p); return; }
+  route();
+})();
