@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import math
 import re
+import secrets
 import time
 from collections import Counter
 from pathlib import Path
@@ -31,6 +32,7 @@ class ApiError(Exception):
 
 SYSTEM = "(system)"  # events about DurianDB itself rather than a point, visible to superadmins only
 PENDING_MAX = 200_000
+CONFIRM_SECONDS = 30
 
 
 class App:
@@ -38,6 +40,7 @@ class App:
         self.store, self.auth = store, Auth(store)
         self.maint = Maintenance(store, backup_dir or Path("backups"))
         self.engine, self.outputs, self.open_events = None, None, []
+        self.confirms = {}  # token -> ((user, point, value), expiry) for writes waiting for their second step
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
         self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
         self.reload()
@@ -94,6 +97,34 @@ class App:
                 if ev.held is None:
                     self.outputs.on_event(ev, "cleared")
             self.open_events = still
+
+    # ---- safe control
+    @staticmethod
+    def set_limit(p, which):
+        """Lowest or highest value a write may carry: the point's own limit, else its engineering range."""
+        v = p.meta.get("set_" + which)
+        return v if v is not None else p.meta.get("eu_low" if which == "min" else "eu_high")
+
+    def check_setpoint(self, p, v):
+        if v is None:  # releasing a point is always allowed
+            return
+        lo, hi, step = self.set_limit(p, "min"), self.set_limit(p, "max"), p.meta.get("max_step")
+        if (lo is not None and v < lo) or (hi is not None and v > hi):
+            raise ApiError(422, f"{p.name} accepts values from {lo if lo is not None else 'any'} to {hi if hi is not None else 'any'}")
+        if step is not None and p.last is not None and abs(v - p.last) > step:
+            raise ApiError(422, f"{p.name} may change by at most {step} per write (now {p.last}); step towards the target")
+
+    def confirm_token(self, ident, point, v):
+        now = time.time()
+        self.confirms = {k: x for k, x in self.confirms.items() if x[1] > now}  # drop expired
+        tok = secrets.token_urlsafe(12)
+        self.confirms[tok] = ((ident["name"], point, v), now + CONFIRM_SECONDS)
+        return tok
+
+    def confirmed(self, ident, point, v, tok):
+        """True once, for the same user, point and value that asked for the token, while it is fresh."""
+        got = self.confirms.pop(tok, None) if isinstance(tok, str) else None
+        return bool(got and got[1] > time.time() and got[0] == (ident["name"], point, v))
 
     def _hold_for(self, point, pts, ts):
         """Why an alarm on this point is recorded but not announced right now, or None."""
@@ -155,6 +186,9 @@ class App:
         cfg = p.meta.get("detector_cfg", [])
         limit = lambda kind: next((d["limit"] for d in cfg if d.get("kind") == kind), None)
         return {"name": p.name, "source": s.name, "unit": p.meta.get("unit", ""), "tags": p.tags, "last": p.last,
+                "description": p.meta.get("description", ""), "decimals": p.meta.get("decimals"),
+                "eu": {"low": p.meta.get("eu_low"), "high": p.meta.get("eu_high")},
+                "set_limits": {"min": self.set_limit(p, "min"), "max": self.set_limit(p, "max"), "max_step": p.meta.get("max_step"), "confirm": bool(p.meta.get("confirm"))} if p.meta.get("settable") else None,
                 "last_ts": p.last_ts, "received": p.last_recv, "quality": Quality(p.quality).name.lower(), "settable": p.meta.get("settable", False),
                 "limits": {"high": limit("HIGH_LIMIT"), "low": limit("LOW_LIMIT")},
                 "history": [{"ts": t, "value": v} for t, v in list(p.cache)[-60:]]}
@@ -217,6 +251,10 @@ class App:
                 raise ApiError(400, "value must be a number, or null to release the point")
             if not hasattr(s, "write"):
                 raise ApiError(400, "this source cannot write")
+            self.check_setpoint(p, v)
+            if p.meta.get("confirm") and v is not None and not self.confirmed(ident, p.name, v, (body or {}).get("confirm")):
+                return 202, {"confirm": self.confirm_token(ident, p.name, v), "expires_in": CONFIRM_SECONDS,
+                             "message": f"Repeat the request with this confirm token to set {p.name} to {v}"}
             try:
                 with self.store.lock:
                     s.write(p.name, v)
@@ -224,7 +262,7 @@ class App:
                 raise ApiError(502, str(ex))
             if hasattr(s, "override"):  # keep held values across engine rebuilds and restarts
                 self.store.put("override", p.name, {"value": v}) if v is not None else self.store.delete("override", p.name)
-            self.store.audit(ident["name"], "set", f"{p.name}={v}" + (f" via token {ident['token']}" if scope else ""))
+            self.store.audit(ident["name"], "set", f"{p.name}: {p.last} -> {v}" + (f" via token {ident['token']}" if scope else ""))
             return 200, {"ok": True}
         if (method, a) == ("GET", "series"):
             return 200, self.series(ident, query)

@@ -222,6 +222,23 @@ def validate_point(name, b, store):
                 make_detector(d)
             except (ValueError, TypeError, AttributeError) as ex:
                 add(f"detectors[{i}]", str(ex))
+    if not (isinstance(b.get("description", ""), str) and len(b.get("description", "")) <= 200):
+        add("description", "must be text, up to 200 characters")
+    for k in ("eu_low", "eu_high", "set_min", "set_max"):
+        if k in b and not _num(b[k]):
+            add(k, "must be a number")
+    for lo, hi in (("eu_low", "eu_high"), ("set_min", "set_max")):
+        if _num(b.get(lo)) and _num(b.get(hi)) and b[lo] >= b[hi]:
+            add(hi, f"must be greater than {lo}")
+    d = b.get("decimals")
+    if "decimals" in b and not (isinstance(d, int) and not isinstance(d, bool) and 0 <= d <= 6):
+        add("decimals", "must be a whole number from 0 to 6")
+    if "max_step" in b and not (_num(b["max_step"]) and b["max_step"] > 0):
+        add("max_step", "must be a number greater than zero")
+    if not isinstance(b.get("confirm", False), bool):
+        add("confirm", "must be true or false")
+    if not b.get("settable") and any(k in b for k in ("set_min", "set_max", "max_step", "confirm")):
+        add("settable", "set limits and confirmation only apply to a settable point")
     sw = b.get("suppress_when")
     if sw is not None and not (isinstance(sw, dict) and isinstance(sw.get("point"), str) and sw["point"] != name
                                and sw.get("op") in (">", "<", "==") and _num(sw.get("value"))):
@@ -277,6 +294,9 @@ def make_point(name, b, source_name):
               "detector_cfg": b.get("detectors", [])}
     for k in ("modbus", "http", "sql", "scale", "suppress_when"):
         if b.get(k):
+            p.meta[k] = b[k]
+    for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm"):  # zero is a real value here
+        if k in b:
             p.meta[k] = b[k]
     return p
 
