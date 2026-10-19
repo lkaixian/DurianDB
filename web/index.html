@@ -70,15 +70,16 @@ async function api(path,opts){
 
 function spark(h,limit){
   if(h.length<2) return "";
-  const vs=h.map(p=>p.value).concat(limit), lo=Math.min(...vs), hi=Math.max(...vs), span=(hi-lo)||1;
+  const hasLim=limit!=null;
+  const vs=h.map(p=>p.value).concat(hasLim?[limit]:[]), lo=Math.min(...vs), hi=Math.max(...vs), span=(hi-lo)||1;
   const y=v=>52-((v-lo)/span)*48, x=i=>(i/(h.length-1))*300;
   const d=h.map((p,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(p.value).toFixed(1)).join("");
-  return `<svg viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Recent values"><line class="lim" x1="0" x2="300" y1="${y(limit)}" y2="${y(limit)}"/><path class="line" d="${d}"/></svg>`;
+  return `<svg viewBox="0 0 300 56" preserveAspectRatio="none" role="img" aria-label="Recent values">${hasLim?`<line class="lim" x1="0" x2="300" y1="${y(limit)}" y2="${y(limit)}"/>`:""}<path class="line" d="${d}"/></svg>`;
 }
 
 function renderPoints(pts){
   $("points").className="";
-  $("points").innerHTML=pts.length?pts.map(p=>`<div class="pt"><div><span>${esc(p.name)}</span><span class="val num ${p.last>p.limit?"over":""}">${p.last??"no value yet"}</span></div>${spark(p.history,p.limit)}</div>`).join(""):'<p class="status">No points configured. Add one to a data source in <code>durian/server.py</code>.</p>';
+  $("points").innerHTML=pts.length?pts.map(p=>`<div class="pt"><div><span>${esc(p.name)}</span><span class="val num ${p.limit!=null&&p.last>p.limit?"over":""}">${p.last??"no value yet"}</span></div>${spark(p.history,p.limit)}</div>`).join(""):'<p class="status">No points configured. Add one to a data source in <code>durian/server.py</code>.</p>';
 }
 
 function renderAlarms(evs){

@@ -1,5 +1,6 @@
 ﻿"""DurianDB server: stdlib HTTP + SQLite around durian.core. Run: python -m durian.server"""
 import json
+import os
 import random
 import sqlite3
 import threading
@@ -8,10 +9,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import Engine, HighLimit, Level, Point, Source
+from .mqtt_source import MqttSource
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 DB = Path(__file__).resolve().parent.parent / "durian.db"
-LIMITS = {"boiler-temp": (90.0, Level.URGENT), "line-pressure": (7.5, Level.WARNING)}
+LIMITS = {"boiler-temp": (90.0, Level.URGENT), "line-pressure": (7.5, Level.WARNING),
+          "mqtt-temp": (90.0, Level.URGENT)}
 
 
 class Simulated(Source):
@@ -37,17 +40,26 @@ create table if not exists events(id integer primary key, point text, level int,
   message text, ts real, acked_ts real);
 """)
 engine = Engine()
-src = Simulated()
-engine.sources.append(src)
-stored = {"history": {n: 0 for n in src.points}, "events": 0}
+engine.sources.append(Simulated())
+CREDS = Path(os.environ.get("DURIAN_MQTT_CREDS", WEB.parent / "lab" / "mqtt" / "creds.json"))
+if CREDS.exists():  # TLS broker from tools/mqtt_lab.py; skipped when not set up
+    c = json.loads(CREDS.read_text())
+    engine.sources.append(MqttSource("mqtt", c["host"], c["port"], c["ca"], c["user"], c["password"],
+                                     detectors={"mqtt-temp": [HighLimit(*LIMITS["mqtt-temp"])]}))
+stored = {"history": {}, "events": 0}
+
+
+def all_points():
+    return {n: p for s in engine.sources for n, p in s.points.items()}
 
 
 def tick():
     while True:
         with lock:
             engine.tick(time.time())
-            for n, p in src.points.items():
-                for ts, v in p.history[stored["history"][n]:]:
+            for n, p in all_points().items():
+                done = stored["history"].get(n, 0)
+                for ts, v in p.history[done:]:
                     db.execute("insert into history values (?,?,?)", (n, ts, v))
                 stored["history"][n] = len(p.history)
             for e in engine.events[stored["events"]:]:
@@ -77,9 +89,9 @@ class Handler(BaseHTTPRequestHandler):
         with lock:
             if self.path == "/api/points":
                 out = []
-                for n, p in src.points.items():
+                for n, p in all_points().items():
                     h = rows("select ts, value from history where point=? order by ts desc limit 60", (n,))[::-1]
-                    out.append({"name": n, "last": p.last, "limit": LIMITS[n][0], "history": h})
+                    out.append({"name": n, "last": p.last, "limit": LIMITS.get(n, (None,))[0], "history": h})
                 return self.send(200, out)
             if self.path == "/api/events":
                 return self.send(200, rows("select * from events order by acked_ts is not null, level desc, ts desc limit 100"))
