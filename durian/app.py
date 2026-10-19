@@ -14,7 +14,7 @@ from collections import Counter
 from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
-from . import windows
+from . import pointcsv, windows
 from .config import (build_engine, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .dashboards import validate_dashboard
@@ -315,6 +315,12 @@ class App:
             return 200, {"ok": True}
         if (method, a) == ("GET", "series"):
             return 200, self.series(ident, query)
+        if (method, a, b) == ("GET", "export", "points"):
+            need(admin)
+            return 200, Raw(pointcsv.export(self.store.list("point")), "text/csv; charset=utf-8", "points.csv")
+        if (method, a, b) == ("POST", "import", "points"):
+            need(admin)
+            return self.import_points(query, body, ident)
         if (method, a, b) == ("GET", "export", "history"):
             return self.history_csv(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
@@ -570,6 +576,26 @@ class App:
             self.store.audit(ident["name"], "config.import", json.dumps({k: v for k, v in summary.items() if any(v.values())}))
             self.reload()
         return 200, {"applied": apply_, "summary": summary}
+
+    def import_points(self, query, text, ident):
+        """Points from a spreadsheet. Every row is checked first; a plain call is a dry run, ?apply=1 writes and reloads once."""
+        if not isinstance(text, str):
+            raise ApiError(400, "send the CSV as text (Content-Type text/csv)")
+        rows, errs = pointcsv.parse(text)
+        for line, (name, body) in enumerate(rows, 2):
+            for e in validate_point(name, body, self.store):
+                errs.append({"line": line, "point": name, "property": e["property"], "message": e["message"]})
+        if errs:
+            raise ApiError(422, "validation failed", errs[:100])
+        have = {p["name"] for p in self.store.list("point")}
+        summary = {"created": sum(1 for n, _ in rows if n not in have), "updated": sum(1 for n, _ in rows if n in have)}
+        if query.get("apply") == "1":
+            with self.store.lock:
+                for name, body in rows:
+                    self.store.put("point", name, body)
+                self.store.audit(ident["name"], "points.import", json.dumps(summary))
+                self.reload()
+        return 200, {"applied": query.get("apply") == "1", **summary}
 
     def select_points(self, ident, query):
         """Points the caller may see, narrowed by ?watchlist= and ?tag=key:value."""
