@@ -22,10 +22,10 @@ Written 2026-10-20. Sources are the public documentation pages at docs.radixiot.
 | State, range, change, no-change detectors | `STATE`, `RANGE`, `CHANGE`, `NO_CHANGE` | They answer real plant questions: a pump in Fault, a value out of band, a frozen sensor. Same on-delay, off-delay and level model as the others. |
 | Smoothness and CUSUM detectors | Not built | Statistical detectors that need tuning guidance the pages do not give. |
 | Maintenance events (drop, acknowledge, suppress) | Config kind `maintenance` with those three modes, scope by points, tags or sources, schedules once, weekly or manual | Planned work should not page anyone. Held alarms reuse the shelving machinery, so an alarm still active when the window ends is announced. |
-| Interval logging | Planned | Needed for slow, steady signals. |
-| Rollups beyond avg/min/max/last/count | Planned: first, sum, delta | Counters and totals. |
-| Set-point event handler | Planned, going through the same limits and confirm rules as an operator write | Closing a loop on an alarm is common, and it must not be a way around safe control. |
-| Email event handler | Planned, SMTP from a credentials file | The first thing an operator without Node-RED expects. |
+| Interval logging | `logging: INTERVAL` with the last value or the average, minimum or maximum of each period | Slow, steady signals do not need every update stored. |
+| Rollups beyond avg/min/max/last/count | `first`, `sum`, `delta` (last minus first of the bucket) | Counters and totals. Counter resets inside a bucket are not corrected. |
+| Set-point event handler | `setpoint` handler: value on raise, value or release on return to normal, through the same limits and step size as an operator write | Closing a loop on an alarm is common, and it must not be a way around safe control. The confirm step is skipped because no person is there to confirm. |
+| Email event handler | `email` handler with SMTP (none, STARTTLS, SSL), credentials file, scope | The first thing an operator without Node-RED expects. Recipient lists per group and templates are not built. |
 | Process and script handlers, scripting meta points | Declined | They run arbitrary code or commands on the server. The expression language in `calc.py` covers calculations without that risk, and the webhook handler reaches anything external. |
 | Hierarchy watch lists, point folders | Not built | Tags and watch lists already group points. |
 | HTTP sender, Slack, gRPC publishers | Not built | MQTT and the webhook cover outbound data and alarms. |

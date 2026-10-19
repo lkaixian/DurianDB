@@ -1,37 +1,78 @@
-"""Event handlers (webhook) and publishers (MQTT over TLS), built from stored config.
+"""Event handlers (webhook, email, set point) and publishers (MQTT over TLS), built from stored config.
 
-Delivery never blocks the engine: webhooks go through a bounded queue and one worker thread.
+Delivery never blocks the engine: everything goes through a bounded queue and one worker thread.
+A handler may be limited to some points, tags or sources with `scope`, like a maintenance window.
 """
+import email.message
 import json
 import logging
 import queue
+import re
+import smtplib
+import ssl
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
+from . import windows
 from .config import load_creds
-from .core import Level, Quality
+from .core import SOURCE, Level, Quality
 from .mqtt_source import tls_client
 from .polled import NoRedirect
 
 log = logging.getLogger("durian.outputs")
 
-
 opener = urllib.request.build_opener(NoRedirect)
+ADDRESS = re.compile(r"^[^@\s<>,;]{1,64}@[^@\s<>,;]{1,255}$")
+HANDLER_TYPES = ("webhook", "email", "setpoint")
+SECURITY = ("none", "starttls", "ssl")
+
+
+def _num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 def validate_handler(name, b):
     e, add = [], lambda p, m: e.append({"property": p, "message": m})
-    if b.get("type") != "webhook":
-        add("type", "must be 'webhook'")
-    u = urllib.parse.urlparse(b.get("url", "")) if isinstance(b.get("url"), str) else None
-    if not u or u.scheme not in ("http", "https") or not u.hostname:
-        add("url", "must be an http or https URL")
+    kind = b.get("type")
+    if kind not in HANDLER_TYPES:
+        add("type", f"must be one of {list(HANDLER_TYPES)}")
     if b.get("min_level", "WARNING") not in Level.__members__:
         add("min_level", f"must be one of {list(Level.__members__)}")
     if not isinstance(b.get("enabled", True), bool):
         add("enabled", "must be true or false")
+    sc = b.get("scope")
+    if sc is not None and not (isinstance(sc, dict) and all(isinstance(sc.get(k, []), list) and all(isinstance(x, str) for x in sc.get(k, [])) for k in ("points", "sources"))
+                               and isinstance(sc.get("tags", {}), dict)):
+        add("scope", "must be {points: [...], tags: {...}, sources: [...]}; leave it out for every alarm")
+    if kind == "webhook":
+        u = urllib.parse.urlparse(b.get("url", "")) if isinstance(b.get("url"), str) else None
+        if not u or u.scheme not in ("http", "https") or not u.hostname:
+            add("url", "must be an http or https URL")
+    elif kind == "email":
+        to = b.get("to")
+        if not (isinstance(to, list) and 1 <= len(to) <= 20 and all(isinstance(a, str) and ADDRESS.match(a) for a in to)):
+            add("to", "must be 1 to 20 email addresses")
+        if not (isinstance(b.get("from"), str) and ADDRESS.match(b["from"])):
+            add("from", "must be an email address")
+        s = b.get("smtp")
+        if not (isinstance(s, dict) and isinstance(s.get("host"), str) and s["host"] and _num(s.get("port", 25)) and 1 <= s.get("port", 25) <= 65535 and s.get("security", "none") in SECURITY):
+            add("smtp", f"must be {{host, port, security: {', '.join(SECURITY)}}}")
+        if "creds" in b and not (isinstance(b["creds"], str) and Path(b["creds"]).is_file()):
+            add("creds", "must be the path of a JSON file with user and password")
+        if not isinstance(b.get("on_clear", False), bool):
+            add("on_clear", "must be true or false")
+    elif kind == "setpoint":
+        if not (isinstance(b.get("point"), str) and 0 < len(b["point"]) <= 64):
+            add("point", "name the point to set")
+        if not _num(b.get("value")):
+            add("value", "give the number to write when the alarm is raised")
+        if "clear_value" in b and not _num(b["clear_value"]):
+            add("clear_value", "must be a number")
+        if not isinstance(b.get("release_on_clear", False), bool):
+            add("release_on_clear", "must be true or false")
     return e
 
 
@@ -61,9 +102,13 @@ def validate_publisher(name, b, store):
 
 
 class Outputs:
-    def __init__(self, store):
-        self.webhooks = [h for h in store.list("handler") if h.get("enabled", True)]
+    """`resolve(point name)` returns (tags, source name) so a handler's scope can be checked; `setter(point, value, who)` performs a set-point handler's write."""
+
+    def __init__(self, store, resolve=None, setter=None):
+        self.handlers = [h for h in store.list("handler") if h.get("enabled", True)]
+        self.resolve, self.setter = resolve or (lambda name: ({}, None)), setter
         self.q = queue.Queue(maxsize=1000)
+        self.failed = 0  # deliveries that did not work, for the health view
         self.publishers = []
         for p in store.list("publisher"):
             if not p.get("enabled", True):
@@ -84,30 +129,82 @@ class Outputs:
             if "*" in names or point.name in names:
                 cl.publish(prefix + point.name, json.dumps({"value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}), qos=1)
 
+    def _in_scope(self, h, ev):
+        sc = h.get("scope")
+        if not sc:
+            return True
+        if ev.point.startswith(SOURCE):
+            return windows.covers({"scope": sc}, ev.point, source=ev.point[len(SOURCE):])
+        tags, source = self.resolve(ev.point)
+        return windows.covers({"scope": sc}, ev.point, tags, source)
+
+    def _put(self, item):
+        try:
+            self.q.put_nowait(item)
+        except queue.Full:
+            self.failed += 1
+            log.warning("output queue full, dropping %s", item[0])
+
     def on_event(self, ev, kind):
-        for h in self.webhooks:
-            if ev.level >= Level[h.get("min_level", "WARNING")]:
-                body = {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message,
-                        "ts": ev.ts, "cleared_ts": ev.cleared_ts}
-                try:
-                    self.q.put_nowait((h["url"], body))
-                except queue.Full:
-                    log.warning("webhook queue full, dropping event for %s", ev.point)
+        for h in self.handlers:
+            if ev.level < Level[h.get("min_level", "WARNING")] or not self._in_scope(h, ev):
+                continue
+            t = h.get("type", "webhook")
+            if t == "webhook":
+                self._put(("webhook", h["url"], {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message, "ts": ev.ts, "cleared_ts": ev.cleared_ts}))
+            elif t == "email" and (kind == "raised" or h.get("on_clear")):
+                self._put(("mail", h, ev, kind))
+            elif t == "setpoint" and self.setter:
+                if kind == "raised":
+                    self._put(("set", h["point"], float(h["value"]), f"handler {h['name']}"))
+                elif "clear_value" in h:
+                    self._put(("set", h["point"], float(h["clear_value"]), f"handler {h['name']}"))
+                elif h.get("release_on_clear"):
+                    self._put(("set", h["point"], None, f"handler {h['name']}"))
+
+    @staticmethod
+    def message(h, ev, kind):
+        m = email.message.EmailMessage()
+        m["From"], m["To"] = h["from"], ", ".join(h["to"])
+        m["Subject"] = f"[{ev.level.name}] {ev.point}: {ev.message}" + ("" if kind == "raised" else " (back to normal)")
+        m.set_content(f"{'Alarm raised' if kind == 'raised' else 'Alarm returned to normal'}\n\nPoint: {ev.point}\nLevel: {ev.level.name}\nDetail: {ev.message}\n"
+                      f"Raised at (epoch seconds): {ev.ts:.0f}\n")
+        return m
+
+    def _send_mail(self, h, ev, kind):
+        s = h["smtp"]
+        creds = json.loads(Path(h["creds"]).read_text()) if h.get("creds") else {}
+        cls = smtplib.SMTP_SSL if s.get("security") == "ssl" else smtplib.SMTP
+        kw = {"context": ssl.create_default_context()} if s.get("security") == "ssl" else {}
+        with cls(s["host"], int(s.get("port", 25)), timeout=10, **kw) as c:
+            if s.get("security") == "starttls":
+                c.starttls(context=ssl.create_default_context())
+            if creds.get("user"):
+                c.login(creds["user"], creds.get("password", ""))
+            c.send_message(self.message(h, ev, kind))
 
     def _work(self):
         while True:
-            url, body = self.q.get()
-            if url is None:
-                return
-            req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
-                                         headers={"Content-Type": "application/json"})
+            item = self.q.get()
             try:
-                opener.open(req, timeout=5).read(1024)
-            except (urllib.error.URLError, OSError, ValueError) as ex:
-                log.warning("webhook failed: %s", type(ex).__name__)
+                if item[0] == "stop":
+                    return
+                if item[0] == "webhook":
+                    _, url, body = item
+                    opener.open(urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"}), timeout=5).read(1024)
+                elif item[0] == "mail":
+                    self._send_mail(*item[1:])
+                elif item[0] == "set":
+                    self.setter(*item[1:])
+            except (urllib.error.URLError, OSError, ValueError, smtplib.SMTPException) as ex:
+                self.failed += 1
+                log.warning("%s delivery failed: %s", item[0], type(ex).__name__)
+            except Exception as ex:  # a handler bug must not stop the worker
+                self.failed += 1
+                log.warning("%s delivery crashed: %s", item[0], type(ex).__name__)
 
     def stop(self):
-        self.q.put((None, None))
+        self.q.put(("stop",))
         for cl, _, _ in self.publishers:
             cl.loop_stop()
             cl.disconnect()

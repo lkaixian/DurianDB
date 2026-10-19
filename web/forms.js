@@ -156,9 +156,26 @@ const MAINT_GROUPS = body => {
 const GROUPS = {
   maintenance: MAINT_GROUPS,
   source: (body) => [...SOURCE_GROUPS._common(body), ...(SOURCE_GROUPS[body.type] || (() => []))(body)],
-  handler: () => [{title: "Webhook", fields: [
-    F("enabled", "Enabled", "check"), F("url", "URL", "text", {hint: "Alarms are posted here as JSON."}),
-    F("min_level", "Send from level", "select", {options: opts(...LEVELS)})]}],
+  handler: body => [
+    {title: {webhook: "Webhook", email: "Email", setpoint: "Set a point"}[body.type] || "Handler", fields: [
+      F("enabled", "Enabled", "check"),
+      F("min_level", "Act from level", "select", {options: opts(...LEVELS)}),
+      ...(body.type === "email" ? [
+        F("to", "To", "list", {hint: "Email addresses, comma separated."}), F("from", "From", "text"),
+        F("smtp.host", "SMTP server", "text"), F("smtp.port", "SMTP port", "int", {hint: "25, 587 or 465."}),
+        F("smtp.security", "Security", "select", {options: opts(["none", "None"], ["starttls", "STARTTLS"], ["ssl", "SSL/TLS"])}),
+        F("creds", "Credentials file", "text", {optional: true, hint: "Optional JSON file with user and password, so the password is not stored in the settings."}),
+        F("on_clear", "Also send when the alarm returns to normal", "check")]
+        : body.type === "setpoint" ? [
+        F("point", "Point to set", "text", {hint: "It must be settable. The same limits and step size as an operator apply; the confirm step does not."}),
+        F("value", "Value when the alarm is raised", "number"),
+        F("clear_value", "Value when it returns to normal", "number", {optional: true}),
+        F("release_on_clear", "Release the point when it returns to normal", "check", {hint: "Used when there is no value above."})]
+        : [F("url", "URL", "text", {hint: "Alarms are posted here as JSON."})])]},
+    {title: "Which alarms", fields: [
+      F("scope.points", "Points", "list", {optional: true, hint: "Leave all three empty for every alarm."}),
+      F("scope.tags", "Tags", "tags", {optional: true, hint: "Points with all of these tags, for example area:boiler."}),
+      F("scope.sources", "Sources", "list", {optional: true})]}],
   publisher: () => [{title: "MQTT publisher", fields: [
     F("enabled", "Enabled", "check"), F("creds", "Credentials file", "text"), F("prefix", "Topic prefix", "text", {hint: "Must end with / and not overlap a source's prefix."}),
     F("points", "Points to publish", "list", {hint: "Point names, comma separated, or * for all."})]}],
@@ -256,6 +273,10 @@ function afterChange(kind, path, body, sources) {
   }
 }
 function tidy(kind, body) {
+  if (kind === "handler" && body.scope) {
+    for (const k of ["points", "tags", "sources"]) if (body.scope[k] === undefined || (Array.isArray(body.scope[k]) ? !body.scope[k].length : !Object.keys(body.scope[k]).length)) delete body.scope[k];
+    if (!Object.keys(body.scope).length) delete body.scope;
+  }
   if (kind === "maintenance") {
     for (const k of ["points", "tags", "sources"]) if (body.scope && (body.scope[k] === undefined || (Array.isArray(body.scope[k]) ? !body.scope[k].length : !Object.keys(body.scope[k]).length))) delete body.scope[k];
   }  // drop what an empty optional control leaves behind

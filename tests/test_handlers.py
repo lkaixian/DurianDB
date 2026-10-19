@@ -1,0 +1,121 @@
+"""Email and set-point event handlers, with scope. Run: python tests/test_handlers.py"""
+import json
+import socketserver
+import sys
+import tempfile
+import threading
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from durian.app import ApiError, App  # noqa: E402
+from durian.config import seed  # noqa: E402
+from _support import new_store  # noqa: E402
+
+# ---- a tiny SMTP server that keeps what it receives (plain text, AUTH PLAIN accepted)
+MAIL = []
+
+
+class Smtp(socketserver.StreamRequestHandler):
+    def handle(self):
+        w = lambda t: self.wfile.write(t.encode() + b"\r\n")
+        w("220 test")
+        msg, data = {}, False
+        for raw in self.rfile:
+            line = raw.decode().rstrip("\r\n")
+            if data:
+                if line == ".":
+                    MAIL.append({**msg, "body": "\n".join(self.lines)})
+                    data = False
+                    w("250 queued")
+                else:
+                    self.lines.append(line)
+                continue
+            cmd = line.upper()
+            if cmd.startswith("EHLO") or cmd.startswith("HELO"):
+                w("250-test")
+                w("250 AUTH PLAIN")
+            elif cmd.startswith("AUTH"):
+                msg["auth"] = line
+                w("235 ok")
+            elif cmd.startswith("MAIL FROM"):
+                msg["from"] = line
+                msg["to"] = []
+                w("250 ok")
+            elif cmd.startswith("RCPT TO"):
+                msg["to"].append(line.split(":", 1)[1].strip("<> "))
+                w("250 ok")
+            elif cmd == "DATA":
+                self.lines, data = [], True
+                w("354 go")
+            elif cmd == "QUIT":
+                w("221 bye")
+                return
+            else:
+                w("250 ok")
+
+
+smtp = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Smtp)
+smtp.daemon_threads = True
+threading.Thread(target=smtp.serve_forever, daemon=True).start()
+
+store = new_store()
+seed(store)
+app = App(store)
+assert app.auth.bootstrap("admin-password-123") is None
+admin = app.auth.identity(app.auth.login("admin", "admin-password-123"))
+creds = Path(tempfile.mkdtemp()) / "smtp.json"
+creds.write_text(json.dumps({"user": "ops", "password": "secret"}))
+
+
+def call(method, path, body=None):
+    try:
+        return app.handle(method, path, {}, body, admin)
+    except ApiError as e:
+        return e.status, {"error": str(e), "errors": e.errors}
+
+
+# ---- validation
+MAIL_H = {"type": "email", "to": ["a@example.com"], "from": "durian@example.com", "smtp": {"host": "127.0.0.1", "port": smtp.server_address[1]}, "min_level": "WARNING"}
+for bad in ({"to": []}, {"to": ["nope"]}, {"from": "x"}, {"smtp": {"host": ""}}, {"smtp": {"host": "h", "security": "tls"}}, {"creds": "missing.json"}, {"scope": []}, {"type": "pager"}):
+    assert call("PUT", "/api/config/handler/m", {**MAIL_H, **bad})[0] == 422, bad
+SET_H = {"type": "setpoint", "point": "valve", "value": 0, "min_level": "URGENT"}
+for bad in ({"point": ""}, {"value": "x"}, {"clear_value": "x"}, {"release_on_clear": 1}):
+    assert call("PUT", "/api/config/handler/s", {**SET_H, **bad})[0] == 422, bad
+
+# ---- points: one that alarms (in area boiler), one that is set by a handler, one that alarms elsewhere
+HOT = {"source": "demo", "generator": {"kind": "constant", "value": 95}, "detectors": [{"kind": "HIGH_LIMIT", "limit": 90, "level": "URGENT"}]}
+assert call("PUT", "/api/config/point/hot", {**HOT, "tags": {"area": "boiler"}})[0] == 200
+assert call("PUT", "/api/config/point/hot-line", {**HOT, "tags": {"area": "line"}})[0] == 200
+assert call("PUT", "/api/config/point/valve", {"source": "demo", "generator": {"kind": "constant", "value": 100}, "settable": True, "set_roles": ["user"],
+                                              "set_min": 0, "set_max": 100, "max_step": 60})[0] == 200
+assert call("PUT", "/api/config/handler/mail", {**MAIL_H, "creds": str(creds), "scope": {"tags": {"area": "boiler"}}, "on_clear": True})[0] == 200
+assert call("PUT", "/api/config/handler/close-valve", {**SET_H, "scope": {"points": ["hot"]}, "release_on_clear": True})[0] == 200
+app.tick(time.time())
+for _ in range(50):
+    if MAIL and any(a["action"] == "set" for a in store.audit_log(20)):
+        break
+    time.sleep(0.1)
+
+# ---- email: only the boiler alarm, with the subject, recipients and credentials
+assert len(MAIL) == 1, MAIL
+m = MAIL[0]
+assert m["to"] == ["a@example.com"] and "durian@example.com" in m["from"] and m["auth"].startswith("AUTH PLAIN")
+assert "Subject: [URGENT] hot: 95 > 90" in m["body"], m["body"]
+assert "hot-line" not in json.dumps(m)
+
+# ---- set point: the write went through the same checks and was audited under the handler's name
+valve = next(p for p in call("GET", "/api/points")[1] if p["name"] == "valve")
+assert valve["last"] == 100, valve  # 100 -> 0 is 100 away: the step limit (60) refused it, the value did not move
+assert any(a["action"] == "set.refused" and "close-valve" in a["user"] and "at most 60" in a["detail"] for a in store.audit_log(30)), store.audit_log(30)
+# loosen the step: the handler's write now goes through
+assert call("PUT", "/api/config/point/valve", {"source": "demo", "generator": {"kind": "constant", "value": 100}, "settable": True, "set_roles": ["user"], "set_min": 0, "set_max": 100})[0] == 200
+app.tick(time.time() + 1)
+for _ in range(50):
+    if any(a["action"] == "set" and a["user"] == "handler close-valve" for a in store.audit_log(30)):
+        break
+    time.sleep(0.1)
+assert any(a["action"] == "set" and a["user"] == "handler close-valve" for a in store.audit_log(30))
+app.tick(time.time() + 2)  # the written value reaches the point on the next poll
+assert next(p for p in call("GET", "/api/points")[1] if p["name"] == "valve")["last"] == 0.0
+print("ok")
