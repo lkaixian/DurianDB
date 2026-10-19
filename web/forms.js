@@ -106,6 +106,7 @@ function pointGroups(body, sources) {
   return [
     {title: "Identity", fields: [
       F("source", "Data source", "select", {options: sources.length ? opts(...sources.map(s => [s.name, `${s.name} (${s.type})`])) : [["", "Create a source first"]]}),
+      F("datatype", "Value is", "select", {optional: true, options: opts(["number", "A number"], ["text", "Text (on virtual or HTTP in sources)"])}),
       F("folder", "Folder", "text", {optional: true, hint: "Groups points on the overview, for example Plant/Boiler."}),
       F("description", "Description", "text", {optional: true}), F("unit", "Unit", "text", {optional: true, hint: "For example C, bar or %."}),
       F("tags", "Tags", "tags", {hint: "key:value pairs, comma separated, for example area:boiler, line:2."})]},
@@ -219,13 +220,14 @@ const DET = {
   NO_CHANGE: {label: "Stuck value", args: [["seconds", "Seconds unchanged"], ["tolerance", "Ignore changes of"]], start: {seconds: 600, tolerance: 0}},
   SMOOTHNESS: {label: "Noisy signal", args: [["limit", "Scatter limit (std. deviation)"], ["samples", "Over this many samples"]], late: true, start: {limit: 1, samples: 10}},
   CUSUM: {label: "Slow drift (CUSUM)", args: [["target", "Target value"], ["slack", "Allowance per sample"], ["threshold", "Alarm when the sum passes"]], late: true, start: {target: 0, slack: 0, threshold: 10}},
+  TEXT: {label: "Text matches", args: [["values", "Texts", "tlist"], ["mode", "Alarm when the value", "select", opts(["equals", "equals one of them"], ["contains", "contains one of them"])]], late: true, start: {values: ["FAULT"], mode: "equals"}},
   NO_UPDATE: {label: "No update", args: [["seconds", "Seconds without a value"]], start: {seconds: 60}},
 };
 function detectorHtml(d, i) {
   const kind = d.kind || "HIGH_LIMIT", spec = DET[kind];
   const n = (k, label, hint) => `<div class="fld"><label for="d${i}-${k}">${label}</label><input type="number" step="any" id="d${i}-${k}" data-det="${i}" data-dpath="${k}" value="${esc(d[k] ?? "")}"><small class="hint">${hint || ""}</small></div>`;
-  const arg = ([k, label, type, options]) => type === "list"
-    ? `<div class="fld"><label for="d${i}-${k}">${label}</label><input type="text" id="d${i}-${k}" data-det="${i}" data-dpath="${k}" data-list="1" value="${esc((d[k] || []).join(", "))}" autocomplete="off"><small class="hint">Comma separated, for example 2, 3.</small></div>`
+  const arg = ([k, label, type, options]) => type === "list" || type === "tlist"
+    ? `<div class="fld"><label for="d${i}-${k}">${label}</label><input type="text" id="d${i}-${k}" data-det="${i}" data-dpath="${k}" data-list="${type === "tlist" ? "text" : "1"}" value="${esc((d[k] || []).join(", "))}" autocomplete="off"><small class="hint">Comma separated, for example 2, 3.</small></div>`
     : type === "select" ? `<div class="fld"><label for="d${i}-${k}">${label}</label><select id="d${i}-${k}" data-det="${i}" data-dpath="${k}">${options.map(([v, l]) => `<option value="${v}" ${v === (d[k] || options[0][0]) ? "selected" : ""}>${l}</option>`).join("")}</select></div>`
     : n(k, label);
   return `<fieldset class="det"><legend>Alarm ${i + 1}</legend><div class="fgrid">
@@ -321,7 +323,7 @@ function mountEditor(host, {kind, body, sources = []}) {
     const el = ev.target;
     if (el.dataset.det != null) {
       const d = body.detectors[Number(el.dataset.det)], k = el.dataset.dpath;
-      if (el.dataset.list) { const l = el.value.split(",").map(x => x.trim()).filter(Boolean).map(Number).filter(x => !Number.isNaN(x)); if (l.length) d[k] = l; else delete d[k]; }
+      if (el.dataset.list) { const l = el.value.split(",").map(x => x.trim()).filter(Boolean); if (el.dataset.list !== "text") for (let j = l.length; j--;) { l[j] = Number(l[j]); if (Number.isNaN(l[j])) l.splice(j, 1); } if (l.length) d[k] = l; else delete d[k]; }
       else if (el.tagName === "SELECT") d[k] = el.value; else if (el.value === "") delete d[k]; else d[k] = Number(el.value);
       if (k === "kind") { for (const x of Object.values(DET).flatMap(sp => sp.args.map(a => a[0])).concat(["deadband"])) delete d[x]; Object.assign(d, DET[d.kind].start); }
       if (el.dataset.rerender) draw(el.id); else sync();

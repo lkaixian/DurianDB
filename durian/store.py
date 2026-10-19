@@ -135,7 +135,8 @@ class Store:
 
     # ---- history
     def add_history(self, rows):
-        self.many("insert into history(point, ts, value, quality) values (?,?,?,?)", [(*r, 0)[:4] for r in rows])  # rows without a quality are good
+        self.many("insert into history(point, ts, value, quality, svalue) values (?,?,?,?,?)",  # rows without a quality are good
+                  [(r[0], r[1], None if isinstance(r[2], str) else r[2], r[3] if len(r) > 3 else 0, r[2] if isinstance(r[2], str) else None) for r in rows])
 
     def recent(self, point, n=60):
         return self.q("select ts, value from history where point=? and quality < 2 order by ts desc limit ?", (point, n))[::-1]
@@ -159,7 +160,7 @@ class Store:
                       (bucket, bucket, point, since, bucket))
 
     def history_range(self, point, start, end, limit):
-        return self.q("select ts, value, quality from history where point=? and ts>=? and ts<=? and quality < 2 order by ts limit ?", (point, start, end, limit))
+        return self.q("select ts, value, quality, svalue from history where point=? and ts>=? and ts<=? and quality < 2 order by ts limit ?", (point, start, end, limit))
 
     def history_summary(self, point, start, end):
         """Count, min, max and average of the good samples in a window, the first and last good values, and the number of bad samples."""

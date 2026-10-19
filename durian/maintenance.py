@@ -204,7 +204,7 @@ class Maintenance:
         w = csv.writer(out, lineterminator="\n")
         w.writerow(["timestamp_utc", "epoch_seconds", "value"])
         for r in rows:
-            w.writerow([dt.datetime.fromtimestamp(r["ts"], dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", f"{r['ts']:.3f}", repr(float(r["value"]))])
+            w.writerow([dt.datetime.fromtimestamp(r["ts"], dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", f"{r['ts']:.3f}", r["svalue"] if r["svalue"] is not None else repr(float(r["value"]))])
         return out.getvalue().encode()
 
     def import_history(self, point, text, now=None):

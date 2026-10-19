@@ -152,8 +152,24 @@ class NoUpdate(Detector):
             return self.event
 
 
+class TextDetector(_Latch):
+    """Alarm while a text value equals (mode 'equals') or contains (mode 'contains') one of `values`, ignoring case: a status word such as FAULT."""
+    kind = "TEXT"
+
+    def __init__(self, values, mode="equals", level=Level.WARNING, duration=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
+        self.values, self.mode = [v.lower() for v in values], mode
+
+    def evaluate(self, point, value, ts):
+        t = value.lower()
+        hit = any(t == v if self.mode == "equals" else v in t for v in self.values)
+        return f"text is {value!r}" if hit else None
+
+
 def state_label(point, value):
     """Text for a binary or multistate value from the point's `states` map ({"0": "Stopped", "1": "Running"}), else the number."""
+    if isinstance(value, str):
+        return value
     labels = point.meta.get("states") or {}
     key = str(int(value)) if float(value).is_integer() else str(value)
     return labels.get(key, f"{value:g}" if isinstance(value, float) else str(value))
@@ -198,7 +214,7 @@ class ChangeDetector(Detector):
 
     def check(self, point, value, ts):
         prev, self.prev = self.prev, value
-        if prev is not None and abs(value - prev) > self.tolerance:
+        if prev is not None and ((prev != value) if isinstance(value, str) else abs(value - prev) > self.tolerance):
             return Event(point.name, self.level, f"changed from {state_label(point, prev)} to {state_label(point, value)}", ts, cleared_ts=ts)
 
 
@@ -268,8 +284,8 @@ class Cusum(_Latch):
             return f"drifting below {self.target:g} (sum {self.lo:.3g} > {self.threshold:g})"
 
 
-DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange, Smoothness, Cusum)}
-LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE", "SMOOTHNESS", "CUSUM")  # these take duration (on-delay) and off_delay
+DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange, Smoothness, Cusum, TextDetector)}
+LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE", "SMOOTHNESS", "CUSUM", "TEXT")  # these take duration (on-delay) and off_delay
 
 
 def make_detector(cfg: dict) -> Detector:
@@ -307,6 +323,13 @@ def make_detector(cfg: dict) -> Detector:
         if cfg.get("mode", "outside") not in ("outside", "inside"):
             raise ValueError("mode must be outside or inside")
         return RangeDetector(low, high, cfg.get("mode", "outside"), level, **late)
+    if kind == "TEXT":
+        vs = cfg.get("values")
+        if not (isinstance(vs, list) and 1 <= len(vs) <= 20 and all(isinstance(x, str) and 1 <= len(x) <= 64 for x in vs)):
+            raise ValueError("values must be a list of 1 to 20 texts of up to 64 characters")
+        if cfg.get("mode", "equals") not in ("equals", "contains"):
+            raise ValueError("mode must be equals or contains")
+        return TextDetector(vs, cfg.get("mode", "equals"), level, **late)
     if kind == "SMOOTHNESS":
         n = cfg.get("samples", 10)
         if not isinstance(n, int) or isinstance(n, bool) or not 3 <= n <= 1000:
@@ -334,6 +357,7 @@ class Point:
     quality: int = Quality.GOOD
     in_service: bool = True  # False: detectors are not evaluated (set by an administrator, see App)
     meta: dict = field(default_factory=dict)  # presentation and access data: unit, source, roles, settable
+    text: bool = False  # an alphanumeric point: the value is a short string, logged on change, with no numeric rollups or trend
     interval: float = 0.0  # seconds between samples when logging is INTERVAL
     interval_mode: str = "instant"  # instant, avg, min or max
     _logged: object = None
@@ -352,7 +376,7 @@ class Point:
             self.quality = quality
             return
         log, logged = self.logging == Logging.ALL or (
-            self.logging == Logging.ON_CHANGE and (self._logged is None or self._logged_q == Quality.BAD or abs(value - self._logged) > self.tolerance)), value
+            self.logging == Logging.ON_CHANGE and (self._logged is None or self._logged_q == Quality.BAD or (value != self._logged if self.text else abs(value - self._logged) > self.tolerance))), value
         if self.logging == Logging.INTERVAL:
             self._period.append(value)
             if self._period_start is None:

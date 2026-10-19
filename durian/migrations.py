@@ -41,5 +41,9 @@ def v5_event_held(s):
     s.ddl("alter table events add column held {key}")  # shelved or suppressed while still active; null when announced
 
 
+def v6_history_text(s):
+    s.ddl("alter table history add column svalue {text}")  # the value of an alphanumeric point; value is null on those rows
+
+
 MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens),
-              (4, "history quality", v4_history_quality), (5, "event held", v5_event_held)]
+              (4, "history quality", v4_history_quality), (5, "event held", v5_event_held), (6, "history text", v6_history_text)]
