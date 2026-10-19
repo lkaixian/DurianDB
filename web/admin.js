@@ -102,10 +102,10 @@ async function viewDatabase() {
       try { await api("PUT", "/api/database/settings", body); msg("Settings saved."); } catch (e) { msg((e.errors || []).map(x => `${x.property}: ${x.message}`).join(". ") || e.message, true); }
     });
     $("#purge").addEventListener("click", async () => {
-      try { const r = await api("POST", "/api/database/purge", {}); msg(`Purged ${r.deleted} samples${r.complete ? "" : " (stopped early, run it again)"}.`); } catch (e) { msg(e.message, true); }
+      try { const r = await api("POST", "/api/database/purge", {}); await draw(); $("#dbm").textContent = `Purged ${r.deleted} samples${r.complete ? "" : " (stopped early, run it again)"}.`; } catch (e) { msg(e.message, true); }
     });
     $("#backup").addEventListener("click", async () => {
-      try { const r = await api("POST", "/api/database/backup", {}); msg(`Backup ${r.name} written (${bytes(r.bytes)}).`); } catch (e) { msg(e.message, true); }
+      try { const r = await api("POST", "/api/database/backup", {}); await draw(); $("#dbm").textContent = `Backup ${r.name} written (${bytes(r.bytes)}).`; } catch (e) { msg(e.message, true); }
     });
     $("#imp").addEventListener("change", async ev => {
       const out = $("#impout"), file = ev.target.files[0], mode = $("#impmode").value;
