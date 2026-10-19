@@ -3,6 +3,7 @@
 Written from the public MQTT 3.1.1/5 standard and the paho-mqtt API, not from Mango.
 """
 import json
+import math
 import queue
 import ssl
 
@@ -17,8 +18,8 @@ def parse(payload: bytes):
         v = json.loads(payload.decode())
         if isinstance(v, dict):
             v = v.get("value")
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            return None  # JSON allows NaN and Infinity; they would break comparisons and the browser's JSON
         return float(v)
     except (UnicodeDecodeError, ValueError):
         return None

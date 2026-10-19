@@ -74,4 +74,9 @@ for bad_cfg in ({"kind": "NOPE"}, {"kind": "HIGH_LIMIT"}, {"kind": "HIGH_LIMIT",
         raise AssertionError(bad_cfg)
     except ValueError:
         pass
+# MQTT payloads are untrusted: only finite numbers get through
+from durian.mqtt_source import parse  # noqa: E402
+assert parse(b"21.5") == 21.5 and parse(b'{"value": 3}') == 3.0 and parse(b"-4") == -4.0
+for junk in (b"NaN", b"Infinity", b"-Infinity", b'{"value": NaN}', b"true", b'"12"', b"[1]", b"{}", b"\xff\xfe", b"", b"1e999"):
+    assert parse(junk) is None, junk
 print("ok")
