@@ -37,5 +37,9 @@ def v4_history_quality(s):
     s.ddl("alter table history add column quality {int} not null default 0")  # 0 good, 1 uncertain, 2 bad (core.Quality)
 
 
+def v5_event_held(s):
+    s.ddl("alter table events add column held {key}")  # shelved or suppressed while still active; null when announced
+
+
 MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens),
-              (4, "history quality", v4_history_quality)]
+              (4, "history quality", v4_history_quality), (5, "event held", v5_event_held)]

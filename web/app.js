@@ -94,10 +94,18 @@ function viewOverview() {
   ptSig = "";
   $("#filter").addEventListener("input", () => { ptSig = ""; refreshOverview().catch(showErr); });
   $("#alarms").addEventListener("click", async ev => {
-    const id = ev.target.dataset.ack;
-    if (!id) return;
+    const d = ev.target.dataset, id = d.ack;
+    if (!id && !d.shelve && !d.unshelve) return;
+    let call = ["POST", `/api/events/${id}/ack`, undefined];
+    if (d.shelve) {  // a native prompt keeps this keyboard and screen reader friendly with no extra markup
+      const reason = prompt(`Why shelve the alarm on ${d.shelve}? (3 to 200 characters)`);
+      if (reason === null) return;
+      const minutes = parseInt(prompt("Shelve for how many minutes? (1 to 1440)", "60"), 10);
+      if (!minutes) return;
+      call = ["POST", `/api/alarms/${encodeURIComponent(d.shelve)}/shelve`, {reason, minutes}];
+    } else if (d.unshelve) call = ["POST", `/api/alarms/${encodeURIComponent(d.unshelve)}/unshelve`, undefined];
     ev.target.disabled = true;
-    try { await api("POST", `/api/events/${id}/ack`); await refreshOverview(); } catch (e) { ev.target.disabled = false; showErr(e, $("#alarms")); }
+    try { await api(...call); await refreshOverview(); } catch (e) { ev.target.disabled = false; showErr(e, $("#alarms")); }
   });
   $("#points").addEventListener("submit", async ev => {
     ev.preventDefault();
@@ -124,11 +132,15 @@ function renderAlarms(evs) {
   box.className = "";
   const STATE = {active_unacked: e => "Active, not acknowledged", active_acked: e => `Active, acknowledged by ${esc(e.acked_by)} at ${fmt(e.acked_ts)}`,
     rtn_unacked: e => `Returned to normal at ${fmt(e.cleared_ts)}, not acknowledged`, closed: e => `Closed: returned to normal at ${fmt(e.cleared_ts)}, acknowledged by ${esc(e.acked_by)}`};
-  const state = e => STATE[e.state](e);
+  const HELD = {shelved: "Shelved. ", suppressed: "Suppressed by design. "};
+  const state = e => (e.held && !e.cleared_ts ? HELD[e.held] : "") + STATE[e.state](e);
+  const shelving = e => !isUser() || e.cleared_ts != null ? "" : e.held === "shelved"
+    ? `<button data-unshelve="${esc(e.point)}" aria-label="Unshelve alarm on ${esc(e.point)}">Unshelve</button>`
+    : e.held ? "" : `<button data-shelve="${esc(e.point)}" aria-label="Shelve alarm on ${esc(e.point)}">Shelve</button>`;
   box.innerHTML = `<table class="stack"><thead><tr><th>Level</th><th>Point</th><th>Detail</th><th>Raised</th><th>State</th><th><span class="sr">Action</span></th></tr></thead><tbody>` +
     evs.map(e => `<tr class="${e.acked_ts == null ? "open" : "done"}"><td class="lvl" data-label="Level">${esc(e.level_name)}</td><td data-label="Point">${esc(e.point)}</td>
       <td class="num" data-label="Detail">${esc(e.message)}</td><td class="num" data-label="Raised">${fmt(e.ts)}</td><td data-label="State">${state(e)}</td>
-      <td>${e.acked_ts == null && isUser() ? `<button data-ack="${e.id}" aria-label="Acknowledge alarm on ${esc(e.point)} raised at ${fmt(e.ts)}">Acknowledge</button>` : ""}</td></tr>`).join("") + "</tbody></table>";
+      <td>${e.acked_ts == null && isUser() ? `<button data-ack="${e.id}" aria-label="Acknowledge alarm on ${esc(e.point)} raised at ${fmt(e.ts)}">Acknowledge</button>` : ""} ${shelving(e)}</td></tr>`).join("") + "</tbody></table>";
 }
 
 function spark(h, lim) {

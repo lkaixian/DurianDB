@@ -42,6 +42,7 @@ class Event:
     ts: float
     cleared_ts: Optional[float] = None  # set when the condition returns to normal
     id: Optional[int] = None  # row id once stored
+    held: Optional[str] = None  # "shelved" or "suppressed" while the alarm is recorded but not announced
 
 
 def alarm_state(acked_ts, cleared_ts):
@@ -53,6 +54,11 @@ def alarm_state(acked_ts, cleared_ts):
 
 class Detector:
     kind = ""
+
+    event = since = None
+
+    def reset(self):  # forget any alarm in progress (the point went out of service)
+        self.event = self.since = None
 
     def check(self, point, value, ts) -> Optional[Event]:  # a value arrived
         return None
@@ -179,6 +185,7 @@ class Point:
     last_ts: Optional[float] = None  # when the source says the value was taken
     last_recv: Optional[float] = None  # when we received it
     quality: int = Quality.GOOD
+    in_service: bool = True  # False: detectors are not evaluated (set by an administrator, see App)
     meta: dict = field(default_factory=dict)  # presentation and access data: unit, source, roles, settable
     _logged: object = None
     _logged_q: int = Quality.GOOD
@@ -200,7 +207,7 @@ class Point:
             self.cache.append((ts, value))
             self.unsaved.append((ts, value, int(quality)))
         self.last, self.last_ts, self.last_recv, self.quality = value, ts, ts if recv is None else recv, quality
-        for d in self.detectors:
+        for d in self.detectors if self.in_service else ():
             ev = d.check(self, value, ts)
             if ev:
                 on_event(ev)
@@ -259,7 +266,7 @@ class Engine:
                     for pub in self.publishers:
                         pub(p, p.last, t)
             for p in list(s.points.values()):
-                for d in p.detectors:
+                for d in p.detectors if p.in_service else ():
                     ev = d.tick(p, ts)
                     if ev:
                         self._event(ev)

@@ -37,6 +37,7 @@ class App:
         self.store, self.auth = store, Auth(store)
         self.maint = Maintenance(store, backup_dir or Path("backups"))
         self.engine, self.outputs, self.open_events = None, None, []
+        self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
         self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
         self.reload()
 
@@ -56,6 +57,9 @@ class App:
             self.engine = build_engine(self.store)
             self.outputs = Outputs(self.store)
             self.engine.publishers.append(self.outputs.on_value)
+            self.holds = {h["name"]: h for h in self.store.list("alarmhold")}
+            for name, (p, _) in self.points().items():
+                p.in_service = self.holds.get(name, {}).get("kind") != "oos"
 
     def tick(self, ts=None):
         with self.store.lock:
@@ -67,12 +71,15 @@ class App:
             self.unstored = []
             for i, ev in enumerate(new):
                 try:
+                    ev.held = self._hold_for(ev.point, self.points(), ts)
                     ev.id = self.store.add_event(ev)
                 except Exception:  # the database is unavailable: keep the rest and try again next tick
                     self.unstored = new[i:]
                     break
                 self.open_events.append(ev)
-                self.outputs.on_event(ev, "raised")
+                if ev.held is None:
+                    self.outputs.on_event(ev, "raised")
+            self._apply_holds(ts)
             still = []
             for ev in self.open_events:
                 if ev.cleared_ts is None:
@@ -83,8 +90,40 @@ class App:
                 except Exception:
                     still.append(ev)
                     continue
-                self.outputs.on_event(ev, "cleared")
+                if ev.held is None:
+                    self.outputs.on_event(ev, "cleared")
             self.open_events = still
+
+    def _hold_for(self, point, pts, ts):
+        """Why an alarm on this point is recorded but not announced right now, or None."""
+        h = self.holds.get(point)
+        if h and h["kind"] == "shelved" and h["until"] > ts:
+            return "shelved"
+        sw = pts[point][0].meta.get("suppress_when") if point in pts else None
+        other = pts.get(sw["point"], (None,))[0] if sw else None
+        if other is not None and other.last is not None and other.quality != Quality.BAD:
+            if {">": other.last > sw["value"], "<": other.last < sw["value"], "==": other.last == sw["value"]}[sw["op"]]:
+                return "suppressed"  # suppression by design: the condition that makes this alarm meaningless holds
+        return None
+
+    def _apply_holds(self, ts):
+        """Expire shelves, then move open alarms into or out of the held state. Leaving it announces the alarm if it is still active."""
+        for name in [n for n, h in self.holds.items() if h["kind"] == "shelved" and h["until"] <= ts]:
+            self.store.delete("alarmhold", name)
+            del self.holds[name]
+            self.store.audit("(system)", "shelve.expired", name)
+        pts = self.points()
+        for ev in self.open_events:
+            want = self._hold_for(ev.point, pts, ts)
+            if want == ev.held or ev.id is None:
+                continue
+            try:
+                self.store.hold_event(ev.id, want)
+            except Exception:
+                continue
+            was, ev.held = ev.held, want
+            if was and not want and ev.cleared_ts is None:
+                self.outputs.on_event(ev, "raised")
 
     def _flush_history(self, ts):
         """Write buffered samples. A failing database never loses data silently: samples wait (up to a cap) and an alarm is raised."""
@@ -196,6 +235,8 @@ class App:
             for e in rows:
                 e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
             return 200, rows
+        if a == "alarms":
+            return self.alarm_holds(method, b, c, body, ident)
         if (method, a, c) == ("POST", "events", "ack"):
             need(user)
             ev = self.store.q("select point from events where id=?", (int(b) if b.isdigit() else -1,))
@@ -309,6 +350,57 @@ class App:
             self.store.audit(ident["name"], "token.delete", name)
             return 200, {"deleted": name}
         raise ApiError(405, "method not allowed")
+
+    # ---- shelving and out of service
+    def alarm_holds(self, method, point, action, body, ident):
+        """GET /api/alarms lists holds. POST /api/alarms/<point>/shelve|unshelve (users), out-of-service|in-service (superadmin)."""
+        pts = self.visible_points(ident)
+        if (method, point, action) == ("GET", None, None):
+            return 200, [h for h in self.holds.values() if h["name"] in pts]
+        if method != "POST" or action not in ("shelve", "unshelve", "out-of-service", "in-service"):
+            raise ApiError(404, "not found")
+        if not ident["name"]:
+            raise ApiError(401, "log in first")
+        if point not in pts:
+            raise ApiError(404, "unknown point")
+        if action in ("out-of-service", "in-service"):
+            if "superadmin" not in ident["roles"]:
+                raise ApiError(403, "only a superadmin can take a point out of service")
+        elif "user" not in ident["roles"]:
+            raise ApiError(403, "not allowed")
+        body, now, cur = body if isinstance(body, dict) else {}, time.time(), self.holds.get(point)
+        reason, p = str(body.get("reason", "")).strip(), pts[point][0]
+        if action in ("shelve", "out-of-service"):
+            if not 3 <= len(reason) <= 200:
+                raise ApiError(422, "give a reason of 3 to 200 characters")
+            if action == "shelve":
+                m = body.get("minutes")
+                if not (isinstance(m, int) and not isinstance(m, bool) and 1 <= m <= 1440):
+                    raise ApiError(422, "minutes must be a whole number from 1 to 1440")
+                if cur and cur["kind"] == "oos":
+                    raise ApiError(409, "this point is out of service")
+                h = {"kind": "shelved", "user": ident["name"], "reason": reason, "created": now, "until": now + m * 60}
+            else:
+                h = {"kind": "oos", "user": ident["name"], "reason": reason, "created": now, "until": None}
+        elif not cur or cur["kind"] != ("shelved" if action == "unshelve" else "oos"):
+            raise ApiError(409, "nothing to release")
+        with self.store.lock:
+            if action in ("shelve", "out-of-service"):
+                self.store.put("alarmhold", point, h)
+                self.holds[point] = {"name": point, **h}
+            else:
+                self.store.delete("alarmhold", point)
+                del self.holds[point]
+            p.in_service = self.holds.get(point, {}).get("kind") != "oos"
+            if action == "out-of-service":
+                for d in p.detectors:
+                    d.reset()
+                for ev in self.open_events:  # no longer in alarm: the next tick stores the return to normal
+                    if ev.point == point and ev.cleared_ts is None:
+                        ev.cleared_ts = now
+            self._apply_holds(now)
+        self.store.audit(ident["name"], "alarm." + action, f"{point}: {reason}" if reason else point)
+        return 200, {"point": point, "action": action}
 
     # ---- database health, retention, backups, import and export (superadmin)
     def database(self, method, what, name, body, ident):
