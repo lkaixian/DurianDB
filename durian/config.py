@@ -167,6 +167,7 @@ def build_engine(store):
     """Engine from stored config. A source that fails to build is kept as an unhealthy stub, not fatal."""
     eng = Engine()
     points = store.list("point")
+    held = {o["name"]: o["value"] for o in store.list("override")}  # values operators set and have not released
     for s in store.list("source"):
         if not s.get("enabled", True):
             continue
@@ -177,6 +178,8 @@ def build_engine(store):
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                     src.gens[n] = p.get("generator", {"kind": "walk"})
+                    if n in held:
+                        src.override[n] = held[n]
             else:
                 auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create", True) else None
                 src = MqttSource(s["name"], load_creds(s["creds"]), s.get("prefix", "durian/"),

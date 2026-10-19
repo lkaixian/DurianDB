@@ -63,6 +63,10 @@ app.tick(1002.0)
 assert next(p for p in call(viewer, "GET", "/api/points")[1] if p["name"] == "hot")["last"] == 50
 assert call(viewer, "POST", "/api/points/hot/set", {"value": "x"})[0] == 400
 assert call(ANON, "POST", "/api/points/hot/set", {"value": 5})[0] == 404  # anonymous cannot even see it
+call(admin, "PUT", "/api/config/point/other", dict(body, tags={}))  # a config edit rebuilds the engine...
+app.tick(1002.5)
+assert next(p for p in call(viewer, "GET", "/api/points")[1] if p["name"] == "hot")["last"] == 50  # ...held value survives
+call(admin, "DELETE", "/api/config/point/other")
 assert call(viewer, "POST", "/api/points/hot/set", {"value": None})[0] == 200  # release
 app.tick(1003.0)
 assert any(a["action"] == "set" for a in call(admin, "GET", "/api/audit")[1])
