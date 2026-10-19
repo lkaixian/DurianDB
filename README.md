@@ -2,7 +2,7 @@
 
 An educational reference for how a SCADA / IoT data-acquisition platform fits together, studied from the public documentation and the black-box behavior of Mango (Radix IoT). DurianDB is an independent, original work. It contains no Mango code, assets or branding.
 
-What it does: collects values from data sources (a configurable virtual generator, and MQTT over TLS), stores history as a time series, raises and clears alarms with detectors, lets operators acknowledge alarms and set values, sends events to webhooks, publishes values over MQTT TLS, and shows it all in a browser console. Python standard library plus `paho-mqtt` (and `cryptography` for the lab script only).
+What it does: collects values from data sources (a virtual generator, MQTT over TLS, Modbus over TCP, RTU and ASCII, HTTP JSON, and read-only SQL), stores history as a time series, raises and clears alarms with detectors, lets operators acknowledge alarms and set values, sends events to webhooks, publishes values over MQTT TLS, and shows it all in a browser console. Python standard library plus `paho-mqtt` (and `cryptography` for the lab script only).
 
 ## Run
 
@@ -27,14 +27,17 @@ python tools/sim_publisher.py       # sends durian/mqtt-temp and durian/mqtt-flo
 | `durian/core.py` | Source, point, detectors (high, low, rate of change, no update), engine |
 | `durian/config.py` | Source types (virtual, mqtt), validation, build engine from stored config |
 | `durian/mqtt_source.py` | MQTT over TLS source and shared client factory |
+| `durian/modbus.py`, `modbus_source.py` | Modbus client (TCP, RTU, ASCII, serial) and the polling source |
+| `durian/modbus_sim.py` | Modbus slave for tests: `python -m durian.modbus_sim tcp 1502` |
+| `durian/polled.py`, `http_source.py`, `sql_source.py` | Pull-source base, HTTP JSON source, SQLite source |
 | `durian/outputs.py` | Webhook handler, MQTT publisher |
 | `durian/store.py` | SQLite: history, rollups, events, users, audit, config objects |
 | `durian/auth.py` | scrypt passwords, sessions, role inheritance, login lockout |
 | `durian/app.py` | The API as plain calls, with permission checks |
 | `durian/server.py` | HTTP shell: cookies, CSRF header, security headers |
 | `web/` | Console: overview, history, config editor, users, audit, account |
-| `tests/` | `python tests/test_core.py` (also `test_series`, `test_auth`, `test_app`) |
-| `tools/` | MQTT lab, simulator, `browser_check.mjs` (real browser), `e2e_check.py` (outputs) |
+| `tests/` | `python tests/run_all.py` runs every suite |
+| `tools/` | MQTT lab, sensor simulator, `browser_check.mjs` and `browser_modbus.mjs` (real browser), `e2e_check.py` (outputs) |
 | `docs/` | Clean-room policy and dated research notes |
 | `graphify-out/` | Knowledge graph of the research and code |
 
@@ -46,9 +49,10 @@ Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every 
 
 - Any config change rebuilds the engine. Open alarms are closed and detectors start over, so a still-breached point can raise again. Held set-values survive.
 - One value per point per poll from MQTT (the latest), not every message.
-- The virtual source is a teaching generator, not a protocol driver. Modbus, OPC and the rest are not implemented.
+- Drivers: Modbus (tested against a simulator and over a socket-backed serial URL, not a real port or device), HTTP JSON, SQLite. No OPC, BACnet, DNP3 or SNMP (see `docs/research/08`).
+- Pulled values carry the engine's tick time, not the moment they were read, and a fast poll keeps only the latest value per tick.
 - History is never purged, and there is no clustering or high availability.
 
 ## Status and research
 
-See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `06` (06 compares the enterprise and regular editions). Open questions: `docs/research/99-open-questions.md`.
+See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `08` (06 compares the enterprise and regular editions, 07 is Modbus, 08 is HTTP and SQL). Open questions: `docs/research/99-open-questions.md`.
