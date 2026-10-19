@@ -167,3 +167,4 @@ th button.sort{min-height:0;padding:0;font:inherit;font-weight:600;color:var(--m
 th button.sort:hover:not(:disabled){background:none;color:var(--ink)}
 th[aria-sort=ascending] button.sort::after{content:" \25B2";font-size:.7em}
 th[aria-sort=descending] button.sort::after{content:" \25BC";font-size:.7em}
+h3.fold{grid-column:1/-1;margin:18px 0 0;padding-bottom:4px;border-bottom:1px solid var(--rule)}

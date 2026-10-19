@@ -27,7 +27,7 @@ Written 2026-10-20. Sources are the public documentation pages at docs.radixiot.
 | Set-point event handler | `setpoint` handler: value on raise, value or release on return to normal, through the same limits and step size as an operator write | Closing a loop on an alarm is common, and it must not be a way around safe control. The confirm step is skipped because no person is there to confirm. |
 | Email event handler | `email` handler with SMTP (none, STARTTLS, SSL), credentials file, scope | The first thing an operator without Node-RED expects. Recipient lists per group and templates are not built. |
 | Process and script handlers, scripting meta points | Declined | They run arbitrary code or commands on the server. The expression language in `calc.py` covers calculations without that risk, and the webhook handler reaches anything external. |
-| Hierarchy watch lists, point folders | Not built | Tags and watch lists already group points. |
+| Hierarchy watch lists, point folders | A `folder` path on each point, grouping on the overview and a `folder` filter that includes subfolders | Operators think in plant areas. Tags and watch lists still group points across folders. |
 | HTTP sender, Slack, gRPC publishers | Not built | MQTT and the webhook cover outbound data and alarms. |
 
 ## Left open
