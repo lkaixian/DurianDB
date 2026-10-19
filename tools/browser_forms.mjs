@@ -80,6 +80,12 @@ await ev(`(()=>{document.querySelector('#svc-r').value='sensor replacement';docu
 console.log("out of service:", await ev(`document.querySelector('#svc').textContent`));
 await ev(`document.querySelector('#svc').requestSubmit()`); await sleep(1500);
 console.log("back in service:", await ev(`document.querySelector('#svc').textContent.includes('Take out of service')`));
+// 9. Test settings on a new source reports an answer (a device or a clear failure), never nothing
+await go("#config/source/_new");
+await ev(`(()=>{const s=document.querySelector('#tpl');s.value='Modbus TCP';s.dispatchEvent(new Event('change',{bubbles:true}))})()`); await sleep(400);
+await set("link.port", 1); await set("timeout", 0.5); await set("retries", 0);
+await ev(`document.querySelector('#test').click()`); await sleep(2500);
+console.log("test result:", await ev(`document.querySelector('#test-out').textContent`));
 // mobile
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");

@@ -74,6 +74,8 @@ Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped i
 
 **Form editors.** Config pages for sources, points, handlers, publishers and watch lists are labelled forms: the right fields for each source type, hints under each field, the server's message under the field it names, and detector rows you can add and remove, and (for administrators) a Take out of service / Return to service control on each point. The full settings stay one click away under "Advanced" as JSON, and the form and the JSON box stay in step. Visual direction is in `DESIGN.md`; `tools/browser_forms.mjs` checks the editors in a real browser.
 
+**Test settings.** The source editor's Test settings button (administrators) tries the settings once without saving: an HTTP JSON source lists every numeric value it found with the path to use on a point, a SQL source shows its first rows, and a Modbus source checks that the device answers. `POST /api/test/source`.
+
 **Data quality.** Every value carries the source's own timestamp and a quality: `good`, `uncertain` or `bad`. A source that is down or cannot fill a point marks it `bad`: the last value is held, no alarm is evaluated on it, and charts, CSV export and rollups skip it (the history table keeps the row with its quality). A device clock more than a minute ahead, or a sender that says `"quality": "uncertain"`, makes the value `uncertain`. Values older than the newest one already received for a point are dropped. A "no update" alarm counts from when DurianDB received a value, not from the device's clock. Senders may add `ts` and `quality` to ingest and MQTT payloads.
 
 ## Database

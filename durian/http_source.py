@@ -67,7 +67,8 @@ class HttpJsonSource(PolledSource):
             handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=cfg["ca"])))
         self.opener = urllib.request.build_opener(*handlers)
 
-    def fetch(self):
+    def document(self):
+        """One fetch of the JSON document. Public so the Test button can show what a source would see."""
         headers = {"Accept": "application/json", **self.headers}
         if self.token_file and "Authorization" not in headers:  # read each time so a rotated token is picked up
             headers["Authorization"] = "Bearer " + Path(self.token_file).read_text().strip()
@@ -75,7 +76,10 @@ class HttpJsonSource(PolledSource):
             raw = r.read(self.max_bytes + 1)
         if len(raw) > self.max_bytes:
             raise ValueError("response larger than max_bytes")
-        data = json.loads(raw)
+        return json.loads(raw)
+
+    def fetch(self):
+        data = self.document()
         values, rejected = {}, []
         for p in self.points.values():
             try:

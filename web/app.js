@@ -324,7 +324,7 @@ async function viewConfig(kind = "source", name) {
     ${cur ? `<form id="ed"><label>Name <input name="name" value="${esc(cur.name)}" ${name === "_new" ? "" : "readonly"} required pattern="[A-Za-z0-9_.\\-]{1,64}"></label>
       ${name === "_new" && kind !== "point" && Object.keys(TEMPLATES[kind]).length > 1 ? `<label>${kind === "source" ? "Source type" : "Start from"} <select id="tpl">${Object.keys(TEMPLATES[kind]).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>` : ""}
       <div id="editor"></div>
-      <div class="row"><button type="submit">Save</button>${name !== "_new" ? '<button type="button" id="del">Delete</button>' : ""}</div></form><div id="ed-msg" role="status"></div>
+      <div class="row"><button type="submit">Save</button>${kind === "source" ? '<button type="button" id="test">Test settings</button>' : ""}${name !== "_new" ? '<button type="button" id="del">Delete</button>' : ""}</div></form><div id="ed-msg" role="status"></div><div id="test-out" role="status"></div>
       ${kind === "point" && name !== "_new" ? '<form id="svc" class="svc"></form>' : ""}`
       : '<p class="note">Choose an item, or create a new one. Saving validates every field and reloads the engine.</p>'}`;
   const msg = $("#ed-msg");
@@ -334,6 +334,16 @@ async function viewConfig(kind = "source", name) {
   let editor = mount(body);
   $("#tpl")?.addEventListener("change", e => { editor = mount(TEMPLATES[kind][e.target.value]); });
   const report = (ok, text, errs) => { msg.className = ok ? "" : "err"; msg.innerHTML = esc(text) + (errs ? `<ul class="errors">${errs.map(e => `<li><code>${esc(e.property)}</code>: ${esc(e.message)}</li>`).join("")}</ul>` : ""); };
+  $("#test")?.addEventListener("click", async ev => {
+    const out = $("#test-out"), b = ev.target;
+    b.disabled = true; out.className = "status"; out.textContent = "Testing...";
+    try {
+      const r = await api("POST", "/api/test/source", editor.body());
+      out.className = r.ok ? "" : "err";
+      out.innerHTML = `<p>${esc(r.ok ? "Passed. " + r.message : "Failed. " + r.message)}</p>` + (r.found.length ? `<table class="stack"><thead><tr><th>Path or key</th><th>Value</th></tr></thead><tbody>${r.found.map(f => `<tr><td data-label="Path or key"><code>${esc(f.name)}</code></td><td class="num" data-label="Value">${esc(String(f.value))}</td></tr>`).join("")}</tbody></table>` : "");
+    } catch (e) { out.className = "err"; out.textContent = e.message; }
+    b.disabled = false;
+  });
   $("#ed").addEventListener("submit", async ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);

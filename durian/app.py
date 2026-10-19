@@ -19,6 +19,7 @@ from .core import SOURCE, Event, Level, Quality, alarm_state
 from .dashboards import validate_dashboard
 from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
+from .testsource import test_source
 from .outputs import Outputs, validate_handler, validate_publisher
 from .store import ROLLUPS
 
@@ -267,6 +268,9 @@ class App:
             for e in rows:
                 e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
             return 200, rows
+        if (method, a, b) == ("POST", "test", "source"):
+            need(admin)
+            return 200, test_source(body)
         if a == "alarms":
             return self.alarm_holds(method, b, c, body, ident, query)
         if (method, a, c) == ("POST", "events", "ack"):
