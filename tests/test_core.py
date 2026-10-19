@@ -89,4 +89,13 @@ assert len(eng.events) == 2  # without a deadband it chatters, as before
 
 from durian.core import alarm_state  # noqa: E402
 assert [alarm_state(None, None), alarm_state(5, None), alarm_state(None, 6), alarm_state(5, 6)] == ["active_unacked", "active_acked", "rtn_unacked", "closed"]
+
+# ---- off-delay: the alarm stays until the value has been normal for off_delay seconds, and a relapse restarts the wait
+eng, _ = run([11, 9, 9, 11, 9, 9, 9, 9], Point("p", detectors=[make_detector({"kind": "HIGH_LIMIT", "limit": 10, "off_delay": 2})]))
+assert len(eng.events) == 1 and eng.events[0].cleared_ts == 6.0, [e.cleared_ts for e in eng.events]
+try:
+    make_detector({"kind": "HIGH_LIMIT", "limit": 1, "off_delay": -1})
+    raise AssertionError("negative off_delay")
+except ValueError:
+    pass
 print("ok")

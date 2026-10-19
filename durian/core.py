@@ -56,10 +56,10 @@ def alarm_state(acked_ts, cleared_ts):
 class Detector:
     kind = ""
 
-    event = since = None
+    event = since = ok_since = None
 
     def reset(self):  # forget any alarm in progress (the point went out of service)
-        self.event = self.since = None
+        self.event = self.since = self.ok_since = None
 
     def check(self, point, value, ts) -> Optional[Event]:  # a value arrived
         return None
@@ -71,9 +71,9 @@ class Detector:
 class _Latch(Detector):
     """Raises one event when a condition has held for `duration` seconds; clears when it stops."""
 
-    def __init__(self, level=Level.WARNING, duration=0.0):
-        self.level, self.duration = level, duration
-        self.since, self.event = None, None
+    def __init__(self, level=Level.WARNING, duration=0.0, off_delay=0.0):
+        self.level, self.duration, self.off_delay = level, duration, off_delay  # on-delay: condition must hold `duration`; off-delay: must be absent `off_delay` to clear
+        self.since, self.event, self.ok_since = None, None, None
 
     def evaluate(self, point, value, ts) -> Optional[str]:
         raise NotImplementedError
@@ -81,10 +81,15 @@ class _Latch(Detector):
     def check(self, point, value, ts):
         msg = self.evaluate(point, value, ts)
         if msg is None:
-            self.since = None
+            if self.event and self.off_delay:
+                self.ok_since = ts if self.ok_since is None else self.ok_since
+                if ts - self.ok_since < self.off_delay:
+                    return None  # back to normal, but not for long enough yet
+            self.since = self.ok_since = None
             if self.event:
                 self.event.cleared_ts, self.event = ts, None
             return None
+        self.ok_since = None
         if self.since is None:
             self.since = ts
         if self.event is None and ts - self.since >= self.duration:
@@ -95,8 +100,8 @@ class _Latch(Detector):
 class HighLimit(_Latch):
     kind = "HIGH_LIMIT"
 
-    def __init__(self, limit, level=Level.WARNING, duration=0.0, deadband=0.0):
-        super().__init__(level, duration)
+    def __init__(self, limit, level=Level.WARNING, duration=0.0, deadband=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
         self.limit, self.deadband = limit, deadband  # once raised, the value must pass the limit by `deadband` to clear, so a value hovering on the limit does not chatter
 
     def evaluate(self, point, value, ts):
@@ -116,8 +121,8 @@ class RateOfChange(_Latch):
     """Event when the value moves faster than `per_second` units per second."""
     kind = "RATE_OF_CHANGE"
 
-    def __init__(self, per_second, level=Level.WARNING, duration=0.0):
-        super().__init__(level, duration)
+    def __init__(self, per_second, level=Level.WARNING, duration=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
         self.per_second, self.prev = per_second, None
 
     def evaluate(self, point, value, ts):
@@ -164,7 +169,10 @@ def make_detector(cfg: dict) -> Detector:
     duration = cfg.get("duration", 0)
     if not isinstance(duration, (int, float)) or duration < 0:
         raise ValueError("duration must be a number of seconds, zero or more")
-    extra = {} if kind == "NO_UPDATE" else {"duration": float(duration)}
+    off_delay = cfg.get("off_delay", 0)
+    if kind != "NO_UPDATE" and (not isinstance(off_delay, (int, float)) or isinstance(off_delay, bool) or off_delay < 0):
+        raise ValueError("off_delay must be a number of seconds, zero or more")
+    extra = {} if kind == "NO_UPDATE" else {"duration": float(duration), "off_delay": float(off_delay)}
     if kind in ("HIGH_LIMIT", "LOW_LIMIT"):
         deadband = cfg.get("deadband", 0)
         if not isinstance(deadband, (int, float)) or isinstance(deadband, bool) or deadband < 0:
