@@ -1,2 +1,7 @@
 ﻿__pycache__/
 durian.db
+*.crdownload
+app/
+app-en/
+app.zip
+app-en.zip
