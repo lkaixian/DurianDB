@@ -32,14 +32,16 @@ function showErr(e, where) {
 }
 
 // ---- navigation
-const VIEWS = {overview: viewOverview, history: viewHistory, config: viewConfig, users: viewUsers, audit: viewAudit, account: viewAccount};
+const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, config: viewConfig, users: viewUsers, audit: viewAudit, account: viewAccount};
 function nav(view) {
-  const items = me.name ? [["overview", "Overview"], ["history", "History"], ...(isAdmin() ? [["config", "Config"], ["users", "Users"], ["audit", "Audit"]] : []), ["account", me.name]] : [];
-  $("#nav").innerHTML = items.map(([v, l]) => `<a href="#${v}" ${v === view ? 'aria-current="page"' : ""}>${esc(l)}</a>`).join("");
+  const items = me.name ? [["overview", "Overview"], ["dashboards", "Dashboards"], ["history", "History"], ...(isAdmin() ? [["config", "Config"], ["users", "Users"], ["audit", "Audit"]] : []), ["account", me.name]] : [["", "Log in"]];
+  $("#nav").innerHTML = items.map(([v, l]) => `<a href="#${v}" ${v === view || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : ""}>${esc(l)}</a>`).join("");
 }
 function route() {
   stopTimers();
+  document.body.classList.remove("kiosk");
   const [view, ...rest] = (location.hash.slice(1) || "overview").split("/");
+  if (!me.name && view === "d" && rest[0]) { nav("d"); return viewDashboard(decodeURIComponent(rest[0]), rest[1]); }  // public dashboards need no login
   if (!me.name) { nav(""); return viewLogin(); }
   const v = VIEWS[view] ? view : "overview";
   if (["config", "users", "audit"].includes(v) && !isAdmin()) { location.hash = "#overview"; return; }
