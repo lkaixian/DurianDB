@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector
-from . import http_source, sql_source
+from . import calc, http_source, sql_source
 from .http_source import HttpJsonSource
 from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
@@ -18,7 +18,7 @@ from .mqtt_source import MqttSource
 from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-SOURCE_TYPES = ("virtual", "mqtt", "modbus", "http_json", "sql", "http_in")
+SOURCE_TYPES = ("virtual", "mqtt", "modbus", "http_json", "sql", "http_in", "calc")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -270,8 +270,15 @@ def validate_point(name, b, store):
     if src and src.get("type") in ("http_json", "sql") and not (
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
-    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in"):
+    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc"):
         add("settable", "this source type is read-only")
+    if src and src.get("type") == "calc":
+        try:
+            tree = calc.parse(b["calc"].get("expression") if isinstance(b.get("calc"), dict) else None)
+            if name in calc.refs(tree):
+                add("calc.expression", "a point cannot read itself")
+        except ValueError as ex:
+            add("calc.expression", str(ex))
     return e
 
 
@@ -297,7 +304,7 @@ def make_point(name, b, source_name):
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "http", "sql", "scale", "suppress_when"):
+    for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm"):  # zero is a real value here
@@ -328,6 +335,11 @@ def build_engine(store):
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 src.start()
+            elif s["type"] == "calc":
+                src = calc.CalcSource(s["name"])
+                src.engine = eng
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
             elif s["type"] == "http_in":
                 auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create") else None
                 src = HttpInSource(s["name"], bool(s.get("auto_create")), auto, s.get("max_age_days", 7))
@@ -350,6 +362,7 @@ def build_engine(store):
         src.meta = {"type": s.get("type"), "read_roles": s.get("read_roles", ["user"])}
         src.heartbeat, src.down_after = s.get("heartbeat_seconds"), s.get("down_after", 10.0)
         eng.sources.append(src)
+    eng.sources.sort(key=lambda s: isinstance(s, calc.CalcSource))  # calculations run last, on this tick's fresh inputs
     return eng
 
 

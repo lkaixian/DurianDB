@@ -248,6 +248,7 @@ const TEMPLATES = {
     "Modbus RTU on a serial port": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "serial", port: "COM3", baudrate: 9600, parity: "N", stopbits: 1, bytesize: 8}, framing: "rtu", period: 5, timeout: 0.5, retries: 2},
     "Modbus RTU over TCP (serial converter)": {type: "modbus", enabled: true, read_roles: ["user"], link: {kind: "tcp", host: "192.168.0.50", port: 4001}, framing: "rtu", period: 5},
     "HTTP JSON document": {type: "http_json", enabled: true, read_roles: ["user"], url: "http://127.0.0.1:8000/data", period: 10, timeout: 5},
+    "Calculated points": {type: "calc", enabled: true, read_roles: ["user"]},
     "SQL query (SQLite file, read-only)": {type: "sql", enabled: true, read_roles: ["user"], path: "plant.db", query: "select name, value from readings", period: 10},
   },
   point: {
@@ -258,6 +259,7 @@ const TEMPLATES = {
     "Modbus coil": MODBUS_POINT({range: "coil", address: 0}, {settable: true, set_roles: ["user"]}),
     "Modbus bit of a register": MODBUS_POINT({range: "holding", address: 40, type: "bool", bit: 3}),
     "HTTP JSON value": {source: "web", ...POINT_BASE, http: {path: "sensors.temp"}, scale: {multiplier: 1, additive: 0}},
+    "Calculation from other points": {source: "calcs", ...POINT_BASE, calc: {expression: 'p("boiler-temp") * 1.8 + 32'}},
     "SQL row by key": {source: "sql", ...POINT_BASE, sql: {key: "tank1"}, scale: {multiplier: 1, additive: 0}},
   },
   handler: {"Webhook": {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true}},
