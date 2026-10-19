@@ -47,6 +47,9 @@ await ev(`(()=>{const f=document.querySelector('#pd-control form');f.value.remov
 console.log("set 9:", await text('#pd-control output'));
 await shot("1-point");
 console.log("edit link:", await ev(`document.querySelector('#pd-settings a.btn')?.getAttribute('href')`));
+// a point with history draws its trend with the alarm limit lines
+await ev(`location.hash="#point/boiler-temp"`); await sleep(7500);
+console.log("trend with history:", await ev(`JSON.stringify({paths:document.querySelectorAll('#pd-chart svg path').length,text:document.querySelector('#pd-chart').textContent.slice(0,60)})`));
 // unknown point
 await ev(`location.hash="#point/ghost"`); await sleep(2500);
 console.log("unknown:", await text('main'));
