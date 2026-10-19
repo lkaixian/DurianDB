@@ -1,0 +1,6 @@
+{
+"origin":"restV3DispatcherServlet",
+"message":"No endpoint GET /rest/latest/modules.",
+"url":"https://localhost:18443/rest/latest/modules",
+"status":"404"
+}
