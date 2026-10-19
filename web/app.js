@@ -213,6 +213,19 @@ function viewHistory() {
   }, 5000);
 }
 
+// ---- out of service: an administrator stops a point's alarms (for example while a sensor is replaced), with a reason that is audited
+async function drawService(name) {
+  const holds = await api("GET", "/api/alarms").catch(() => []), h = holds.find(x => x.name === name && x.kind === "oos"), f = $("#svc");
+  f.innerHTML = h
+    ? `<fieldset><legend>Alarm service</legend><p>Out of service since ${fmt(h.created)} by ${esc(h.user)}: ${esc(h.reason)}. Its alarms are not evaluated.</p><button type="submit">Return to service</button><small class="fe" id="svc-e" role="alert"></small></fieldset>`
+    : `<fieldset><legend>Alarm service</legend><div class="fld"><label for="svc-r">Reason for taking it out of service</label><input id="svc-r" required minlength="3" maxlength="200" autocomplete="off"><small class="hint">Its alarms stop and open ones return to normal. Recorded in the audit trail.</small></div><button type="submit">Take out of service</button><small class="fe" id="svc-e" role="alert"></small></fieldset>`;
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    try { await api("POST", `/api/alarms/${encodeURIComponent(name)}/${h ? "in-service" : "out-of-service"}`, h ? {} : {reason: $("#svc-r").value}); await drawService(name); }
+    catch (e) { $("#svc-e").textContent = e.message; }
+  };
+}
+
 // ---- reports: one row per point for a window
 function viewReports() {
   main.innerHTML = `<section aria-labelledby="r-h"><h2 id="r-h">Reports</h2><form id="rf" class="row">
@@ -311,10 +324,12 @@ async function viewConfig(kind = "source", name) {
     ${cur ? `<form id="ed"><label>Name <input name="name" value="${esc(cur.name)}" ${name === "_new" ? "" : "readonly"} required pattern="[A-Za-z0-9_.\\-]{1,64}"></label>
       ${name === "_new" && kind !== "point" && Object.keys(TEMPLATES[kind]).length > 1 ? `<label>${kind === "source" ? "Source type" : "Start from"} <select id="tpl">${Object.keys(TEMPLATES[kind]).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>` : ""}
       <div id="editor"></div>
-      <div class="row"><button type="submit">Save</button>${name !== "_new" ? '<button type="button" id="del">Delete</button>' : ""}</div></form><div id="ed-msg" role="status"></div>`
+      <div class="row"><button type="submit">Save</button>${name !== "_new" ? '<button type="button" id="del">Delete</button>' : ""}</div></form><div id="ed-msg" role="status"></div>
+      ${kind === "point" && name !== "_new" ? '<form id="svc" class="svc"></form>' : ""}`
       : '<p class="note">Choose an item, or create a new one. Saving validates every field and reloads the engine.</p>'}`;
   const msg = $("#ed-msg");
   if (!cur) return;
+  if (kind === "point" && name !== "_new") await drawService(name);
   const mount = b => mountEditor($("#editor"), {kind, body: structuredClone(b), sources});
   let editor = mount(body);
   $("#tpl")?.addEventListener("change", e => { editor = mount(TEMPLATES[kind][e.target.value]); });

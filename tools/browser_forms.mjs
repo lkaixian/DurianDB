@@ -74,6 +74,12 @@ console.log("existing:", await ev(`JSON.stringify({unit:document.querySelector('
 await shot("4-existing");
 // 7. keyboard: every control is focusable and labelled
 console.log("unlabelled controls:", await ev(`[...document.querySelectorAll('#ed input,#ed select,#ed textarea')].filter(e=>!(e.labels&&e.labels.length)&&!e.getAttribute('aria-label')).map(e=>e.id||e.dataset.path).join()`));
+// 8. out of service from the point page, then back
+await go("#config/point/boiler-temp");
+await ev(`(()=>{document.querySelector('#svc-r').value='sensor replacement';document.querySelector('#svc').requestSubmit()})()`); await sleep(1500);
+console.log("out of service:", await ev(`document.querySelector('#svc').textContent`));
+await ev(`document.querySelector('#svc').requestSubmit()`); await sleep(1500);
+console.log("back in service:", await ev(`document.querySelector('#svc').textContent.includes('Take out of service')`));
 // mobile
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");
