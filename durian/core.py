@@ -1,8 +1,8 @@
 """DurianDB core model: source -> point -> history / detectors / publishers.
 
-Original teaching implementation of the concepts in docs/research/01-concepts.md.
-Not derived from Mango code.
+Original teaching implementation of the concepts in docs/research. Not derived from Mango code.
 """
+from collections import deque
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, Optional
@@ -30,41 +30,148 @@ class Event:
     level: Level
     message: str
     ts: float
+    cleared_ts: Optional[float] = None  # set when the condition returns to normal
+    id: Optional[int] = None  # row id once stored
 
 
-@dataclass
-class HighLimit:
-    """Raises while value is above limit; clears when it returns below."""
-    limit: float
-    level: Level = Level.WARNING
-    active: bool = False
+class Detector:
+    kind = ""
 
-    def check(self, point: "Point", value, ts) -> Optional[Event]:
-        over = value > self.limit
-        fired = over and not self.active
-        self.active = over
-        if fired:
-            return Event(point.name, self.level, f"{value} > {self.limit}", ts)
+    def check(self, point, value, ts) -> Optional[Event]:  # a value arrived
+        return None
+
+    def tick(self, point, ts) -> Optional[Event]:  # time passed, maybe with no value
+        return None
+
+
+class _Latch(Detector):
+    """Raises one event when a condition has held for `duration` seconds; clears when it stops."""
+
+    def __init__(self, level=Level.WARNING, duration=0.0):
+        self.level, self.duration = level, duration
+        self.since, self.event = None, None
+
+    def evaluate(self, point, value, ts) -> Optional[str]:
+        raise NotImplementedError
+
+    def check(self, point, value, ts):
+        msg = self.evaluate(point, value, ts)
+        if msg is None:
+            self.since = None
+            if self.event:
+                self.event.cleared_ts, self.event = ts, None
+            return None
+        if self.since is None:
+            self.since = ts
+        if self.event is None and ts - self.since >= self.duration:
+            self.event = Event(point.name, self.level, msg, ts)
+            return self.event
+
+
+class HighLimit(_Latch):
+    kind = "HIGH_LIMIT"
+
+    def __init__(self, limit, level=Level.WARNING, duration=0.0):
+        super().__init__(level, duration)
+        self.limit = limit
+
+    def evaluate(self, point, value, ts):
+        return f"{value} > {self.limit}" if value > self.limit else None
+
+
+class LowLimit(HighLimit):
+    kind = "LOW_LIMIT"
+
+    def evaluate(self, point, value, ts):
+        return f"{value} < {self.limit}" if value < self.limit else None
+
+
+class RateOfChange(_Latch):
+    """Event when the value moves faster than `per_second` units per second."""
+    kind = "RATE_OF_CHANGE"
+
+    def __init__(self, per_second, level=Level.WARNING, duration=0.0):
+        super().__init__(level, duration)
+        self.per_second, self.prev = per_second, None
+
+    def evaluate(self, point, value, ts):
+        prev, self.prev = self.prev, (value, ts)
+        if prev is None or ts <= prev[1]:
+            return None
+        rate = abs(value - prev[0]) / (ts - prev[1])
+        return f"changing {rate:.2f}/s > {self.per_second}/s" if rate > self.per_second else None
+
+
+class NoUpdate(Detector):
+    """Event when a point reports nothing for `seconds`; clears on the next value."""
+    kind = "NO_UPDATE"
+
+    def __init__(self, seconds, level=Level.WARNING):
+        self.seconds, self.level, self.event = seconds, level, None
+
+    def check(self, point, value, ts):
+        if self.event:
+            self.event.cleared_ts, self.event = ts, None
+
+    def tick(self, point, ts):
+        if self.event is None and point.last_ts is not None and ts - point.last_ts > self.seconds:
+            self.event = Event(point.name, self.level, f"no update for {ts - point.last_ts:.0f}s", ts)
+            return self.event
+
+
+DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate)}
+_ARG = {"HIGH_LIMIT": "limit", "LOW_LIMIT": "limit", "RATE_OF_CHANGE": "per_second", "NO_UPDATE": "seconds"}
+
+
+def make_detector(cfg: dict) -> Detector:
+    """Build a detector from a config dict: {kind, limit|per_second|seconds, level, duration}."""
+    kind = cfg.get("kind")
+    if kind not in DETECTORS:
+        raise ValueError(f"kind must be one of {sorted(DETECTORS)}")
+    arg = _ARG[kind]
+    if not isinstance(cfg.get(arg), (int, float)) or isinstance(cfg.get(arg), bool):
+        raise ValueError(f"{arg} must be a number")
+    try:
+        level = Level[str(cfg.get("level", "WARNING")).upper()]
+    except KeyError:
+        raise ValueError(f"level must be one of {[l.name for l in Level]}")
+    duration = cfg.get("duration", 0)
+    if not isinstance(duration, (int, float)) or duration < 0:
+        raise ValueError("duration must be a number of seconds, zero or more")
+    extra = {} if kind == "NO_UPDATE" else {"duration": float(duration)}
+    return DETECTORS[kind](cfg[arg], level, **extra)
 
 
 @dataclass
 class Point:
     name: str
     logging: Logging = Logging.ON_CHANGE
+    tolerance: float = 0.0  # ON_CHANGE ignores moves of this size or less
     tags: dict = field(default_factory=dict)
     detectors: list = field(default_factory=list)
-    history: list = field(default_factory=list)  # (ts, value); a real store is separate
+    cache: deque = field(default_factory=lambda: deque(maxlen=100))  # recent (ts, value), bounded
+    unsaved: list = field(default_factory=list)  # logged samples waiting for the store
     last: object = None
+    last_ts: Optional[float] = None
+    meta: dict = field(default_factory=dict)  # presentation and access data: unit, source, roles, settable
+    _logged: object = None
 
     def update(self, value, ts, on_event: Callable[[Event], None]):
-        changed = value != self.last
-        if self.logging == Logging.ALL or (self.logging == Logging.ON_CHANGE and changed):
-            self.history.append((ts, value))
-        self.last = value
+        log = self.logging == Logging.ALL or (
+            self.logging == Logging.ON_CHANGE and (self._logged is None or abs(value - self._logged) > self.tolerance))
+        if log:
+            self._logged = value
+            self.cache.append((ts, value))
+            self.unsaved.append((ts, value))
+        self.last, self.last_ts = value, ts
         for d in self.detectors:
             ev = d.check(self, value, ts)
             if ev:
                 on_event(ev)
+
+    def take_unsaved(self):
+        out, self.unsaved = self.unsaved, []
+        return out
 
 
 @dataclass
@@ -72,6 +179,8 @@ class Source:
     """A data source owns its points; subclasses implement poll()."""
     name: str
     points: dict = field(default_factory=dict)
+    error: Optional[str] = None  # last poll failure, None when healthy
+    meta: dict = field(default_factory=dict)  # type and read roles, filled by config.build_engine
 
     def add(self, point: Point) -> Point:
         self.points[point.name] = point
@@ -90,32 +199,17 @@ class Engine:
 
     def tick(self, ts):
         for s in self.sources:
-            for name, value in s.poll(ts).items():
+            try:
+                values = s.poll(ts)
+                s.error = None
+            except Exception as e:  # one broken source must not stop the others
+                s.error, values = f"{type(e).__name__}: {e}", {}
+            for name, value in values.items():
                 s.points[name].update(value, ts, self._event)
                 for pub in self.publishers:
                     pub(s.points[name], value, ts)
-
-
-def demo():
-    class Fake(Source):
-        vals = iter([20, 20, 95, 96, 30])
-
-        def poll(self, ts):
-            return {"temp": next(self.vals)}
-
-    src = Fake("plc")
-    src.add(Point("temp", detectors=[HighLimit(90, Level.URGENT)]))
-    out = []
-    eng = Engine()
-    eng.sources.append(src)
-    eng.publishers.append(lambda p, v, ts: out.append((p.name, v)))
-    for t in range(5):
-        eng.tick(t)
-    assert [v for _, v in src.points["temp"].history] == [20, 95, 96, 30]  # 2nd 20 not logged
-    assert len(eng.events) == 1 and eng.events[0].level == Level.URGENT  # fires once, not twice
-    assert len(out) == 5
-    print("ok")
-
-
-if __name__ == "__main__":
-    demo()
+            for p in list(s.points.values()):
+                for d in p.detectors:
+                    ev = d.tick(p, ts)
+                    if ev:
+                        self._event(ev)
