@@ -41,15 +41,19 @@ class SqlSource(PolledSource):
         super().__init__(name, cfg.get("period", 10.0), cfg.get("backoff_scale", 1.5), cfg.get("backoff_max", 300.0))
         self.path, self.query, self.timeout = str(Path(cfg["path"]).resolve()), cfg["query"], cfg.get("timeout", 5.0)
 
-    def fetch(self):
+    def rows(self):
+        """The query's rows (at most 10000). Public so the Test button can show what a source would see."""
         con = sqlite3.connect(Path(self.path).as_uri() + "?mode=ro", uri=True, timeout=self.timeout)
         try:
             con.execute("PRAGMA query_only = ON")
             deadline = time.monotonic() + self.timeout
             con.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 10000)
-            rows = con.execute(self.query).fetchmany(10000)
+            return con.execute(self.query).fetchmany(10000)
         finally:
             con.close()
+
+    def fetch(self):
+        rows = self.rows()
         by_key = {str(r[0]): r[1] for r in rows if len(r) >= 2}
         values, rejected = {}, []
         for p in self.points.values():
