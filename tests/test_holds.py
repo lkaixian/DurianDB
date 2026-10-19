@@ -31,7 +31,7 @@ for n, b in (("hot", HOT), ("hot2", HOT), ("mode", {"source": "demo", "generator
     assert call(admin, "PUT", f"/api/config/point/{n}", b)[0] == 200, n
 assert call(admin, "PUT", "/api/config/point/bad", {**HOT, "suppress_when": {"point": "bad", "op": ">", "value": 1}})[0] == 422
 sent = []
-app.outputs.on_event = lambda ev, kind: sent.append((ev.point, kind))
+app.outputs.on_event = lambda ev, kind: sent.append((ev.point, kind)) if ev.point in ("hot", "hot2", "sup") else None  # the seeded random walks may alarm too
 state = lambda n: [(e["state"], e["held"]) for e in call(op, "GET", "/api/events")[1] if e["point"] == n]
 now = time.time()
 
