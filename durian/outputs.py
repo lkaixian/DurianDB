@@ -11,6 +11,7 @@ import re
 import smtplib
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +29,12 @@ opener = urllib.request.build_opener(NoRedirect)
 ADDRESS = re.compile(r"^[^@\s<>,;]{1,64}@[^@\s<>,;]{1,255}$")
 HANDLER_TYPES = ("webhook", "email", "setpoint")
 SECURITY = ("none", "starttls", "ssl")
+PUBLISHER_TYPES = ("mqtt", "http")
+
+
+def _http_url(u):
+    u = urllib.parse.urlparse(u) if isinstance(u, str) else None
+    return bool(u and u.scheme in ("http", "https") and u.hostname)
 
 
 def _num(v):
@@ -48,8 +55,7 @@ def validate_handler(name, b):
                                and isinstance(sc.get("tags", {}), dict)):
         add("scope", "must be {points: [...], tags: {...}, sources: [...]}; leave it out for every alarm")
     if kind == "webhook":
-        u = urllib.parse.urlparse(b.get("url", "")) if isinstance(b.get("url"), str) else None
-        if not u or u.scheme not in ("http", "https") or not u.hostname:
+        if not _http_url(b.get("url")):
             add("url", "must be an http or https URL")
     elif kind == "email":
         to = b.get("to")
@@ -78,21 +84,34 @@ def validate_handler(name, b):
 
 def validate_publisher(name, b, store):
     e, add = [], lambda p, m: e.append({"property": p, "message": m})
-    if b.get("type") != "mqtt":
-        add("type", "must be 'mqtt'")
-    try:
-        load_creds(b.get("creds", ""))
-    except (OSError, ValueError, TypeError) as ex:
-        add("creds", f"cannot use credentials file: {type(ex).__name__}")
-    pre = b.get("prefix", "durian-out/")
-    if not isinstance(pre, str) or not pre.endswith("/") or "#" in pre or "+" in pre:
-        add("prefix", "must be a topic prefix ending in '/', without wildcards")
-    else:  # publishing into a prefix a source subscribes to would feed our own output back in
-        for s in store.list("source"):
-            if s.get("type") == "mqtt":
-                other = s.get("prefix", "durian/")
-                if pre.startswith(other) or other.startswith(pre):
-                    add("prefix", f"overlaps the prefix of source '{s['name']}'")
+    kind = b.get("type")
+    if kind not in PUBLISHER_TYPES:
+        add("type", f"must be one of {list(PUBLISHER_TYPES)}")
+    if kind == "http":  # posts {point, value, ts, quality} as JSON, the body another DurianDB's /api/ingest takes
+        if not _http_url(b.get("url")):
+            add("url", "must be an http or https URL")
+        if "creds" in b:
+            try:
+                if not isinstance(json.loads(Path(b["creds"]).read_text()).get("token"), str):
+                    raise ValueError
+            except (OSError, ValueError, TypeError, AttributeError):
+                add("creds", "must be the path of a JSON file with a token, sent as a Bearer token")
+        if "resend" in b and not (_num(b["resend"]) and 1 <= b["resend"] <= 86400):
+            add("resend", "must be a number of seconds from 1 to 86400")
+    elif kind == "mqtt":
+        try:
+            load_creds(b.get("creds", ""))
+        except (OSError, ValueError, TypeError) as ex:
+            add("creds", f"cannot use credentials file: {type(ex).__name__}")
+        pre = b.get("prefix", "durian-out/")
+        if not isinstance(pre, str) or not pre.endswith("/") or "#" in pre or "+" in pre:
+            add("prefix", "must be a topic prefix ending in '/', without wildcards")
+        else:  # publishing into a prefix a source subscribes to would feed our own output back in
+            for s in store.list("source"):
+                if s.get("type") == "mqtt":
+                    other = s.get("prefix", "durian/")
+                    if pre.startswith(other) or other.startswith(pre):
+                        add("prefix", f"overlaps the prefix of source '{s['name']}'")
     pts = b.get("points")
     if not (isinstance(pts, list) and pts and all(isinstance(p, str) for p in pts)):
         add("points", "list the point names to publish, or ['*'] for all")
@@ -109,9 +128,18 @@ class Outputs:
         self.resolve, self.setter = resolve or (lambda name: ({}, None)), setter
         self.q = queue.Queue(maxsize=1000)
         self.failed = 0  # deliveries that did not work, for the health view
-        self.publishers = []
+        self.publishers, self.senders = [], []  # MQTT clients, and HTTP senders {url, names, headers, resend, sent}
         for p in store.list("publisher"):
             if not p.get("enabled", True):
+                continue
+            if p.get("type") == "http":
+                try:
+                    tok = json.loads(Path(p["creds"]).read_text())["token"] if p.get("creds") else None
+                except (OSError, ValueError, KeyError):
+                    log.warning("publisher %s not started: unreadable credentials", p["name"])
+                    continue
+                self.senders.append({"url": p["url"], "names": set(p["points"]), "resend": p.get("resend", 60), "sent": {},
+                                     "headers": {"Authorization": "Bearer " + tok} if tok else {}})
                 continue
             try:
                 cl = tls_client(load_creds(p["creds"]))
@@ -125,6 +153,13 @@ class Outputs:
         self.worker.start()
 
     def on_value(self, point, value, ts):
+        for s in self.senders:  # send a point's value when it changes, and again after `resend` seconds so the receiver sees it is alive
+            if ("*" in s["names"] or point.name in s["names"]) and point.quality != Quality.BAD:
+                now = time.monotonic()
+                last = s["sent"].get(point.name)
+                if last is None or last[0] != value or now - last[1] >= s["resend"]:
+                    s["sent"][point.name] = (value, now)
+                    self._put(("webhook", s["url"], {"point": point.name, "value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}, s["headers"]))
         for cl, prefix, names in self.publishers:
             if "*" in names or point.name in names:
                 cl.publish(prefix + point.name, json.dumps({"value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}), qos=1)
@@ -190,8 +225,8 @@ class Outputs:
                 if item[0] == "stop":
                     return
                 if item[0] == "webhook":
-                    _, url, body = item
-                    opener.open(urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"}), timeout=5).read(1024)
+                    _, url, body, *extra = item
+                    opener.open(urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", **(extra[0] if extra else {})}), timeout=5).read(1024)
                 elif item[0] == "mail":
                     self._send_mail(*item[1:])
                 elif item[0] == "set":
