@@ -406,19 +406,16 @@ async function viewConfig(kind = "source", name) {
   if (!KINDS[kind]) kind = "source";
   main.innerHTML = `<section aria-labelledby="c-h"><h2 id="c-h">Config</h2>
     <ul class="list">${Object.entries(KINDS).map(([k, l]) => `<li><a class="btn" href="#config/${k}" ${k === kind ? 'aria-current="page"' : ""}>${l}</a></li>`).join("")}</ul>
-    <div id="health"></div><div id="cfg" class="status" data-live>Loading...</div></section>`;
+    <div id="cfg" class="status" data-live>Loading...</div></section>`;
   const items = await api("GET", `/api/config/${kind}`).catch(e => { showErr(e); return null; });
   if (!items) return;
-  if (kind === "source") {
-    const h = await api("GET", "/api/sources").catch(() => []);
-    $("#health").innerHTML = h.length ? `<h3>Source health</h3><table class="stack"><thead><tr><th>Name</th><th>Type</th><th>Points</th><th>State</th><th>Connected</th><th>Dropped</th><th>Error</th></tr></thead><tbody>${h.map(s => `<tr><td data-label="Name">${esc(s.name)}</td><td data-label="Type">${esc(s.type)}</td><td class="num" data-label="Points">${s.points}</td><td class="${s.down ? "err" : ""}" data-label="State">${s.down ? "Down: " + esc(s.down) : "Up"}</td><td data-label="Connected">${s.connected == null ? "n/a" : s.connected ? "yes" : "no"}</td><td class="num" data-label="Dropped">${s.dropped ?? "n/a"}</td><td class="${s.error ? "err" : ""}" data-label="Error">${esc(s.error || "none")}</td></tr>`).join("")}</tbody></table>` : "";
-  }
+  if (!name) return renderConfigList(kind, items);
   const sources = kind === "point" ? await api("GET", "/api/config/source").catch(() => []) : [];
   const newPoint = () => { const s = sources[0], start = s ? POINT_PARTS[s.type].start() : {}; return {source: s ? s.name : "", ...POINT_BASE, ...start}; };
   const cur = name === "_new" ? {name: "", ...(kind === "point" ? newPoint() : firstTemplate(kind))} : items.find(i => i.name === name);
   const {name: _n, ...body} = cur || {};
   $("#cfg").className = "";
-  $("#cfg").innerHTML = `<ul class="list">${items.map(i => `<li><a class="btn" href="#config/${kind}/${encodeURIComponent(i.name)}" ${i.name === name ? 'aria-current="page"' : ""}>${esc(i.name)}</a></li>`).join("")}<li><a class="btn" href="#config/${kind}/_new">New ${KINDS[kind].toLowerCase().replace(/s$/, "")}</a></li></ul>
+  $("#cfg").innerHTML = `<p class="crumb"><a href="#config/${kind}">&lsaquo; All ${KINDS[kind].toLowerCase()}</a></p><h3>${name === "_new" ? "New " + KINDS[kind].toLowerCase().replace(/s$/, "") : esc(name)}</h3>
     ${cur ? `<form id="ed"><label>Name <input name="name" value="${esc(cur.name)}" ${name === "_new" ? "" : "readonly"} required pattern="[A-Za-z0-9_.\\-]{1,64}"></label>
       ${name === "_new" && kind !== "point" && Object.keys(TEMPLATES[kind]).length > 1 ? `<label>${kind === "source" ? "Source type" : "Start from"} <select id="tpl">${Object.keys(TEMPLATES[kind]).map(t => `<option>${esc(t)}</option>`).join("")}</select></label>` : ""}
       <div id="editor"></div>
@@ -456,6 +453,38 @@ async function viewConfig(kind = "source", name) {
     if (!confirm(`Delete ${kind} "${name}"?`)) return;
     try { await api("DELETE", `/api/config/${kind}/${encodeURIComponent(name)}`); location.hash = `#config/${kind}`; }
     catch (e) { report(false, e.message); }
+  });
+}
+
+// ---- config lists: one dense, filterable table per kind (rows open the editor)
+const yes = v => v ? "Yes" : "No";
+const tagText = t => Object.entries(t || {}).map(([k, v]) => k + ":" + v).join(", ");
+const LISTS = {
+  source: {cols: ["Name", "Type", "Enabled", "Points", "State", "Dropped", "Error"], cell: (i, x) => [null, i.type, yes(i.enabled !== false), x.points ?? "", x.down ? "Down: " + x.down : x.name ? "Up" : "Not running", x.dropped ?? "", x.error || ""]},
+  point: {cols: ["Name", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.source, x.last == null ? "no value yet" : `${x.decimals == null ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
+  handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.url || "", i.min_level || "", yes(i.enabled !== false)]},
+  publisher: {cols: ["Name", "Type", "Topic prefix", "Points", "Enabled"], cell: i => [null, i.type, i.prefix || "", (i.points || []).join(", "), yes(i.enabled !== false)]},
+  watchlist: {cols: ["Name", "Tags", "Points", "Who can read"], cell: i => [null, tagText(i.tags), (i.points || []).join(", "), (i.read_roles || []).join(", ")]},
+};
+async function renderConfigList(kind, items) {
+  const live = kind === "source" ? await api("GET", "/api/sources").catch(() => []) : kind === "point" ? await api("GET", "/api/points").catch(() => []) : [];
+  const by = Object.fromEntries(live.map(x => [x.name, x])), L = LISTS[kind], one = KINDS[kind].toLowerCase().replace(/s$/, "");
+  const box = $("#cfg");
+  box.className = "";
+  box.innerHTML = `<div class="row"><a class="btn" href="#config/${kind}/_new">New ${one}</a>
+    ${items.length > 5 ? `<label>Filter <input id="lf" type="search" placeholder="name, source, tag" autocomplete="off"></label>` : ""}<span id="lcount" class="note" role="status"></span></div>
+    ${items.length ? `<table class="stack dense"><thead><tr>${L.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${items.map(i => {
+      const cells = L.cell(i, by[i.name] || {});
+      return `<tr data-q="${esc((i.name + " " + cells.join(" ")).toLowerCase())}">${cells.map((c, n) => n === 0
+        ? `<td data-label="${L.cols[0]}"><a href="#config/${kind}/${encodeURIComponent(i.name)}">${esc(i.name)}</a></td>`
+        : `<td data-label="${L.cols[n]}" class="${String(c).startsWith("Down") || c === "bad" || (L.cols[n] === "Error" && c) ? "err" : ""}">${esc(String(c))}</td>`).join("")}</tr>`;
+    }).join("")}</tbody></table>` : `<p class="status">No ${KINDS[kind].toLowerCase()} yet. ${kind === "source" ? "Add a source first, then points that read from it." : kind === "point" ? "Create a source first, then add points that read from it." : `Use New ${one} to add one.`}</p>`}`;
+  const count = () => { const rows = [...box.querySelectorAll("tbody tr")]; $("#lcount").textContent = rows.length ? `${rows.filter(r => !r.hidden).length} of ${rows.length}` : ""; };
+  count();
+  $("#lf")?.addEventListener("input", e => {
+    const q = e.target.value.trim().toLowerCase();
+    box.querySelectorAll("tbody tr").forEach(r => { r.hidden = q !== "" && !q.split(/\s+/).every(w => r.dataset.q.includes(w)); });
+    count();
   });
 }
 
