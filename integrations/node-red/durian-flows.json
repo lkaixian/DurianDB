@@ -1,0 +1,736 @@
+[
+  {
+    "id": "durian_tab",
+    "type": "tab",
+    "label": "DurianDB examples",
+    "disabled": false,
+    "info": "Examples for sending data to DurianDB and reading it back. See integrations/node-red/README.md."
+  },
+  {
+    "id": "c_1 70",
+    "type": "comment",
+    "name": "1  Push values with HTTP POST",
+    "info": "Needs an ingest token for an http_in source. One value, a batch, or a flat {point: value} map are all accepted. ts is optional (epoch seconds or milliseconds, or ISO-8601). The reply lists accepted and rejected values.",
+    "x": 170,
+    "y": 70,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "in_post",
+    "type": "inject",
+    "name": "Push now",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 110,
+    "wires": [
+      [
+        "fn_post"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "fn_post",
+    "type": "function",
+    "name": "Build the request",
+    "func": "const base = env.get(\"DURIAN_URL\") || \"http://127.0.0.1:8765\";\nmsg.method = \"POST\";\nmsg.url = base + \"/api/ingest/\" + env.get(\"DURIAN_SOURCE\");\nmsg.headers = {\"Authorization\": \"Bearer \" + env.get(\"DURIAN_INGEST_TOKEN\"), \"Content-Type\": \"application/json\"};\n// a batch: several points, each with its own time\nmsg.payload = {values: [\n  {point: \"temp\",  value: Math.round((20 + Math.random() * 5) * 10) / 10, ts: Date.now()},\n  {point: \"level\", value: Math.round(Math.random() * 100) / 10, ts: Date.now()}\n]};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 110,
+    "wires": [
+      [
+        "hr_post"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "hr_post",
+    "type": "http request",
+    "name": "DurianDB",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 620,
+    "y": 110,
+    "wires": [
+      [
+        "keep_post"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "keep_post",
+    "type": "function",
+    "name": "Remember result",
+    "func": "global.set(\"last_post\", {status: msg.statusCode, body: msg.payload});\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 800,
+    "y": 110,
+    "wires": [
+      [
+        "dbg_post"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "dbg_post",
+    "type": "debug",
+    "name": "result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 980,
+    "y": 110,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "c_2 140",
+    "type": "comment",
+    "name": "2  Push a value with HTTP GET",
+    "info": "For tools that can only issue GET. The same ingest token. Values travel in the query string.",
+    "x": 170,
+    "y": 140,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "in_get",
+    "type": "inject",
+    "name": "Push now",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 180,
+    "wires": [
+      [
+        "fn_get"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "fn_get",
+    "type": "function",
+    "name": "Build the request",
+    "func": "const base = env.get(\"DURIAN_URL\") || \"http://127.0.0.1:8765\";\nmsg.method = \"GET\";\nconst v = Math.round(Math.random() * 100) / 10;\nmsg.url = base + \"/api/ingest/\" + env.get(\"DURIAN_SOURCE\") + \"?point=level&value=\" + v + \"&ts=\" + Date.now();\nmsg.headers = {\"Authorization\": \"Bearer \" + env.get(\"DURIAN_INGEST_TOKEN\")};\ndelete msg.payload;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 180,
+    "wires": [
+      [
+        "hr_get"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "hr_get",
+    "type": "http request",
+    "name": "DurianDB",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 620,
+    "y": 180,
+    "wires": [
+      [
+        "keep_get"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "keep_get",
+    "type": "function",
+    "name": "Remember result",
+    "func": "global.set(\"last_get\", {status: msg.statusCode, body: msg.payload});\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 800,
+    "y": 180,
+    "wires": [
+      [
+        "dbg_get"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "dbg_get",
+    "type": "debug",
+    "name": "result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 980,
+    "y": 180,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "c_3 210",
+    "type": "comment",
+    "name": "3  Read the latest value",
+    "info": "Needs a read token. The point must be readable by the token's owner.",
+    "x": 170,
+    "y": 210,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "in_read",
+    "type": "inject",
+    "name": "Read now",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 250,
+    "wires": [
+      [
+        "fn_read"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "fn_read",
+    "type": "function",
+    "name": "Build the request",
+    "func": "const base = env.get(\"DURIAN_URL\") || \"http://127.0.0.1:8765\";\nmsg.method = \"GET\";\nmsg.url = base + \"/api/value/\" + (msg.point || \"boiler-temp\");\nmsg.headers = {\"Authorization\": \"Bearer \" + env.get(\"DURIAN_READ_TOKEN\")};\ndelete msg.payload;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 250,
+    "wires": [
+      [
+        "hr_read"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "hr_read",
+    "type": "http request",
+    "name": "DurianDB",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 620,
+    "y": 250,
+    "wires": [
+      [
+        "keep_read"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "keep_read",
+    "type": "function",
+    "name": "Remember result",
+    "func": "global.set(\"last_read\", {status: msg.statusCode, body: msg.payload});\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 800,
+    "y": 250,
+    "wires": [
+      [
+        "dbg_read"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "dbg_read",
+    "type": "debug",
+    "name": "result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 980,
+    "y": 250,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "c_4 280",
+    "type": "comment",
+    "name": "4  Set a point (control)",
+    "info": "Needs a write token. The point must be settable and the token's owner must hold one of its set roles. Every set is audited with the token name.",
+    "x": 170,
+    "y": 280,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "in_set",
+    "type": "inject",
+    "name": "Set now",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 320,
+    "wires": [
+      [
+        "fn_set"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "fn_set",
+    "type": "function",
+    "name": "Build the request",
+    "func": "const base = env.get(\"DURIAN_URL\") || \"http://127.0.0.1:8765\";\nmsg.method = \"POST\";\nmsg.url = base + \"/api/points/pump-setpoint/set\";\nmsg.headers = {\"Authorization\": \"Bearer \" + env.get(\"DURIAN_WRITE_TOKEN\"), \"Content-Type\": \"application/json\"};\nmsg.payload = {value: 55};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 320,
+    "wires": [
+      [
+        "hr_set"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "hr_set",
+    "type": "http request",
+    "name": "DurianDB",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 620,
+    "y": 320,
+    "wires": [
+      [
+        "keep_set"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "keep_set",
+    "type": "function",
+    "name": "Remember result",
+    "func": "global.set(\"last_set\", {status: msg.statusCode, body: msg.payload});\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 800,
+    "y": 320,
+    "wires": [
+      [
+        "dbg_set"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "dbg_set",
+    "type": "debug",
+    "name": "result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 980,
+    "y": 320,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "c_5 350",
+    "type": "comment",
+    "name": "5  Publish over MQTT with TLS",
+    "info": "Topic durian/<point>, payload a number or {\"value\": n}. Set the broker's TLS config to the CA file and fill in the user and password.",
+    "x": 170,
+    "y": 350,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "in_mqtt",
+    "type": "inject",
+    "name": "Publish now",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 150,
+    "y": 390,
+    "wires": [
+      [
+        "fn_mqtt"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "fn_mqtt",
+    "type": "function",
+    "name": "Build the message",
+    "func": "msg.topic = \"durian/mqtt-temp\";\nmsg.payload = {value: Math.round((70 + Math.random() * 25) * 10) / 10};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 390,
+    "wires": [
+      [
+        "mq_out"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "mq_out",
+    "type": "mqtt out",
+    "name": "DurianDB mqtt-temp",
+    "topic": "",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "durian_broker",
+    "x": 720,
+    "y": 390,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "c_6 420",
+    "type": "comment",
+    "name": "6  Receive what DurianDB publishes over MQTT",
+    "info": "Configure a publisher in DurianDB with prefix durian-out/ and the points to share. Node-RED receives them here.",
+    "x": 170,
+    "y": 420,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "mq_in",
+    "type": "mqtt in",
+    "name": "durian-out/#",
+    "topic": "durian-out/#",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "durian_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 150,
+    "y": 460,
+    "wires": [
+      [
+        "keep_mqtt"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "keep_mqtt",
+    "type": "function",
+    "name": "Remember",
+    "func": "global.set(\"last_mqtt\", {topic: msg.topic, body: msg.payload});\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 460,
+    "wires": [
+      [
+        "dbg_mqtt"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "dbg_mqtt",
+    "type": "debug",
+    "name": "result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 700,
+    "y": 460,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "c_7 490",
+    "type": "comment",
+    "name": "7  Receive DurianDB event webhooks",
+    "info": "Add a handler in DurianDB: type webhook, url http://<node-red>:1880/durian/events, minimum level you care about. Each alarm raised or cleared arrives here as JSON {event, point, level, message, ts, cleared_ts}.",
+    "x": 170,
+    "y": 490,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "wh_in",
+    "type": "http in",
+    "name": "POST /durian/events",
+    "url": "/durian/events",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 530,
+    "wires": [
+      [
+        "keep_event"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "keep_event",
+    "type": "function",
+    "name": "Remember and answer",
+    "func": "global.set(\"last_event\", msg.payload);\nmsg.statusCode = 204;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 530,
+    "wires": [
+      [
+        "wh_out",
+        "dbg_event"
+      ]
+    ],
+    "z": "durian_tab"
+  },
+  {
+    "id": "wh_out",
+    "type": "http response",
+    "name": "204",
+    "statusCode": "",
+    "headers": {},
+    "x": 700,
+    "y": 530,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "dbg_event",
+    "type": "debug",
+    "name": "result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 700,
+    "y": 580,
+    "wires": [],
+    "z": "durian_tab"
+  },
+  {
+    "id": "durian_tls",
+    "type": "tls-config",
+    "name": "DurianDB CA",
+    "cert": "",
+    "key": "",
+    "ca": "",
+    "certname": "",
+    "keyname": "",
+    "caname": "",
+    "servername": "",
+    "verifyservercert": true,
+    "alpnprotocol": ""
+  },
+  {
+    "id": "durian_broker",
+    "type": "mqtt-broker",
+    "name": "DurianDB MQTT (TLS)",
+    "broker": "localhost",
+    "port": "18883",
+    "tls": "durian_tls",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": true,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  }
+]

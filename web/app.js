@@ -32,9 +32,9 @@ function showErr(e, where) {
 }
 
 // ---- navigation
-const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, config: viewConfig, users: viewUsers, audit: viewAudit, account: viewAccount};
+const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount};
 function nav(view) {
-  const items = me.name ? [["overview", "Overview"], ["dashboards", "Dashboards"], ["history", "History"], ...(isAdmin() ? [["config", "Config"], ["users", "Users"], ["audit", "Audit"]] : []), ["account", me.name]] : [["", "Log in"]];
+  const items = me.name ? [["overview", "Overview"], ["dashboards", "Dashboards"], ["history", "History"], ...(isAdmin() ? [["config", "Config"], ["users", "Users"], ["tokens", "Tokens"], ["database", "Database"], ["audit", "Audit"]] : []), ["account", me.name]] : [["", "Log in"]];
   $("#nav").innerHTML = items.map(([v, l]) => `<a href="#${v}" ${v === view || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : ""}>${esc(l)}</a>`).join("");
 }
 function route() {
@@ -44,7 +44,7 @@ function route() {
   if (!me.name && view === "d" && rest[0]) { nav("d"); return viewDashboard(decodeURIComponent(rest[0]), rest[1]); }  // public dashboards need no login
   if (!me.name) { nav(""); return viewLogin(); }
   const v = VIEWS[view] ? view : "overview";
-  if (["config", "users", "audit"].includes(v) && !isAdmin()) { location.hash = "#overview"; return; }
+  if (["config", "users", "tokens", "database", "audit"].includes(v) && !isAdmin()) { location.hash = "#overview"; return; }
   nav(v);
   VIEWS[v](...rest.map(decodeURIComponent));
   main.focus({preventScroll: true});
