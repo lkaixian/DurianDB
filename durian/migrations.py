@@ -33,4 +33,9 @@ def v3_api_tokens(s):
           "scope {key} not null, source {key}, created {real}, expires {real}, last_used {real}, disabled {int} not null default 0)")
 
 
-MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens)]
+def v4_history_quality(s):
+    s.ddl("alter table history add column quality {int} not null default 0")  # 0 good, 1 uncertain, 2 bad (core.Quality)
+
+
+MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens),
+              (4, "history quality", v4_history_quality)]

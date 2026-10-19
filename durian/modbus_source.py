@@ -6,7 +6,7 @@ only loses those points, and a dead link backs off (period x scale^failures, cap
 import threading
 import time
 
-from .core import Logging, Point, Source
+from .core import Logging, Point, Quality, Source
 from .modbus import (LIMITS, RANGES, TYPES, ModbusClient, ModbusError, ModbusException, SerialLink, TcpLink,
                      decode, encode, plan_batches)
 
@@ -112,10 +112,13 @@ class ModbusSource(Source):
         else:
             self.fails, self.next_try, self.connected = 0, 0.0, True
             self.error = f"{len(rejected)} point(s) rejected: " + "; ".join(rejected[:3]) if rejected else None
+        now = time.time()
+        out = {n: (v, now, Quality.GOOD) for n, v in values.items()}
+        out.update({n: (None, now, Quality.BAD) for n, p in self.points.items() if "modbus" in p.meta and n not in values})
         if self.cfg["monitor"]:
-            values.update({self._monitor_name(u): 1.0 if ok else 0.0 for u, ok in online.items()})
+            out.update({self._monitor_name(u): (1.0 if ok else 0.0, now, Quality.GOOD) for u, ok in online.items()})
         with self._lock:
-            self._latest.update(values)
+            self._latest.update(out)
 
     def _read(self, unit, rng, start, count):
         if rng in ("coil", "discrete"):

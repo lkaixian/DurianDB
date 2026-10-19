@@ -45,10 +45,10 @@ for bad in (True, None, "yesterday", [1]):
         raise AssertionError(bad)
     except ValueError:
         pass
-assert parse_payload({"point": "a", "value": 1, "ts": 5}, {}) == [("a", 1, 5, 0)]
-assert parse_payload({"values": [{"point": "a", "value": 1}, {"point": "b", "value": 2}]}, {})[1] == ("b", 2, None, 1)
-assert parse_payload({"a": 1, "b": 2}, {}) == [("a", 1, None, 0), ("b", 2, None, 1)]
-assert parse_payload(None, {"point": "a", "value": "3.5", "ts": "9"}) == [("a", "3.5", "9", 0)]
+assert parse_payload({"point": "a", "value": 1, "ts": 5}, {}) == [("a", 1, 5, 0, None)]
+assert parse_payload({"values": [{"point": "a", "value": 1}, {"point": "b", "value": 2}]}, {})[1] == ("b", 2, None, 1, None)
+assert parse_payload({"a": 1, "b": 2}, {}) == [("a", 1, None, 0, None), ("b", 2, None, 1, None)]
+assert parse_payload(None, {"point": "a", "value": "3.5", "ts": "9"}) == [("a", "3.5", "9", 0, None)]
 for bad in (None, {}, [], "x", {"values": "x"}, {"values": [1]}, {"values": []}, {"values": [{"point": "a", "value": 1}] * 1001}):
     try:
         parse_payload(bad, {})
@@ -119,6 +119,7 @@ app.tick(time.time() + 5)
 v = {p["name"]: p["last"] for p in call(admin, "GET", "/api/points")[1]}
 assert v["temp"] == 23.0 and v["level"] == 9.5, v
 assert call(R, "GET", "/api/value/temp")[1]["value"] == 23.0 and call(R, "GET", "/api/value/ghost")[0] == 404
+assert call(R, "GET", "/api/value/temp")[1]["quality"] == "good"
 src = next(s for s in app.engine.sources if s.name == "nodered")
 assert src.dropped >= 5 and call(admin, "GET", "/api/sources")[1][-1]["dropped"] >= 5
 
