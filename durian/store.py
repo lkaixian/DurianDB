@@ -154,6 +154,20 @@ class Store:
     def history_range(self, point, start, end, limit):
         return self.q("select ts, value, quality from history where point=? and ts>=? and ts<=? and quality < 2 order by ts limit ?", (point, start, end, limit))
 
+    def history_summary(self, point, start, end):
+        """Count, min, max and average of the good samples in a window, the first and last good values, and the number of bad samples."""
+        good = "point=? and ts>=? and ts<=? and quality < 2"
+        r = self.q("select count(case when quality < 2 then 1 end) as n, min(case when quality < 2 then value end) as lo, "
+                   "max(case when quality < 2 then value end) as hi, avg(case when quality < 2 then value end) as mean, "
+                   "count(case when quality = 2 then 1 end) as bad from history where point=? and ts>=? and ts<=?", (point, start, end))[0]
+        if r["n"]:
+            r["first"] = self.q(f"select value from history where {good} order by ts limit 1", (point, start, end))[0]["value"]
+            r["last"] = self.q(f"select value from history where {good} order by ts desc limit 1", (point, start, end))[0]["value"]
+        return r
+
+    def alarm_counts(self, start, end):
+        return {r["point"]: r["n"] for r in self.q("select point, count(*) as n from events where ts>=? and ts<=? group by point", (start, end))}
+
     def purge_history(self, cutoff, point=None, except_points=(), limit=5000):
         """Delete up to `limit` rows older than cutoff, for one point or for all but the listed ones. Returns rows deleted."""
         where, args = "ts < ?", [cutoff]
