@@ -51,4 +51,4 @@ Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every 
 
 ## Status and research
 
-See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `05`. Open questions: `docs/research/99-open-questions.md`.
+See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `06` (06 compares the enterprise and regular editions). Open questions: `docs/research/99-open-questions.md`.
