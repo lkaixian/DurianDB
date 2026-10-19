@@ -20,7 +20,7 @@ h = hash_password("correct horse battery")
 assert verify_password("correct horse battery", h) and not verify_password("wrong", h) and not verify_password("x", "garbage")
 assert h != hash_password("correct horse battery")  # salted
 
-assert held(["superadmin"]) == {"superadmin", "user", "anonymous"} and held(["ops"]) == {"ops"}
+assert held(["superadmin"]) == {"superadmin", "user", "anonymous"} and held(["ops"]) == {"ops", "anonymous"}  # public means everyone
 assert can({"anonymous"}, ["anonymous"]) and not can({"anonymous"}, []) and can({"superadmin"}, [])
 assert can(held(["user"]), ["anonymous"]) and not can(held(["user"]), ["ops"]) and can(held(["ops"]), ["ops", "x"])
 

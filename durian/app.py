@@ -8,8 +8,9 @@ import re
 import time
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
-from .config import (build_engine, validate_point, validate_source, validate_watchlist)
+from .config import (build_engine, roles_ok, validate_point, validate_source, validate_watchlist)
 from .core import Level
+from .dashboards import validate_dashboard
 from .outputs import Outputs, validate_handler, validate_publisher
 from .store import ROLLUPS
 
@@ -156,6 +157,8 @@ class App:
                          if can(ident["roles"], s.meta.get("read_roles", ["user"]))]
         if (method, a) == ("GET", "watchlists") and b is None:
             return 200, [w for w in self.store.list("watchlist") if can(ident["roles"], w.get("read_roles", ["user"]))]
+        if a == "dashboards" and c is None:
+            return self.dashboards(method, b, body, ident)
         if (method, a) == ("POST", "password") and b is None:
             need(ident["name"])
             body = body or {}
@@ -174,6 +177,63 @@ class App:
         if (method, a) == ("GET", "audit"):
             return 200, self.store.audit_log()
         raise ApiError(404, "not found")
+
+    # ---- dashboards: viewing follows read roles, editing follows owner, edit roles or superadmin
+    MAX_DASHBOARDS = 200
+
+    @staticmethod
+    def _can_edit(ident, d):
+        return bool(ident["name"]) and (d.get("owner") == ident["name"] or can(ident["roles"], d.get("edit_roles", [])))
+
+    @staticmethod
+    def _can_read(ident, d):
+        return can(ident["roles"], d.get("read_roles", ["user"])) or App._can_edit(ident, d)
+
+    def dashboards(self, method, name, body, ident):
+        if method == "GET" and name is None:
+            return 200, [{"name": d["name"], "title": d.get("title", d["name"]), "owner": d.get("owner"),
+                          "public": "anonymous" in d.get("read_roles", []), "editable": self._can_edit(ident, d)}
+                         for d in self.store.list("dashboard") if self._can_read(ident, d)]
+        if name is None:
+            raise ApiError(400, "give a dashboard name in the URL")
+        d = self.store.get("dashboard", name)
+        if d is not None and not self._can_read(ident, d):
+            d = None  # hidden, same as missing
+        if method == "GET":
+            if d is None:
+                raise ApiError(404, "unknown dashboard")
+            return 200, {**d, "name": name, "editable": self._can_edit(ident, d)}
+        if not ident["name"]:
+            raise ApiError(401, "log in first")
+        if method == "PUT":
+            if not isinstance(body, dict):
+                raise ApiError(400, "body must be a JSON object")
+            if d is not None and not self._can_edit(ident, d):
+                raise ApiError(403, "not allowed to edit this dashboard")
+            if d is None and self.store.get("dashboard", name) is not None:
+                raise ApiError(404, "unknown dashboard")  # exists but hidden from this user: do not reveal it
+            if d is None and not ("superadmin" in ident["roles"] or "designer" in ident["roles"]):
+                raise ApiError(403, "creating dashboards needs the designer role")
+            if d is None and len(self.store.list("dashboard")) >= self.MAX_DASHBOARDS:
+                raise ApiError(409, "too many dashboards")
+            body = {k: v for k, v in body.items() if k not in ("owner", "name", "editable")}
+            errs, warns = validate_dashboard(name, body, self.store, roles_ok)
+            if "anonymous" in body.get("read_roles", []) and "superadmin" not in ident["roles"]:
+                errs.append({"property": "read_roles", "message": "only a superadmin can publish a dashboard to anonymous visitors"})
+            if errs:
+                raise ApiError(422, "validation failed", errs)
+            self.store.put("dashboard", name, {**body, "owner": d.get("owner") if d else ident["name"]})
+            self.store.audit(ident["name"], "dashboard.put", name)
+            return 200, {"saved": name, "warnings": warns}
+        if method == "DELETE":
+            if d is None:
+                raise ApiError(404, "unknown dashboard")
+            if not self._can_edit(ident, d):
+                raise ApiError(403, "not allowed to delete this dashboard")
+            self.store.delete("dashboard", name)
+            self.store.audit(ident["name"], "dashboard.delete", name)
+            return 200, {"deleted": name}
+        raise ApiError(405, "method not allowed")
 
     def source_view(self, s):
         return {"name": s.name, "type": s.meta.get("type"), "points": len(s.points), "error": s.error,

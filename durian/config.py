@@ -137,6 +137,9 @@ def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
+roles_ok = _roles_ok
+
+
 def load_creds(path):
     c = json.loads(Path(path).read_text())
     for k in ("host", "port", "ca", "user", "password"):
@@ -319,6 +322,19 @@ def seed(store, lab_creds=None):
               "detectors": [{"kind": "HIGH_LIMIT", "limit": 7.5, "level": "WARNING"}]})
     store.put("point", "pump-setpoint", {"source": "demo", "unit": "%", "tags": {"area": "line"}, "settable": True,
               "set_roles": ["user"], "generator": {"kind": "constant", "value": 40}, "logging": "ON_CHANGE"})
+    store.put("dashboard", "plant-overview", {"title": "Plant overview", "owner": None, "read_roles": ["user"], "edit_roles": [], "columns": 12, "refresh": 2,
+              "widgets": [
+                  {"id": "temp", "type": "value", "title": "Boiler temperature", "point": "boiler-temp", "x": 0, "y": 0, "w": 3, "h": 2,
+                   "decimals": 1, "rules": [{"op": ">", "value": 90, "tone": "alarm"}, {"op": ">", "value": 85, "tone": "warn"}]},
+                  {"id": "press", "type": "gauge", "title": "Line pressure", "point": "line-pressure", "min": 0, "max": 10, "x": 3, "y": 0, "w": 3, "h": 2,
+                   "zones": [{"from": 7.5, "to": 10, "tone": "alarm"}]},
+                  {"id": "pump", "type": "setpoint", "title": "Pump setpoint", "point": "pump-setpoint", "x": 6, "y": 0, "w": 3, "h": 2},
+                  {"id": "health", "type": "status", "title": "Sources", "x": 9, "y": 0, "w": 3, "h": 2},
+                  {"id": "trend", "type": "chart", "title": "Boiler temperature, last hour", "points": ["boiler-temp"], "window": 3600, "rollup": "avg", "x": 0, "y": 2, "w": 6, "h": 4},
+                  {"id": "alarms", "type": "alarms", "title": "Open alarms", "state": "open", "limit": 8, "x": 6, "y": 2, "w": 6, "h": 4},
+                  {"id": "line", "type": "table", "title": "Line points", "tag": "area:line", "x": 0, "y": 6, "w": 6, "h": 3},
+                  {"id": "note", "type": "text", "title": "About this dashboard", "x": 6, "y": 6, "w": 6, "h": 3,
+                   "text": "Built from the dashboard editor. Every widget is plain data: a type, the points it reads and a place on the grid."}]})
     if lab_creds and Path(lab_creds).exists():
         store.put("source", "lab-mqtt", {"type": "mqtt", "enabled": True, "read_roles": ["user"], "creds": str(lab_creds),
                   "prefix": "durian/", "cmd_prefix": "durian-cmd/", "auto_create": True})
