@@ -222,6 +222,10 @@ def validate_point(name, b, store):
                 make_detector(d)
             except (ValueError, TypeError, AttributeError) as ex:
                 add(f"detectors[{i}]", str(ex))
+    sw = b.get("suppress_when")
+    if sw is not None and not (isinstance(sw, dict) and isinstance(sw.get("point"), str) and sw["point"] != name
+                               and sw.get("op") in (">", "<", "==") and _num(sw.get("value"))):
+        add("suppress_when", "must be {point: another point's name, op: >, < or ==, value: number}")
     if src and src.get("type") == "virtual":
         g = b.get("generator", {"kind": "walk"})
         kind = g.get("kind") if isinstance(g, dict) else None
@@ -271,7 +275,7 @@ def make_point(name, b, source_name):
     p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "http", "sql", "scale"):
+    for k in ("modbus", "http", "sql", "scale", "suppress_when"):
         if b.get(k):
             p.meta[k] = b[k]
     return p

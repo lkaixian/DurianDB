@@ -173,8 +173,11 @@ class Store:
 
     # ---- events
     def add_event(self, ev):
-        return self.run("insert into events(point,level,message,ts) values (?,?,?,?)",
-                        (ev.point, int(ev.level), ev.message, ev.ts)).lastrowid
+        return self.run("insert into events(point,level,message,ts,held) values (?,?,?,?,?)",
+                        (ev.point, int(ev.level), ev.message, ev.ts, ev.held)).lastrowid
+
+    def hold_event(self, event_id, held):
+        self.run("update events set held=? where id=?", (held, event_id))
 
     def clear_event(self, event_id, ts):
         self.run("update events set cleared_ts=? where id=? and cleared_ts is null", (ts, event_id))
