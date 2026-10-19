@@ -107,3 +107,12 @@ main a:not(.btn){color:var(--ink);text-underline-offset:3px}
 main a:not(.btn):hover{color:var(--accent)}
 .dhead a{margin-right:12px}
 @media (max-width:700px){.widget{min-height:calc(var(--rows) * 40px)}}
+.mimic{width:100%;height:auto;max-height:70vh}
+.mimic rect,.mimic circle,.mimic line{fill:none;stroke:var(--ink);stroke-width:2}
+.mimic .mm-pipe{stroke-width:6}
+.mimic .mm-warn{stroke-dasharray:8 4}
+.mimic .mm-alarm{stroke:var(--accent);stroke-width:4;fill:var(--accent);fill-opacity:.2}
+.mimic .mm-pipe.mm-alarm{fill:none}
+.mimic .mm-q{opacity:.55}
+.mimic text{fill:var(--ink);stroke:none;font:14px system-ui,"Segoe UI",sans-serif}
+.mimic text.mm-alarm{fill:var(--accent);font-weight:700}

@@ -46,6 +46,42 @@ registerWidget("gauge", {
   },
 });
 
+// Mimic: a process picture from a fixed set of shapes, built with DOM calls so author text is never parsed as markup.
+const SVGNS = "http://www.w3.org/2000/svg";
+registerWidget("mimic", {
+  needs: ["points"], size: {w: 8, h: 6},
+  template: {type: "mimic", title: "Tank and pump", width: 400, height: 200, shapes: [
+    {type: "rect", x: 20, y: 40, w: 120, h: 120, label: "Tank", point: "boiler-temp", rules: [{op: ">", value: 90, tone: "alarm"}]},
+    {type: "line", x1: 140, y1: 100, x2: 260, y2: 100, point: "line-pressure", rules: [{op: ">", value: 7.5, tone: "warn"}]},
+    {type: "circle", cx: 290, cy: 100, r: 28, label: "Pump", point: "pump-setpoint"},
+    {type: "value", x: 20, y: 180, point: "boiler-temp", decimals: 1}]},
+  render(box, w, ctx) {
+    const mk = (tag, attrs, text) => { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; };
+    const svg = mk("svg", {viewBox: `0 0 ${w.width} ${w.height}`, role: "img", class: "mimic", "aria-label": w.title || "Process picture"});
+    for (const s of w.shapes) {
+      const p = s.point ? ctx.points[s.point] : null, tone = p ? toneOf(s.rules, p.last) : "normal";
+      const state = !p ? "" : p.quality && p.quality !== "good" ? ` ${p.quality}` : "";
+      const cls = `mm-${tone}${state ? " mm-q" : ""}`;
+      const say = !s.point ? (s.label || "") : !p ? `${s.point}: no access` : `${s.label || s.point}: ${formatted(p, s)} ${p.unit}${tone !== "normal" ? ", " + tone : ""}${state}`;
+      let node;
+      if (s.type === "rect") node = mk("rect", {x: s.x, y: s.y, width: s.w, height: s.h, class: cls});
+      else if (s.type === "circle") node = mk("circle", {cx: s.cx, cy: s.cy, r: s.r, class: cls});
+      else if (s.type === "line") node = mk("line", {x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, class: `mm-pipe ${cls}`});
+      else node = mk("text", {x: s.x, y: s.y, class: `mm-text ${s.type === "value" ? cls : ""}`}, s.type === "text" ? s.text : p ? `${formatted(p, s)} ${p.unit}`.trim() : "no access");
+      if (say && s.type !== "text") node.append(mk("title", {}, say));
+      svg.append(node);
+      if (s.label && (s.type === "rect" || s.type === "circle")) {  // the label sits inside the shape, and the state is also written out for anyone who cannot see colour
+        const lx = s.type === "rect" ? s.x + s.w / 2 : s.cx, ly = s.type === "rect" ? s.y + s.h / 2 : s.cy;
+        svg.append(mk("text", {x: lx, y: ly, "text-anchor": "middle", class: "mm-text"}, s.label + (tone !== "normal" ? ` (${tone})` : "")));
+      }
+    }
+    const h = document.createElement("h3");
+    h.className = "wt";
+    h.textContent = w.title || "Mimic";
+    box.replaceChildren(h, svg);
+  },
+});
+
 const DASHES = ["", "7 4", "2 3", "9 3 2 3", "4 6", "1 4"];  // series differ by line pattern and label, not by colour
 registerWidget("chart", {
   needs: ["points"], size: {w: 6, h: 4}, template: {type: "chart", title: "Trend", points: ["boiler-temp"], window: 3600, rollup: "avg"},

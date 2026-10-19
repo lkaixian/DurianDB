@@ -127,6 +127,37 @@ def _table(w, p, c):
         c.err(f"{p}.{k}", "must look like area:boiler" if k == "tag" else "must be a watch list name")
 
 
+MIMIC_SHAPES = {"rect": ("x", "y", "w", "h"), "line": ("x1", "y1", "x2", "y2"), "circle": ("cx", "cy", "r"), "text": ("x", "y"), "value": ("x", "y")}
+
+
+@widget("mimic")
+def _mimic(w, p, c):
+    """A process picture drawn from a fixed set of shapes. Shapes can follow a point: tone rules restyle them, a value shape prints the number."""
+    if not (_num(w.get("width")) and _num(w.get("height")) and 50 <= w["width"] <= 2000 and 50 <= w["height"] <= 2000):
+        c.err(f"{p}.width", "width and height must be numbers from 50 to 2000")
+    shapes = w.get("shapes")
+    if not (isinstance(shapes, list) and 1 <= len(shapes) <= 80):
+        return c.err(f"{p}.shapes", "must be a list of 1 to 80 shapes")
+    for i, s in enumerate(shapes):
+        sp = f"{p}.shapes[{i}]"
+        if not isinstance(s, dict) or s.get("type") not in MIMIC_SHAPES:
+            c.err(f"{sp}.type", f"must be one of {list(MIMIC_SHAPES)}")
+            continue
+        for k in MIMIC_SHAPES[s["type"]]:
+            if not (_num(s.get(k)) and -10000 <= s[k] <= 10000 and (k not in ("w", "h", "r") or s[k] >= 0)):
+                c.err(f"{sp}.{k}", "must be a number (not negative for a size)")
+        if s["type"] == "text" and not (_text(s.get("text"), 100) and s["text"]):
+            c.err(f"{sp}.text", "must be 1 to 100 characters of plain text")
+        if "label" in s and not _text(s["label"], 100):
+            c.err(f"{sp}.label", "must be up to 100 characters of plain text")
+        if s["type"] == "value" or "point" in s:
+            c.point(s, sp)
+        if "rules" in s:
+            c.tone_rules(s, sp)
+        if "decimals" in s and not (isinstance(s["decimals"], int) and 0 <= s["decimals"] <= 6):
+            c.err(f"{sp}.decimals", "must be 0 to 6")
+
+
 @widget("setpoint")
 def _setpoint(w, p, c):
     c.point(w, p)
