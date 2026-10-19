@@ -31,7 +31,9 @@ python tools/sim_publisher.py       # sends durian/mqtt-temp and durian/mqtt-flo
 | `durian/modbus_sim.py` | Modbus slave for tests: `python -m durian.modbus_sim tcp 1502` |
 | `durian/polled.py`, `http_source.py`, `sql_source.py` | Pull-source base, HTTP JSON source, SQLite source |
 | `durian/outputs.py` | Webhook handler, MQTT publisher |
-| `durian/store.py` | SQLite: history, rollups, events, users, audit, config objects |
+| `durian/store.py`, `migrations.py` | SQLite or MySQL/MariaDB: history, rollups, events, users, audit, tokens, config objects, versioned migrations |
+| `durian/maintenance.py` | Retention, backups, config export and import, history CSV |
+| `durian/ingest.py` | HTTP ingest source (values pushed by Node-RED and others) |
 | `durian/auth.py` | scrypt passwords, sessions, role inheritance, login lockout |
 | `durian/app.py` | The API as plain calls, with permission checks |
 | `durian/server.py` | HTTP shell: cookies, CSRF header, security headers |
@@ -45,6 +47,14 @@ python tools/sim_publisher.py       # sends durian/mqtt-temp and durian/mqtt-flo
 ## Security notes
 
 Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every state-changing request needs an `X-Requested-With` header. Five failed logins lock a name for five minutes. The page uses a strict Content-Security-Policy with no inline script or style. MQTT clients always verify the server certificate and hostname. Webhooks do not follow redirects. Object permissions are role lists that default to `user`, with `superadmin` always allowed. The server speaks plain HTTP on 127.0.0.1 only. Put it behind HTTPS before exposing it anywhere else.
+
+## Node-RED and other systems
+
+Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped ingest token), publish over MQTT with TLS, read values (`/api/value/<point>`) and set points with scoped tokens, and receive DurianDB's alarms through a webhook or MQTT. Example flows, a step-by-step guide and an end-to-end check against a real Node-RED are in `integrations/node-red/`. Create tokens under **Tokens**.
+
+## Database
+
+SQLite by default, MySQL or MariaDB with `DURIAN_DB=mysql://user:password@host:3306/database` (the whole test suite passes on both). Schema changes are versioned migrations that upgrade an existing database in place. Under **Database**: size and health, retention (global, and per point with `retention_days`), scheduled purge and backups (SQLite), configuration export and import with a preview, and CSV export and import of a point's history. If the database fails, samples wait in a buffer and a system alarm is raised.
 
 ## Dashboards
 
@@ -60,4 +70,4 @@ Open **Dashboards** in the console. The seeded `plant-overview` shows every widg
 
 ## Status and research
 
-See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `09` (06 compares the enterprise and regular editions, 07 is Modbus, 08 is HTTP and SQL, 09 is dashboards and extension). Open questions: `docs/research/99-open-questions.md`.
+See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `10` (10 is the SCADA baseline and gap analysis that sets the roadmap) (06 compares the enterprise and regular editions, 07 is Modbus, 08 is HTTP and SQL, 09 is dashboards and extension). Open questions: `docs/research/99-open-questions.md`.
