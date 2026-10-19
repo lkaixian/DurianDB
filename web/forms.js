@@ -126,7 +126,8 @@ function pointGroups(body, sources) {
       F("settable", "Operators can set this point", "check"),
       ...(settable ? [F("set_roles", "Who can set it", "roles", {hint: "Empty = administrators only."}),
         F("set_min", "Lowest value accepted", "number", {optional: true, hint: "Empty = the engineering range."}), F("set_max", "Highest value accepted", "number", {optional: true}),
-        F("max_step", "Largest change per write", "number", {optional: true}), F("confirm", "Ask for confirmation before each write", "check")] : [])]},
+        F("max_step", "Largest change per write", "number", {optional: true}), F("confirm", "Ask for confirmation before each write", "check"),
+        F("require_reason", "Ask for a reason with each write", "check", {hint: "The reason is stored in the audit log with the old and new value."})] : [])]},
     {title: "Suppression", fields: [
       F("suppress_when.point", "Hold this point's alarms while point", "text", {optional: true, hint: "Empty = never suppressed."}),
       F("suppress_when.op", "is", "select", {optional: true, options: opts(["", "choose"], ">", "<", "==")}), F("suppress_when.value", "than", "number", {optional: true})]},
@@ -292,7 +293,7 @@ function tidy(kind, body) {
   if (kind === "point") {
     if (!body.suppress_when?.point) delete body.suppress_when;
     else if (!body.suppress_when.op || body.suppress_when.value === undefined) { body.suppress_when.op ||= ">"; body.suppress_when.value ??= 0; }
-    if (!body.settable) for (const k of ["set_roles", "set_min", "set_max", "max_step", "confirm"]) delete body[k];
+    if (!body.settable) for (const k of ["set_roles", "set_min", "set_max", "max_step", "confirm", "require_reason"]) delete body[k];
     if (body.tags && !Object.keys(body.tags).length) body.tags = {};
   }
   return body;

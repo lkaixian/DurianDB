@@ -246,7 +246,7 @@ class App:
                 "datatype": "text" if p.text else "number", "description": p.meta.get("description", ""), "decimals": p.meta.get("decimals"),
                 "folder": p.meta.get("folder", ""), "states": p.meta.get("states"), "text": state_label(p, p.last) if p.meta.get("states") and p.last is not None else None,
                 "eu": {"low": p.meta.get("eu_low"), "high": p.meta.get("eu_high")},
-                "set_limits": {"min": self.set_limit(p, "min"), "max": self.set_limit(p, "max"), "max_step": p.meta.get("max_step"), "confirm": bool(p.meta.get("confirm"))} if p.meta.get("settable") else None,
+                "set_limits": {"min": self.set_limit(p, "min"), "max": self.set_limit(p, "max"), "max_step": p.meta.get("max_step"), "confirm": bool(p.meta.get("confirm")), "reason_required": bool(p.meta.get("require_reason"))} if p.meta.get("settable") else None,
                 "last_ts": p.last_ts, "received": p.last_recv, "quality": Quality(p.quality).name.lower(), "settable": p.meta.get("settable", False),
                 "limits": {"high": limit("HIGH_LIMIT"), "low": limit("LOW_LIMIT")},
                 "history": [{"ts": t, "value": v} for t, v in list(p.cache)[-60:]]}
@@ -311,10 +311,16 @@ class App:
             if not hasattr(s, "write"):
                 raise ApiError(400, "this source cannot write")
             self.check_setpoint(p, v)
+            reason = (body or {}).get("reason")
+            if reason is not None and not (isinstance(reason, str) and len(reason) <= 200 and reason.isprintable()):
+                raise ApiError(400, "reason must be printable text of up to 200 characters")
+            reason = (reason or "").strip()
+            if p.meta.get("require_reason") and not reason:
+                raise ApiError(422, f"{p.name} needs a reason for every write: send reason")
             if p.meta.get("confirm") and v is not None and not self.confirmed(ident, p.name, v, (body or {}).get("confirm")):
                 return 202, {"confirm": self.confirm_token(ident, p.name, v), "expires_in": CONFIRM_SECONDS,
                              "message": f"Repeat the request with this confirm token to set {p.name} to {v}"}
-            self.perform_write(p, s, v, ident["name"], f" via token {ident['token']}" if scope else "")
+            self.perform_write(p, s, v, ident["name"], (f" via token {ident['token']}" if scope else "") + (f" reason: {reason}" if reason else ""))
             return 200, {"ok": True}
         if (method, a) == ("GET", "series"):
             return 200, self.series(ident, query)
