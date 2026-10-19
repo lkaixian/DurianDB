@@ -70,6 +70,8 @@ Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped i
 
 **Sign-in diagnostics.** Logins, logouts, failed attempts and lockouts of real accounts are written to the audit trail (made-up user names are not, so they cannot fill it). The console logs itself out after 30 minutes without a click, key press or scroll; its constant refreshing does not count as activity. Sessions also end after 8 hours whatever happens.
 
+**Off-delay.** Besides `duration` (the condition must hold that long before the alarm), HIGH_LIMIT, LOW_LIMIT and RATE_OF_CHANGE detectors take `off_delay`: the value must stay normal that many seconds before the alarm returns to normal, and a relapse restarts the wait. Together with `deadband` this keeps a noisy signal from raising a string of alarms.
+
 **Data quality.** Every value carries the source's own timestamp and a quality: `good`, `uncertain` or `bad`. A source that is down or cannot fill a point marks it `bad`: the last value is held, no alarm is evaluated on it, and charts, CSV export and rollups skip it (the history table keeps the row with its quality). A device clock more than a minute ahead, or a sender that says `"quality": "uncertain"`, makes the value `uncertain`. Values older than the newest one already received for a point are dropped. A "no update" alarm counts from when DurianDB received a value, not from the device's clock. Senders may add `ts` and `quality` to ingest and MQTT payloads.
 
 ## Database
