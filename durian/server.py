@@ -1,156 +1,124 @@
-﻿"""DurianDB server: stdlib HTTP + SQLite around durian.core. Run: python -m durian.server"""
+﻿"""HTTP shell around durian.app. Run: python -m durian.server
+
+Cookies are HttpOnly and SameSite=Strict, and every state-changing request must carry
+X-Requested-With: durian (CSRF). Serve behind HTTPS if it is ever reachable beyond this machine.
+"""
 import json
+import logging
 import os
-import random
-import sqlite3
 import threading
 import time
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .core import Engine, HighLimit, Level, Point, Source
-from .mqtt_source import MqttSource
+from .app import ApiError, App
+from .auth import AuthError
+from .config import seed
+from .store import Store
 
-WEB = Path(__file__).resolve().parent.parent / "web"
-DB = Path(__file__).resolve().parent.parent / "durian.db"
-LIMITS = {"boiler-temp": (90.0, Level.URGENT), "line-pressure": (7.5, Level.WARNING),
-          "mqtt-temp": (90.0, Level.URGENT)}
-
-
-class Simulated(Source):
-    # ponytail: random-walk stand-in for a real protocol; add real sources behind Source.poll
-    def __init__(self):
-        super().__init__("simulated")
-        self.v = {"boiler-temp": 87.0, "line-pressure": 6.0}
-        for name, (lim, lvl) in LIMITS.items():
-            self.add(Point(name, detectors=[HighLimit(lim, lvl)]))
-
-    def poll(self, ts):
-        for k in self.v:
-            self.v[k] = max(0.0, self.v[k] + random.uniform(-1.5, 1.8) * (1 if k == "boiler-temp" else 0.15))
-        return {k: round(v, 2) for k, v in self.v.items()}
-
-
-lock = threading.Lock()
-db = sqlite3.connect(DB, check_same_thread=False)
-db.executescript("""
-create table if not exists history(point text, ts real, value real);
-create index if not exists h_idx on history(point, ts);
-create table if not exists events(id integer primary key, point text, level int,
-  message text, ts real, acked_ts real);
-""")
-engine = Engine()
-engine.sources.append(Simulated())
-CREDS = Path(os.environ.get("DURIAN_MQTT_CREDS", WEB.parent / "lab" / "mqtt" / "creds.json"))
-if CREDS.exists():  # TLS broker from tools/mqtt_lab.py; skipped when not set up
-    c = json.loads(CREDS.read_text())
-    engine.sources.append(MqttSource("mqtt", c["host"], c["port"], c["ca"], c["user"], c["password"],
-                                     detectors={"mqtt-temp": [HighLimit(*LIMITS["mqtt-temp"])]}))
-stored = {"history": {}, "events": 0}
-
-
-def all_points():
-    return {n: p for s in engine.sources for n, p in s.points.items()}
-
-
-def tick():
-    while True:
-        with lock:
-            engine.tick(time.time())
-            for n, p in all_points().items():
-                done = stored["history"].get(n, 0)
-                for ts, v in p.history[done:]:
-                    db.execute("insert into history values (?,?,?)", (n, ts, v))
-                stored["history"][n] = len(p.history)
-            for e in engine.events[stored["events"]:]:
-                db.execute("insert into events(point,level,message,ts) values (?,?,?,?)",
-                           (e.point, int(e.level), e.message, e.ts))
-            stored["events"] = len(engine.events)
-            db.commit()
-        time.sleep(2)
-
-
-def rows(sql, args=()):
-    cur = db.execute(sql, args)
-    cols = [c[0] for c in cur.description]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
-
-
-ROLLUPS = {"avg": "avg(value)", "min": "min(value)", "max": "max(value)", "count": "count(*)"}
-
-
-def series(point, since, bucket, rollup):
-    """Bucketed history. Bucket start time is returned as ts. Caller validates all arguments."""
-    if rollup == "last":
-        return rows("select b * ? as ts, value from (select cast(ts / ? as int) b, value, "
-                    "row_number() over (partition by cast(ts / ? as int) order by ts desc) rn "
-                    "from history where point = ? and ts >= ?) where rn = 1 order by b",
-                    (bucket, bucket, bucket, point, since))
-    return rows(f"select cast(ts / ? as int) * ? as ts, {ROLLUPS[rollup]} as value from history "
-                "where point = ? and ts >= ? group by cast(ts / ? as int) order by ts",
-                (bucket, bucket, point, since, bucket))
-
-
-def series_request(query):
-    q = {k: v[0] for k, v in parse_qs(query).items()}
-    point, rollup = q.get("point"), q.get("rollup", "avg")
-    if point not in all_points():
-        return 400, {"error": "unknown point"}
-    if rollup != "last" and rollup not in ROLLUPS:
-        return 400, {"error": "rollup must be one of avg, min, max, last, count"}
-    try:
-        window = int(q.get("window", 3600))
-        bucket = int(q.get("bucket", max(1, window // 120)))
-    except ValueError:
-        return 400, {"error": "window and bucket must be whole seconds"}
-    if not 10 <= window <= 7 * 86400 or not 1 <= bucket <= window:
-        return 400, {"error": "window must be 10 s to 7 days and bucket between 1 s and the window"}
-    items = series(point, time.time() - window, bucket, rollup)
-    return 200, {"point": point, "rollup": rollup, "window": window, "bucket": bucket, "items": items}
+ROOT = Path(__file__).resolve().parent.parent
+WEB = ROOT / "web"
+STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
+          "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/app.css": ("app.css", "text/css; charset=utf-8")}
+CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+COOKIE = "durian_session"
+MAX_BODY = 1_000_000
+log = logging.getLogger("durian")
+app: App = None
 
 
 class Handler(BaseHTTPRequestHandler):
-    def send(self, code, body, ctype="application/json"):
-        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+    def send(self, code, payload, ctype="application/json", extra=()):
+        data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
+        for k, v in (("Content-Type", ctype), ("Content-Length", str(len(data))), ("X-Content-Type-Options", "nosniff"),
+                     ("Content-Security-Policy", CSP), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
+                     ("Cache-Control", "no-store"), *extra):
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
 
-    def do_GET(self):
-        url = urlparse(self.path)
-        with lock:
-            if url.path == "/api/series":
-                return self.send(*series_request(url.query))
-            if self.path == "/api/points":
-                out = []
-                for n, p in all_points().items():
-                    h = rows("select ts, value from history where point=? order by ts desc limit 60", (n,))[::-1]
-                    out.append({"name": n, "last": p.last, "limit": LIMITS.get(n, (None,))[0], "history": h})
-                return self.send(200, out)
-            if self.path == "/api/events":
-                return self.send(200, rows("select * from events order by acked_ts is not null, level desc, ts desc limit 100"))
-        if self.path in ("/", "/index.html"):
-            return self.send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
-        self.send(404, {"error": "not found"})
+    def token(self):
+        c = SimpleCookie(self.headers.get("Cookie", ""))
+        return c[COOKIE].value if COOKIE in c else None
 
-    def do_POST(self):
-        parts = self.path.strip("/").split("/")  # api/events/<id>/ack
-        if len(parts) == 4 and parts[:2] == ["api", "events"] and parts[3] == "ack" and parts[2].isdigit():
-            with lock:
-                cur = db.execute("update events set acked_ts=? where id=? and acked_ts is null",
-                                 (time.time(), int(parts[2])))
-                db.commit()
-            return self.send(200 if cur.rowcount else 404, {"acked": cur.rowcount})
-        self.send(404, {"error": "not found"})
+    def serve(self, method):
+        url = urlparse(self.path)
+        if method == "GET" and url.path in STATIC:
+            name, ctype = STATIC[url.path]
+            return self.send(200, (WEB / name).read_bytes(), ctype)
+        if not url.path.startswith("/api/"):
+            return self.send(404, {"error": "not found"})
+        if method != "GET" and self.headers.get("X-Requested-With") != "durian":
+            return self.send(403, {"error": "missing X-Requested-With header"})
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self.send(400, {"error": "bad Content-Length"})
+        if length > MAX_BODY:
+            return self.send(413, {"error": "body too large"})
+        body = None
+        if length:
+            try:
+                body = json.loads(self.rfile.read(length))
+            except ValueError:
+                return self.send(400, {"error": "body must be JSON"})
+        try:
+            if (method, url.path) == ("POST", "/api/login"):
+                token = app.login(body)
+                ident = app.auth.identity(token)
+                cookie = f"{COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={app.auth.ttl}"
+                return self.send(200, {"name": ident["name"], "roles": sorted(ident["roles"])}, extra=[("Set-Cookie", cookie)])
+            if (method, url.path) == ("POST", "/api/logout"):
+                app.auth.logout(self.token())
+                return self.send(200, {"ok": True}, extra=[("Set-Cookie", f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")])
+            query = {k: v[0] for k, v in parse_qs(url.query).items()}
+            status, payload = app.handle(method, url.path, query, body, app.auth.identity(self.token()))
+            self.send(status, payload)
+        except AuthError as ex:
+            self.send(ex.status, {"error": str(ex)})
+        except ApiError as ex:
+            self.send(ex.status, {"error": str(ex), **({"errors": ex.errors} if ex.errors else {})})
+        except Exception:
+            log.exception("unhandled error")
+            self.send(500, {"error": "internal error"})
+
+    do_GET = lambda self: self.serve("GET")
+    do_POST = lambda self: self.serve("POST")
+    do_PUT = lambda self: self.serve("PUT")
+    do_DELETE = lambda self: self.serve("DELETE")
 
     def log_message(self, *a):
         pass
 
 
+def run_ticks(seconds):
+    while True:
+        try:
+            app.tick()
+        except Exception:
+            log.exception("tick failed")
+        time.sleep(seconds)
+
+
+def main():
+    global app
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    store = Store(os.environ.get("DURIAN_DB", str(ROOT / "durian.db")))
+    seeded = seed(store, os.environ.get("DURIAN_MQTT_CREDS", ROOT / "lab" / "mqtt" / "creds.json"))
+    app = App(store)
+    pw = app.auth.bootstrap(os.environ.get("DURIAN_ADMIN_PASSWORD"))
+    if pw:
+        print(f"First run: log in as 'admin' with password {pw} (shown once; change it after logging in).")
+    if seeded:
+        print("Seeded demo configuration. Edit it under Config in the console.")
+    threading.Thread(target=run_ticks, args=(float(os.environ.get("DURIAN_TICK", 2)),), daemon=True).start()
+    port = int(os.environ.get("DURIAN_PORT", 8765))
+    print(f"DurianDB on http://127.0.0.1:{port}")
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
 if __name__ == "__main__":
-    threading.Thread(target=tick, daemon=True).start()
-    print("DurianDB on http://127.0.0.1:8765")
-    ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()
+    main()
