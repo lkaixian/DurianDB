@@ -158,3 +158,8 @@ h3{font-size:.95rem;margin:20px 0 6px}
 dl.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 20px;margin:0 0 12px}
 dl.kv dt{color:var(--muted)}
 dl.kv dd{margin:0}
+/* dense lists */
+[hidden]{display:none!important}
+table.dense td,table.dense th{padding-top:6px;padding-bottom:6px;font-size:.92rem}
+table.dense td{max-width:22em;overflow-wrap:anywhere}
+a.btn[aria-current=page]{background:var(--ink);color:var(--paper);text-decoration:none;font-weight:600}

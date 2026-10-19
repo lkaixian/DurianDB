@@ -27,6 +27,18 @@ await send("Page.enable"); await send("Runtime.enable");
 await send("Network.enable"); await send("Network.setCacheDisabled", {cacheDisabled: true}); await send("Page.navigate", {url: (process.env.DURIAN_BASE ?? "http://127.0.0.1:8766") + "/"}); await sleep(2000);
 await ev(`(()=>{const f=document.querySelector('#login');f.username.value='admin';f.password.value=${JSON.stringify(process.env.DURIAN_ADMIN_PASSWORD)};f.requestSubmit()})()`); await sleep(2500);
 
+const putPoint = n => ev(`fetch('/api/config/point/${n}',{method:'PUT',headers:{'Content-Type':'application/json','X-Requested-With':'durian'},body:JSON.stringify({source:'demo',generator:{kind:'constant',value:1}})}).then(r=>r.status)`);
+for (const n of ["list-a", "list-b", "list-c"]) await putPoint(n);   // enough rows for the filter box to appear
+// 0. the lists are dense tables with a filter; a row opens its editor
+await go("#config/point");
+await shot("0-list");
+console.log("point list:", await ev(`JSON.stringify({rows:document.querySelectorAll('table.dense tbody tr').length,head:[...document.querySelectorAll('table.dense th')].map(t=>t.textContent).join(),first:document.querySelector('table.dense tbody tr')?.innerText.replace(/\s+/g,' ')})`));
+await ev(`(()=>{const f=document.querySelector('#lf');if(f){f.value='boiler';f.dispatchEvent(new Event('input',{bubbles:true}))}})()`); await sleep(300);
+console.log("filtered:", await ev(`document.querySelector('#lcount')?.textContent`), "| visible:", await ev(`[...document.querySelectorAll('table.dense tbody tr')].filter(r=>!r.hidden).length`));
+await go("#config/source");
+console.log("source list head:", await ev(`[...document.querySelectorAll('table.dense th')].map(t=>t.textContent).join()`), "| states:", await ev(`[...document.querySelectorAll('table.dense tbody tr')].map(r=>r.cells[4].textContent).join(' / ')`));
+await ev(`document.querySelector('table.dense tbody a').click()`); await sleep(1500);
+console.log("row opens editor:", await ev(`location.hash`), "| back link:", await ev(`document.querySelector('.crumb a')?.textContent`));
 // 1. new Modbus source through the form
 await go("#config/source/_new");
 console.log("fields on new source:", await ev(`[...document.querySelectorAll('#fe-fields legend')].map(l=>l.textContent).join(' | ')`));
