@@ -10,19 +10,31 @@ body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 system-ui,
 main:focus-visible{outline:none}  /* main only takes focus after navigation, so screen readers start at the new view */
 .skip{position:absolute;left:-999px;top:0;background:var(--ink);color:var(--paper);padding:10px 14px}
 .skip:focus{left:8px;top:8px;z-index:2}
-main{max-width:1100px;margin:0 auto;padding-left:16px;padding-right:16px}
-header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:0 24px;padding:6px max(16px,calc((100vw - 1100px)/2 + 16px));background:var(--bar);color:var(--bar-ink)}
+main{padding-left:24px;padding-right:24px;min-width:0}
+header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:0 24px;padding:6px 16px;background:var(--bar);color:var(--bar-ink)}
+.shell{display:grid;grid-template-columns:200px minmax(0,1fr);min-height:calc(100vh - 56px);max-width:1500px}
+.shell.solo{grid-template-columns:minmax(0,1fr);max-width:1100px;margin:0 auto}
+.shell.solo #nav{display:none}
+.ac{color:var(--bar-ink);text-decoration:underline;text-underline-offset:3px;font-size:.9rem}
+.ac.on{font-weight:700}
+@media (max-width:820px){.shell{grid-template-columns:minmax(0,1fr)}main{padding-left:16px;padding-right:16px}}
 header :focus-visible{outline-color:var(--bar-ink)}
 h1{font-size:1.25rem;margin:0}
-nav{display:flex;flex-wrap:wrap;gap:0 4px}
-nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 10px;color:var(--bar-ink);text-decoration:none;border-bottom:3px solid transparent}
-nav a:hover{border-bottom-color:#7f8c9b}
-nav a[aria-current=page]{border-bottom-color:var(--bar-ink);font-weight:600}
+nav{background:var(--field);border-right:1px solid var(--rule);padding:8px 0 24px;display:flex;flex-direction:column}
+nav .ng{margin:16px 16px 4px;font-size:.8rem;font-weight:600;color:var(--muted)}
+nav a{display:flex;align-items:center;min-height:44px;padding:0 16px;color:var(--ink);text-decoration:none;border-left:3px solid transparent}
+nav a:hover{background:var(--paper)}
+nav a[aria-current=page]{background:var(--paper);font-weight:600;border-left-color:var(--ink)}
+@media (max-width:820px){nav{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--rule);padding:0 8px}nav .ng{display:none}nav a{border-left:0;border-bottom:3px solid transparent;padding:0 10px}nav a[aria-current=page]{border-bottom-color:var(--ink)}}
 main{padding-bottom:56px;outline:none}
 h2{font-size:1rem;margin:26px 0 8px}
 h2 small{font-weight:400;color:var(--muted)}
-.grid{display:grid;gap:8px 40px;grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
-@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.grid{display:grid;gap:8px 40px;grid-template-columns:minmax(0,1fr)}
+#points:not(.status){display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0 32px}
+#alarms td:nth-child(-n+4){white-space:nowrap}
+#alarms td:last-child{white-space:nowrap;text-align:right}
+#alarms td:last-child button{margin-left:6px}
+@media (max-width:640px){#alarms td{white-space:normal!important;text-align:left!important}}
 .wide{grid-column:1/-1}
 table{width:100%;border-collapse:collapse}
 th{text-align:left;font-weight:600;font-size:.85rem;color:var(--muted);border-bottom:1px solid var(--ink);padding:6px 10px 6px 0}
@@ -69,7 +81,8 @@ svg .lim{stroke:var(--accent);stroke-width:1;stroke-dasharray:4 3}
 ul.errors{margin:8px 0;padding-left:20px}
 
 /* dashboards: one accent, tones carry meaning with weight and underline as well as colour */
-.kiosk header{display:none}
+.kiosk header,.kiosk nav{display:none}
+.kiosk .shell{grid-template-columns:minmax(0,1fr);max-width:none}
 .dhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 16px}
 .dgrid{display:grid;gap:12px;grid-auto-rows:72px}
 .widget{border-top:2px solid var(--ink);padding-top:8px;overflow:hidden;min-width:0}
