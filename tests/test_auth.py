@@ -43,6 +43,10 @@ for _ in range(4):  # 5th bad attempt locks the account, even for the right pass
 fails(lambda: a.login("viewer", "bad"), 401)
 fails(lambda: a.login("viewer", "viewer-password-1"), 429)
 
+log = st.audit_log(100)
+acts = [r["action"] for r in log]
+assert "logout" in acts and acts.count("login.failed") == 4 and acts.count("login.locked") == 1 and "login" in acts
+assert not any(r["user"] == "nobody" for r in log)  # made-up names are not audited
 a2 = Auth(new_store())
 assert a2.bootstrap("a-chosen-password-1") is None and a2.login("admin", "a-chosen-password-1")
 fails(lambda: Auth(new_store()).bootstrap("short"), 400)
