@@ -486,7 +486,7 @@ function makeSortable(table) {
 const yes = v => v ? "Yes" : "No";
 const tagText = t => Object.entries(t || {}).map(([k, v]) => k + ":" + v).join(", ");
 const LISTS = {
-  source: {cols: ["Name", "Type", "Enabled", "Points", "State", "Dropped", "Error"], cell: (i, x) => [null, i.type, yes(i.enabled !== false), x.points ?? "", x.down ? "Down: " + x.down : x.name ? "Up" : "Not running", x.dropped ?? "", x.error || ""]},
+  source: {cols: ["Name", "Type", "Enabled", "Points", "State", "Last poll", "Dropped", "Error"], cell: (i, x) => [null, i.type, yes(i.enabled !== false), x.points ?? "", x.down ? "Down: " + x.down : x.name ? "Up" : "Not running", x.poll_ms == null ? "" : `${(x.poll_ms / 1000).toFixed(2)} s${x.overruns ? `, ${x.overruns} too slow` : ""}`, x.dropped ?? "", x.error || ""]},
   point: {cols: ["Name", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.source, x.last == null ? "no value yet" : `${x.decimals == null ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
   handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.type === "email" ? (i.to || []).join(", ") : i.type === "setpoint" ? `${i.point} = ${i.value}` : i.url || "", i.min_level || "", yes(i.enabled !== false)]},
   publisher: {cols: ["Name", "Type", "Topic prefix", "Points", "Enabled"], cell: i => [null, i.type, i.prefix || "", (i.points || []).join(", "), yes(i.enabled !== false)]},

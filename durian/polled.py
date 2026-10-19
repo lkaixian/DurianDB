@@ -53,6 +53,7 @@ class PolledSource(Source):
             started = time.monotonic()
             if time.time() >= self.next_try:
                 self.cycle()
+                self.poll_ms = (time.monotonic() - started) * 1000
             self._stop.wait(max(0.05, self.period - (time.monotonic() - started), self.next_try - time.time()))
 
     def cycle(self):

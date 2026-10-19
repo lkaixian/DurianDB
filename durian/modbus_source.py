@@ -34,6 +34,7 @@ class ModbusSource(Source):
         self.cfg = {**DEFAULTS, **cfg}
         self.client = client or make_client(cfg)
         self.fails, self.next_try, self.connected = 0, 0.0, None
+        self.period = self.cfg["period"]
         self._latest, self._lock, self._stop = {}, threading.Lock(), threading.Event()
         self._thread = None
 
@@ -76,6 +77,7 @@ class ModbusSource(Source):
                     self.cycle()
                 except Exception as e:  # a bug here must not silently kill polling
                     self.error = f"internal error: {type(e).__name__}: {e}"
+                self.poll_ms = (time.monotonic() - started) * 1000
             wait = max(0.05, self.cfg["period"] - (time.monotonic() - started))  # a slow cycle shortens the wait, not the schedule
             self._stop.wait(max(wait, self.next_try - time.time()))
 
