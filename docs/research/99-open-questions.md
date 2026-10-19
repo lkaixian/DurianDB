@@ -11,4 +11,4 @@ Still open, to study next through public docs and black-box observation:
 - Time-series store: batching, purge and shard behavior as documented.
 - Point hierarchy and user-owned watch lists.
 - Scripting: meta points and the scripting data source.
-- Enterprise edition: which features differ (`app-en` has not been run).
+- Enterprise edition: answered at the module and settings level in note 06. Still open: how the NoSQL store behaves under load, and how the persistent source and publisher pair negotiate.
