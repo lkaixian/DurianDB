@@ -1,0 +1,30 @@
+"""Ordered schema migrations. Each runs once, in order, and the version is recorded.
+
+Never edit a migration that has shipped: add a new one. DDL uses {pk} {key} {text} {real} {int} placeholders that
+the store fills in for the database in use, so one definition serves SQLite and MySQL/MariaDB.
+"""
+
+
+def _index(s, sql):
+    try:
+        s.ddl(sql)
+    except Exception as e:  # an index that already exists is fine (databases from before migrations existed)
+        if not any(w in str(e).lower() for w in ("exist", "duplicate")):
+            raise
+
+
+def v1_baseline(s):
+    s.ddl("create table if not exists history(point {key}, ts {real}, value {real})")
+    _index(s, "create index h_idx on history(point, ts)")
+    s.ddl("create table if not exists events(id {pk}, point {key}, level {int}, message {text}, ts {real}, "
+          "cleared_ts {real}, acked_ts {real}, acked_by {key})")
+    s.ddl("create table if not exists users(name {key} primary key, hash {key} not null, roles {text} not null, created {real})")
+    s.ddl("create table if not exists audit(id {pk}, ts {real}, user {key}, action {key}, detail {text})")
+    s.ddl("create table if not exists objects(kind {key}, name {key}, body {text} not null, primary key(kind, name))")
+
+
+def v2_settings(s):
+    s.ddl("create table if not exists settings(skey {key} primary key, svalue {text} not null)")
+
+
+MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings)]

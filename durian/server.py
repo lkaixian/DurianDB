@@ -6,6 +6,7 @@ X-Requested-With: durian (CSRF). Serve behind HTTPS if it is ever reachable beyo
 import json
 import logging
 import os
+import re
 import threading
 import time
 from http.cookies import SimpleCookie
@@ -16,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 from .app import ApiError, App
 from .auth import AuthError
 from .config import seed
+from .maintenance import Raw
 from .store import Store
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,13 +27,19 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("inde
           "/app.css": ("app.css", "text/css; charset=utf-8")}
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 COOKIE = "durian_session"
-MAX_BODY = 1_000_000
+MAX_BODY, MAX_IMPORT = 1_000_000, 5_000_000
 log = logging.getLogger("durian")
 app: App = None
 
 
 class Handler(BaseHTTPRequestHandler):
     def send(self, code, payload, ctype="application/json", extra=()):
+        extra = list(extra)
+        if isinstance(payload, Raw):  # a file download
+            ctype = payload.ctype
+            if payload.filename:
+                extra.append(("Content-Disposition", 'attachment; filename="' + re.sub(r"[^A-Za-z0-9._-]", "_", payload.filename) + '"'))
+            payload = payload.data
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(code)
         for k, v in (("Content-Type", ctype), ("Content-Length", str(len(data))), ("X-Content-Type-Options", "nosniff"),
@@ -58,14 +66,21 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             return self.send(400, {"error": "bad Content-Length"})
-        if length > MAX_BODY:
+        if length > (MAX_IMPORT if url.path.startswith("/api/import") else MAX_BODY):
             return self.send(413, {"error": "body too large"})
         body = None
         if length:
-            try:
-                body = json.loads(self.rfile.read(length))
-            except ValueError:
-                return self.send(400, {"error": "body must be JSON"})
+            raw = self.rfile.read(length)
+            if self.headers.get("Content-Type", "").startswith("text/"):  # CSV uploads arrive as text
+                try:
+                    body = raw.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    return self.send(400, {"error": "text must be UTF-8"})
+            else:
+                try:
+                    body = json.loads(raw)
+                except ValueError:
+                    return self.send(400, {"error": "body must be JSON"})
         try:
             if (method, url.path) == ("POST", "/api/login"):
                 token = app.login(body)
@@ -104,18 +119,28 @@ def run_ticks(seconds):
         time.sleep(seconds)
 
 
+def run_maintenance():
+    while True:  # purge and backup run on their schedule, once a day each, checked every minute
+        time.sleep(60)
+        try:
+            app.maint.tick()
+        except Exception:
+            log.exception("maintenance failed")
+
+
 def main():
     global app
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     store = Store(os.environ.get("DURIAN_DB", str(ROOT / "durian.db")))
     seeded = seed(store, os.environ.get("DURIAN_MQTT_CREDS", ROOT / "lab" / "mqtt" / "creds.json"))
-    app = App(store)
+    app = App(store, ROOT / "backups")
     pw = app.auth.bootstrap(os.environ.get("DURIAN_ADMIN_PASSWORD"))
     if pw:
         print(f"First run: log in as 'admin' with password {pw} (shown once; change it after logging in).")
     if seeded:
         print("Seeded demo configuration. Edit it under Config in the console.")
     threading.Thread(target=run_ticks, args=(float(os.environ.get("DURIAN_TICK", 2)),), daemon=True).start()
+    threading.Thread(target=run_maintenance, daemon=True).start()
     port = int(os.environ.get("DURIAN_PORT", 8765))
     print(f"DurianDB on http://127.0.0.1:{port}")
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

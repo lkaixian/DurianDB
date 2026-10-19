@@ -8,8 +8,9 @@ from durian.auth import hash_password  # noqa: E402
 from durian.config import seed  # noqa: E402
 from durian.dashboards import VALIDATORS  # noqa: E402
 from durian.store import Store  # noqa: E402
+from _support import new_store  # noqa: E402
 
-store = Store()
+store = new_store()
 seed(store)
 app = App(store)
 app.auth.bootstrap("admin-password-123")

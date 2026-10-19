@@ -2,15 +2,18 @@
 
 The HTTP layer in server.py only translates requests into App.handle() calls.
 """
+import datetime as dt
 import json
 import math
 import re
 import time
+from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from .config import (build_engine, roles_ok, validate_point, validate_source, validate_watchlist)
-from .core import Level
+from .core import Event, Level
 from .dashboards import validate_dashboard
+from .maintenance import Maintenance, Raw
 from .outputs import Outputs, validate_handler, validate_publisher
 from .store import ROLLUPS
 
@@ -24,10 +27,16 @@ class ApiError(Exception):
         self.status, self.errors = status, errors
 
 
+SYSTEM = "(system)"  # events about DurianDB itself rather than a point, visible to superadmins only
+PENDING_MAX = 200_000
+
+
 class App:
-    def __init__(self, store):
+    def __init__(self, store, backup_dir=None):
         self.store, self.auth = store, Auth(store)
+        self.maint = Maintenance(store, backup_dir or Path("backups"))
         self.engine, self.outputs, self.open_events = None, None, []
+        self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
         self.reload()
 
     # ---- runtime
@@ -40,7 +49,8 @@ class App:
                 getattr(s, "stop", lambda: None)()
             now = time.time()
             for ev in self.open_events:
-                self.store.clear_event(ev.id, now)
+                if ev.id is not None:
+                    self.store.clear_event(ev.id, now)
             self.open_events = []
             self.engine = build_engine(self.store)
             self.outputs = Outputs(self.store)
@@ -50,22 +60,51 @@ class App:
         with self.store.lock:
             ts = ts or time.time()
             self.engine.tick(ts)
-            rows = [(p.name, t, v) for s in self.engine.sources for p in s.points.values() for t, v in p.take_unsaved()]
-            if rows:
-                self.store.add_history(rows)
-            new, self.engine.events = self.engine.events, []
-            for ev in new:
-                ev.id = self.store.add_event(ev)
+            self.pending.extend((p.name, t, v) for s in self.engine.sources for p in s.points.values() for t, v in p.take_unsaved())
+            self._flush_history(ts)
+            new, self.engine.events = self.unstored + self.engine.events, []
+            self.unstored = []
+            for i, ev in enumerate(new):
+                try:
+                    ev.id = self.store.add_event(ev)
+                except Exception:  # the database is unavailable: keep the rest and try again next tick
+                    self.unstored = new[i:]
+                    break
                 self.open_events.append(ev)
                 self.outputs.on_event(ev, "raised")
             still = []
             for ev in self.open_events:
                 if ev.cleared_ts is None:
                     still.append(ev)
-                else:
+                    continue
+                try:
                     self.store.clear_event(ev.id, ev.cleared_ts)
-                    self.outputs.on_event(ev, "cleared")
+                except Exception:
+                    still.append(ev)
+                    continue
+                self.outputs.on_event(ev, "cleared")
             self.open_events = still
+
+    def _flush_history(self, ts):
+        """Write buffered samples. A failing database never loses data silently: samples wait (up to a cap) and an alarm is raised."""
+        try:
+            while self.pending:
+                self.store.add_history(self.pending[:5000])
+                del self.pending[:5000]
+        except Exception as e:
+            if len(self.pending) > PENDING_MAX:
+                self.lost += len(self.pending) - PENDING_MAX
+                del self.pending[:len(self.pending) - PENDING_MAX]
+            if self.sys_event is None:
+                try:
+                    self.sys_event = self.store.add_event(Event(SYSTEM, Level.URGENT, f"history is not being saved: {type(e).__name__}", ts))
+                except Exception:
+                    self.sys_event = -1  # cannot even record it; the database page still shows the buffer
+            return
+        if self.sys_event is not None:
+            if self.sys_event > 0:
+                self.store.clear_event(self.sys_event, ts)
+            self.sys_event = None
 
     def points(self):
         return {p.name: (p, s) for s in self.engine.sources for p in s.points.values()}
@@ -138,16 +177,18 @@ class App:
             return 200, {"ok": True}
         if (method, a) == ("GET", "series"):
             return 200, self.series(ident, query)
+        if (method, a, b) == ("GET", "export", "history"):
+            return self.history_csv(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
             ok = self.visible_points(ident)
-            rows = [e for e in self.store.events(300) if e["point"] in ok][:100]
+            rows = [e for e in self.store.events(300) if e["point"] in ok or (e["point"] == SYSTEM and admin)][:100]
             for e in rows:
                 e["level_name"] = Level(e["level"]).name
             return 200, rows
         if (method, a, c) == ("POST", "events", "ack"):
             need(user)
             ev = self.store.q("select point from events where id=?", (int(b) if b.isdigit() else -1,))
-            if not ev or ev[0]["point"] not in self.visible_points(ident):
+            if not ev or not (ev[0]["point"] in self.visible_points(ident) or (ev[0]["point"] == SYSTEM and admin)):
                 raise ApiError(404, "unknown event")
             n = self.store.ack_event(int(b), ident["name"], time.time())
             self.store.audit(ident["name"], "ack", f"event {b}")
@@ -176,7 +217,81 @@ class App:
             return self.users(method, b, body, ident)
         if (method, a) == ("GET", "audit"):
             return 200, self.store.audit_log()
+        if a == "database":
+            return self.database(method, b, c, body, ident)
+        if (method, a) == ("GET", "export") and b is None:
+            doc = json.dumps(self.maint.export_config(), indent=2).encode()
+            return 200, Raw(doc, "application/json", "durian-config-" + dt.date.today().isoformat() + ".json")
+        if (method, a) == ("POST", "import") and b is None:
+            return self.import_config(query, body, ident)
+        if (method, a, b) == ("POST", "import", "history"):
+            return self.import_history(query, body, ident)
         raise ApiError(404, "not found")
+
+    # ---- database health, retention, backups, import and export (superadmin)
+    def database(self, method, what, name, body, ident):
+        if method == "GET" and what is None:
+            return 200, self.maint.status(len(self.pending), self.lost)
+        if (method, what) == ("PUT", "settings"):
+            errs = self.maint.update_settings(body)
+            if errs:
+                raise ApiError(422, "validation failed", errs)
+            self.store.audit(ident["name"], "database.settings", json.dumps(body))
+            return 200, self.maint.settings()
+        if (method, what) == ("POST", "purge"):
+            r = self.maint.purge()
+            self.store.audit(ident["name"], "database.purge", f"{r['deleted']} rows")
+            return 200, r
+        if (method, what) == ("POST", "backup"):
+            try:
+                r = self.maint.backup()
+            except NotImplementedError as e:
+                raise ApiError(501, str(e))
+            self.store.audit(ident["name"], "database.backup", r["name"])
+            return 200, r
+        if (method, what) == ("GET", "backups") and name:
+            p = self.maint.backup_file(name)
+            if p is None:
+                raise ApiError(404, "unknown backup")
+            self.store.audit(ident["name"], "database.download", name)
+            return 200, Raw(p.read_bytes(), "application/octet-stream", name)
+        raise ApiError(404, "not found")
+
+    def import_config(self, query, doc, ident):
+        validators = {"source": lambda n, b, v: validate_source(n, b), "point": lambda n, b, v: validate_point(n, b, v),
+                      "handler": lambda n, b, v: validate_handler(n, b), "publisher": lambda n, b, v: validate_publisher(n, b, v),
+                      "watchlist": lambda n, b, v: validate_watchlist(n, b),
+                      "dashboard": lambda n, b, v: validate_dashboard(n, b, v, roles_ok)[0]}
+        apply_ = query.get("apply") == "1"  # a plain call is always a dry run
+        errs, summary = self.maint.import_config(doc, validators, query.get("mode", "merge"), not apply_, ident["name"])
+        if errs:
+            raise ApiError(422, "validation failed", errs)
+        if apply_:
+            self.store.audit(ident["name"], "config.import", json.dumps({k: v for k, v in summary.items() if any(v.values())}))
+            self.reload()
+        return 200, {"applied": apply_, "summary": summary}
+
+    def history_csv(self, ident, query):
+        point = query.get("point")
+        if point not in self.visible_points(ident):
+            raise ApiError(404, "unknown point")
+        now = time.time()
+        try:
+            start, end = float(query.get("from", now - 86400)), float(query.get("to", now))
+        except ValueError:
+            raise ApiError(400, "from and to are epoch seconds")
+        data = self.maint.export_history(point, start, end)
+        if data is None:
+            raise ApiError(413, "too many rows for one file, narrow the time range")
+        return 200, Raw(data, "text/csv; charset=utf-8", f"{point}.csv")
+
+    def import_history(self, query, text, ident):
+        point = query.get("point")
+        if not isinstance(text, str) or point not in {p["name"] for p in self.store.list("point")} | set(self.points()):
+            raise ApiError(400, "send CSV text and name an existing point")
+        r = self.maint.import_history(point, text)
+        self.store.audit(ident["name"], "history.import", f"{point}: {r.get('imported', 0)} rows")
+        return (200 if not r.get("error") else 400), r
 
     # ---- dashboards: viewing follows read roles, editing follows owner, edit roles or superadmin
     MAX_DASHBOARDS = 200

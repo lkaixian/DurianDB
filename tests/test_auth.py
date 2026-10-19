@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from durian.auth import Auth, AuthError, can, held, hash_password, verify_password  # noqa: E402
 from durian.store import Store  # noqa: E402
+from _support import new_store  # noqa: E402
 
 
 def fails(fn, status):
@@ -24,7 +25,7 @@ assert held(["superadmin"]) == {"superadmin", "user", "anonymous"} and held(["op
 assert can({"anonymous"}, ["anonymous"]) and not can({"anonymous"}, []) and can({"superadmin"}, [])
 assert can(held(["user"]), ["anonymous"]) and not can(held(["user"]), ["ops"]) and can(held(["ops"]), ["ops", "x"])
 
-st = Store()
+st = new_store()
 a = Auth(st)
 pw = a.bootstrap()
 assert pw and len(pw) >= 10 and a.bootstrap() is None  # only the first call creates the admin
@@ -42,7 +43,7 @@ for _ in range(4):  # 5th bad attempt locks the account, even for the right pass
 fails(lambda: a.login("viewer", "bad"), 401)
 fails(lambda: a.login("viewer", "viewer-password-1"), 429)
 
-a2 = Auth(Store())
+a2 = Auth(new_store())
 assert a2.bootstrap("a-chosen-password-1") is None and a2.login("admin", "a-chosen-password-1")
-fails(lambda: Auth(Store()).bootstrap("short"), 400)
+fails(lambda: Auth(new_store()).bootstrap("short"), 400)
 print("ok")

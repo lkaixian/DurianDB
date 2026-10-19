@@ -4,8 +4,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from durian.store import Store  # noqa: E402
+from _support import new_store  # noqa: E402
 
-st = Store()
+st = new_store()
 st.add_history([("p", 100, 10), ("p", 101, 20), ("p", 105, 60), ("p", 112, 5)])  # 10 s buckets: 100 and 110
 
 
