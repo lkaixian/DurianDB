@@ -54,4 +54,24 @@ s, raw = get(op, format="csv", state="unacked")
 lines = raw.data.decode().splitlines()
 assert raw.filename == "alarms.csv" and lines[0].startswith("raised_utc,point,level") and len(lines) == 3 and "boiler-temp" in lines[1] and "active_unacked" in lines[1]
 assert get(app.auth.identity(None))[1]["total"] == 0
+
+# ---- acknowledge many at once: only what the caller can see, ids that cannot be seen are skipped, already acknowledged ones do not count
+many = lambda ident, ids: app.handle("POST", "/api/events/ack-many", {}, {"ids": ids}, ident)
+ids = {r["point"]: r["id"] for r in store.q("select id, point from events where acked_ts is null")}
+assert set(ids) == {"boiler-temp", "(system)", "hidden-point"}, ids
+mine = [r["id"] for r in store.q("select id from events where point='boiler-temp' and acked_ts is null")]
+assert many(op, mine + [ids["(system)"], ids["hidden-point"], 999999])[1] == {"acked": len(mine)}
+assert store.q("select acked_by from events where id=?", (mine[0],))[0]["acked_by"] == "op" and store.q("select acked_ts from events where id=?", (ids["(system)"],))[0]["acked_ts"] is None
+assert many(op, mine)[1] == {"acked": 0} and many(admin, [ids["(system)"]])[1] == {"acked": 1}
+for bad in (None, [], ["a"], [True], list(range(201))):
+    try:
+        many(op, bad)
+        raise AssertionError(bad)
+    except ApiError as e:
+        assert e.status == 400
+try:
+    many(app.auth.identity(None), [1])
+    raise AssertionError("anonymous")
+except ApiError as e:
+    assert e.status == 401
 print("ok")

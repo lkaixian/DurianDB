@@ -337,6 +337,17 @@ class App:
             return 200, test_source(body)
         if a == "alarms":
             return self.alarm_holds(method, b, c, body, ident, query)
+        if (method, a, b, c) == ("POST", "events", "ack-many", None):
+            need(user)
+            ids = (body or {}).get("ids")
+            if not (isinstance(ids, list) and 1 <= len(ids) <= 200 and all(isinstance(i, int) and not isinstance(i, bool) for i in ids)):
+                raise ApiError(400, "send {ids: [1 to 200 alarm ids]}")
+            ok, now, n = self.event_points(ident), time.time(), 0
+            for row in self.store.q(f"select id, point from events where id in ({', '.join('?' * len(ids))})", ids):
+                if row["point"] in ok:  # an id you cannot see is skipped, not an error
+                    n += self.store.ack_event(row["id"], ident["name"], now)
+            self.store.audit(ident["name"], "ack", f"{n} alarm(s) at once")
+            return 200, {"acked": n}
         if (method, a, c) == ("POST", "events", "ack"):
             need(user)
             ev = self.store.q("select point from events where id=?", (int(b) if b.isdigit() else -1,))
