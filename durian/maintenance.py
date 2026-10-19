@@ -14,7 +14,7 @@ from pathlib import Path
 DEFAULTS = {"retention_days": 365, "purge_hour": 3, "backup_hour": -1, "backup_keep": 7}
 LIMITS = {"retention_days": (0, 36500), "purge_hour": (0, 23), "backup_hour": (-1, 23), "backup_keep": (1, 365)}
 BACKUP_NAME = re.compile(r"^durian-\d{8}-\d{6}\.db$")
-KINDS = ("source", "point", "handler", "publisher", "watchlist", "dashboard")
+KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance", "dashboard")
 CSV_MAX_ROWS, IMPORT_MAX_ROWS = 200_000, 50_000
 EPOCH_MIN = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc).timestamp()
 
@@ -176,7 +176,7 @@ class Maintenance:
         if errors:
             return errors, None
         summary = {k: {"created": 0, "updated": 0, "unchanged": 0, "deleted": 0} for k in KINDS}
-        order = ("source", "point", "handler", "publisher", "watchlist", "dashboard")
+        order = ("source", "point", "handler", "publisher", "watchlist", "maintenance", "dashboard")
         for kind in order:
             for name, body in objs.get(kind, {}).items():
                 if kind == "dashboard":

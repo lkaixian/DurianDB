@@ -110,6 +110,7 @@ function pointGroups(body, sources) {
       F("tags", "Tags", "tags", {hint: "key:value pairs, comma separated, for example area:boiler, line:2."})]},
     ...(part && part.fields(body).length ? [{title: `Value from the ${type} source`, fields: part.fields(body)}] : []),
     {title: "Range and display", fields: [
+      F("states", "State labels", "states", {optional: true, hint: "For on/off and multi-state points: 0=Stopped, 1=Running, 2=Fault. The label is shown instead of the number."}),
       F("eu_low", "Engineering range, low", "number", {optional: true}), F("eu_high", "Engineering range, high", "number", {optional: true}),
       F("decimals", "Decimals shown", "int", {optional: true, hint: "0 to 6."})]},
     {title: "History", fields: [
@@ -129,7 +130,29 @@ function pointGroups(body, sources) {
   ];
 }
 
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MAINT_GROUPS = body => {
+  const kind = getPath(body, "schedule.type");
+  return [
+    {title: "What happens", fields: [
+      F("enabled", "Enabled", "check", {hint: "A disabled window never applies."}),
+      F("mode", "During the window", "select", {options: opts(["suppress", "Hold alarms: record them, announce nothing"], ["acknowledge", "Acknowledge alarms at once and announce nothing"], ["drop", "Drop alarms: do not record them"])}),
+      F("reason", "Reason", "text", {optional: true, hint: "Shown to operators, for example Pump 3 replacement."})]},
+    {title: "Which alarms", fields: [
+      F("scope.points", "Points", "list", {optional: true, hint: "Point names, comma separated."}),
+      F("scope.tags", "Tags", "tags", {optional: true, hint: "Every point with all of these tags, for example area:boiler."}),
+      F("scope.sources", "Sources", "list", {optional: true, hint: "Source names. Also covers the source-down alarm."})]},
+    {title: "When", fields: [
+      F("schedule.type", "Schedule", "select", {options: opts(["weekly", "Every week"], ["once", "Once"], ["manual", "Only when switched on"])}),
+      ...(kind === "weekly" ? [F("schedule.days", "Days", "days", {hint: "For example Mon, Tue, Fri."}), F("schedule.start", "From (HH:MM)", "text", {hint: "Server local time."}),
+        F("schedule.end", "Until (HH:MM)", "text", {hint: "An end before the start crosses midnight."})] : []),
+      ...(kind === "once" ? [F("schedule.from", "From", "datetime"), F("schedule.to", "Until", "datetime")] : []),
+      ...(kind === "manual" ? [F("active", "In effect now", "check", {hint: "Tick and save to start the window, untick and save to end it."})] : [])]},
+  ];
+};
+
 const GROUPS = {
+  maintenance: MAINT_GROUPS,
   source: (body) => [...SOURCE_GROUPS._common(body), ...(SOURCE_GROUPS[body.type] || (() => []))(body)],
   handler: () => [{title: "Webhook", fields: [
     F("enabled", "Enabled", "check"), F("url", "URL", "text", {hint: "Alarms are posted here as JSON."}),
@@ -154,6 +177,9 @@ function control(f, body) {
     case "number": case "int": return `<input type="number" step="${f.type === "int" ? 1 : "any"}" ${a} value="${esc(v ?? "")}">`;
     case "roles": case "list": return `<input type="text" ${a} value="${esc((v || []).join(", "))}" autocomplete="off">`;
     case "tags": return `<input type="text" ${a} value="${esc(Object.entries(v || {}).map(([k, x]) => k + ":" + x).join(", "))}" autocomplete="off">`;
+    case "days": return `<input type="text" ${a} value="${esc((v || []).map(d => DAYS[d]).join(", "))}" autocomplete="off">`;
+    case "datetime": return `<input type="datetime-local" ${a} value="${v ? new Date(v * 1000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ""}">`;
+    case "states": return `<input type="text" ${a} value="${esc(Object.entries(v || {}).map(([k, x]) => k + "=" + x).join(", "))}" autocomplete="off">`;
     default: return `<input type="text" ${a} value="${esc(v ?? "")}" autocomplete="off">`;
   }
 }
@@ -162,17 +188,31 @@ function fieldHtml(f, body) {
   return f.type === "check" ? `<div class="fld chk"><label class="inl">${control(f, body)} ${esc(f.label)}</label>${tail}</div>`
     : `<div class="fld"><label for="${id}">${esc(f.label)}</label>${control(f, body)}${tail}</div>`;
 }
+// What each alarm condition needs. "list" fields are comma separated numbers.
+const DET = {
+  HIGH_LIMIT: {label: "Above a limit", args: [["limit", "Limit"]], late: true, band: true, start: {limit: 0}},
+  LOW_LIMIT: {label: "Below a limit", args: [["limit", "Limit"]], late: true, band: true, start: {limit: 0}},
+  RATE_OF_CHANGE: {label: "Changing too fast", args: [["per_second", "Units per second"]], late: true, start: {per_second: 1}},
+  STATE: {label: "In a state", args: [["states", "States (numbers)", "list"]], late: true, start: {states: [1]}},
+  RANGE: {label: "Outside or inside a range", args: [["low", "Low"], ["high", "High"], ["mode", "Alarm when", "select", opts(["outside", "outside the range"], ["inside", "inside the range"])]], late: true, start: {low: 0, high: 100, mode: "outside"}},
+  CHANGE: {label: "Every change", args: [["tolerance", "Ignore changes of"]], start: {tolerance: 0}},
+  NO_CHANGE: {label: "Stuck value", args: [["seconds", "Seconds unchanged"], ["tolerance", "Ignore changes of"]], start: {seconds: 600, tolerance: 0}},
+  NO_UPDATE: {label: "No update", args: [["seconds", "Seconds without a value"]], start: {seconds: 60}},
+};
 function detectorHtml(d, i) {
-  const kind = d.kind || "HIGH_LIMIT", limit = kind === "HIGH_LIMIT" || kind === "LOW_LIMIT";
-  const arg = {HIGH_LIMIT: ["limit", "Limit"], LOW_LIMIT: ["limit", "Limit"], RATE_OF_CHANGE: ["per_second", "Units per second"], NO_UPDATE: ["seconds", "Seconds without a value"]}[kind];
+  const kind = d.kind || "HIGH_LIMIT", spec = DET[kind];
   const n = (k, label, hint) => `<div class="fld"><label for="d${i}-${k}">${label}</label><input type="number" step="any" id="d${i}-${k}" data-det="${i}" data-dpath="${k}" value="${esc(d[k] ?? "")}"><small class="hint">${hint || ""}</small></div>`;
+  const arg = ([k, label, type, options]) => type === "list"
+    ? `<div class="fld"><label for="d${i}-${k}">${label}</label><input type="text" id="d${i}-${k}" data-det="${i}" data-dpath="${k}" data-list="1" value="${esc((d[k] || []).join(", "))}" autocomplete="off"><small class="hint">Comma separated, for example 2, 3.</small></div>`
+    : type === "select" ? `<div class="fld"><label for="d${i}-${k}">${label}</label><select id="d${i}-${k}" data-det="${i}" data-dpath="${k}">${options.map(([v, l]) => `<option value="${v}" ${v === (d[k] || options[0][0]) ? "selected" : ""}>${l}</option>`).join("")}</select></div>`
+    : n(k, label);
   return `<fieldset class="det"><legend>Alarm ${i + 1}</legend><div class="fgrid">
-    <div class="fld"><label for="d${i}-kind">Condition</label><select id="d${i}-kind" data-det="${i}" data-dpath="kind" data-rerender="1">${opts(["HIGH_LIMIT", "Above a limit"], ["LOW_LIMIT", "Below a limit"], ["RATE_OF_CHANGE", "Changing too fast"], ["NO_UPDATE", "No update"]).map(([v, l]) => `<option value="${v}" ${v === kind ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    ${n(arg[0], arg[1])}
-    <div class="fld"><label for="d${i}-level">Level</label><select id="d${i}-level" data-det="${i}" data-dpath="level">${LEVELS.map(l => `<option ${l === (d.level || "WARNING") ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-    ${kind === "NO_UPDATE" ? "" : n("duration", "Must hold for (seconds)", "On-delay: the condition must last this long.")}
-    ${limit ? n("deadband", "Dead band", "Once raised, the value must pass the limit by this much to clear.") : ""}
-    ${kind === "NO_UPDATE" ? "" : n("off_delay", "Stay raised for (seconds)", "Off-delay: normal this long before it clears.")}
+    <div class="fld"><label for="d${i}-kind">Condition</label><select id="d${i}-kind" data-det="${i}" data-dpath="kind" data-rerender="1">${Object.entries(DET).map(([v, s]) => `<option value="${v}" ${v === kind ? "selected" : ""}>${s.label}</option>`).join("")}</select></div>
+    ${spec.args.map(arg).join("")}
+    <div class="fld"><label for="d${i}-level">Level</label><select id="d${i}-level" data-det="${i}" data-dpath="level">${LEVELS.map(l => `<option ${l === (d.level || (kind === "CHANGE" ? "INFORMATION" : "WARNING")) ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+    ${spec.late ? n("duration", "Must hold for (seconds)", "On-delay: the condition must last this long.") : ""}
+    ${spec.band ? n("deadband", "Dead band", "Once raised, the value must pass the limit by this much to clear.") : ""}
+    ${spec.late ? n("off_delay", "Stay raised for (seconds)", "Off-delay: normal this long before it clears.") : ""}
     </div><small class="fe" data-err="detectors[${i}]"></small><button type="button" data-del-det="${i}">Remove alarm ${i + 1}</button></fieldset>`;
 }
 function groupsHtml(groups, body) {
@@ -188,6 +228,9 @@ function readControl(el) {
   if (t === "number" || t === "int") return raw === "" ? undefined : Number(raw);
   if (t === "select") return raw === "" ? undefined : el.dataset.numeric ? Number(raw) : raw;
   if (t === "roles" || t === "list") return raw.split(",").map(s => s.trim()).filter(Boolean);
+  if (t === "days") { const d = raw.split(/[ ,]+/).map(x => DAYS.findIndex(n => n.toLowerCase() === x.slice(0, 3).toLowerCase())).filter(i => i >= 0); return [...new Set(d)].sort(); }
+  if (t === "datetime") return raw === "" ? undefined : new Date(raw).getTime() / 1000;
+  if (t === "states") { const o = Object.fromEntries(raw.split(",").map(s => s.trim()).filter(s => s.includes("=")).map(s => { const [k, ...v] = s.split("="); return [k.trim(), v.join("=").trim()]; })); return Object.keys(o).length ? o : undefined; }
   if (t === "tags") return Object.fromEntries(raw.split(",").map(s => s.trim()).filter(s => s.includes(":")).map(s => { const [k, ...v] = s.split(":"); return [k.trim(), v.join(":").trim()]; }));
   return raw === "" ? undefined : raw;
 }
@@ -200,12 +243,20 @@ function afterChange(kind, path, body, sources) {
     for (const p of Object.values(POINT_PARTS)) for (const k of p.keys) delete body[k];
     Object.assign(body, (POINT_PARTS[type] || {start: () => ({})}).start());
   }
+  if (kind === "maintenance" && path === "schedule.type") {
+    const t = body.schedule.type, day = new Date(), p = n => String(n).padStart(2, "0");
+    body.schedule = t === "weekly" ? {type: t, days: [0, 1, 2, 3, 4], start: "22:00", end: "06:00"} : t === "once" ? {type: t, from: Math.floor(Date.now() / 1000), to: Math.floor(Date.now() / 1000) + 3600} : {type: t};
+    if (t !== "manual") delete body.active;
+  }
   if (kind === "point" && path === "generator.kind") {
     const keep = body.generator.kind, dflt = {walk: {start: 50, min: 0, max: 100, step: 1}, sine: {offset: 0, amplitude: 1, period: 60}, constant: {value: 0}}[keep];
     body.generator = {kind: keep, ...dflt};
   }
 }
-function tidy(kind, body) {  // drop what an empty optional control leaves behind
+function tidy(kind, body) {
+  if (kind === "maintenance") {
+    for (const k of ["points", "tags", "sources"]) if (body.scope && (body.scope[k] === undefined || (Array.isArray(body.scope[k]) ? !body.scope[k].length : !Object.keys(body.scope[k]).length))) delete body.scope[k];
+  }  // drop what an empty optional control leaves behind
   if (kind === "point") {
     if (!body.suppress_when?.point) delete body.suppress_when;
     else if (!body.suppress_when.op || body.suppress_when.value === undefined) { body.suppress_when.op ||= ">"; body.suppress_when.value ??= 0; }
@@ -244,8 +295,9 @@ function mountEditor(host, {kind, body, sources = []}) {
     const el = ev.target;
     if (el.dataset.det != null) {
       const d = body.detectors[Number(el.dataset.det)], k = el.dataset.dpath;
-      if (el.tagName === "SELECT") d[k] = el.value; else if (el.value === "") delete d[k]; else d[k] = Number(el.value);
-      if (k === "kind") for (const x of ["limit", "per_second", "seconds"]) delete d[x];
+      if (el.dataset.list) { const l = el.value.split(",").map(x => x.trim()).filter(Boolean).map(Number).filter(x => !Number.isNaN(x)); if (l.length) d[k] = l; else delete d[k]; }
+      else if (el.tagName === "SELECT") d[k] = el.value; else if (el.value === "") delete d[k]; else d[k] = Number(el.value);
+      if (k === "kind") { for (const x of Object.values(DET).flatMap(sp => sp.args.map(a => a[0])).concat(["deadband"])) delete d[x]; Object.assign(d, DET[d.kind].start); }
       if (el.dataset.rerender) draw(el.id); else sync();
       return;
     }

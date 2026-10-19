@@ -18,7 +18,7 @@ const tagMatch = (p, tag) => { const [k, ...v] = tag.split(":"); return p.tags[k
 const heading = w => `<h3 class="wt">${esc(w.title || w.point || w.type)}</h3>`;
 const noAccess = name => `<p class="note">No access to ${esc(name)}, or it does not exist.</p>`;
 const QUALITY_NOTE = {bad: "Bad: the source is not supplying this value, showing the last known one", uncertain: "Uncertain: treat this value with care"};
-const formatted = (p, w) => p.last == null ? "no value yet" : w.decimals == null ? String(p.last) : Number(p.last).toFixed(w.decimals);
+const formatted = (p, w) => p.last == null ? "no value yet" : p.text != null ? p.text : w.decimals == null ? String(p.last) : Number(p.last).toFixed(w.decimals);
 
 registerWidget("value", {
   needs: ["points"], size: {w: 3, h: 2}, template: {type: "value", title: "Value", point: "boiler-temp", decimals: 1, rules: [{op: ">", value: 90, tone: "alarm"}]},
