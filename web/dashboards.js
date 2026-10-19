@@ -241,6 +241,18 @@ async function viewDashList() {
 }
 
 // ---- designer
+// Shape editor for a mimic: one row per shape with its own geometry fields, nudge buttons and a point binding. Tone rules stay in the JSON box below it.
+const MM = {rect: ["x", "y", "w", "h"], line: ["x1", "y1", "x2", "y2"], circle: ["cx", "cy", "r"], text: ["x", "y"], value: ["x", "y"]};
+const MM_NEW = {rect: {type: "rect", x: 20, y: 20, w: 80, h: 60}, line: {type: "line", x1: 20, y1: 100, x2: 120, y2: 100}, circle: {type: "circle", cx: 60, cy: 60, r: 20}, text: {type: "text", x: 20, y: 20, text: "Label"}, value: {type: "value", x: 20, y: 20}};
+const mimicEditor = w => `<fieldset class="mm-ed"><legend>Shapes</legend>
+  <div class="row"><label>Width <input type="number" data-mc="width" value="${esc(w.width)}"></label><label>Height <input type="number" data-mc="height" value="${esc(w.height)}"></label></div>
+  ${(w.shapes || []).map((s, k) => `<div class="row" data-k="${k}"><strong>${k + 1}. ${esc(s.type)}</strong>
+    ${(MM[s.type] || []).map(f => `<label>${f} <input type="number" data-mf="${f}" value="${esc(s[f])}"></label>`).join("")}
+    ${s.type === "text" ? `<label>Text <input data-mf="text" value="${esc(s.text || "")}" maxlength="100"></label>` : s.type === "value" ? "" : `<label>Label <input data-mf="label" value="${esc(s.label || "")}" maxlength="100"></label>`}
+    ${s.type === "text" ? "" : `<label>Point <input data-mf="point" value="${esc(s.point || "")}" autocomplete="off"></label>`}
+    ${[["l", "Left"], ["r", "Right"], ["u", "Up"], ["d", "Down"], ["x", "Remove"]].map(([a, t]) => `<button type="button" data-mm="${a}">${t}</button>`).join("")}</div>`).join("")}
+  <div class="row"><label>Add shape <select data-ms>${Object.keys(MM).map(t => `<option>${t}</option>`).join("")}</select></label><button type="button" data-mm="add">Add shape</button></div>
+  <p class="note">Left, right, up and down move a shape by 10. Colour rules by value are set in the JSON box below.</p></fieldset>`;
 async function viewDesigner(name) {
   const isNew = !name || name === "_new";
   let draft = {title: "", columns: 12, refresh: 2, read_roles: ["user"], edit_roles: [], widgets: []}, data = null;
@@ -271,6 +283,7 @@ async function viewDesigner(name) {
       <div class="row"><label>Id <input data-f="id" value="${esc(id)}"></label><label>Title <input data-f="title" value="${esc(title || "")}"></label>
         ${["x", "y", "w", "h"].map(k => `<label>${k.toUpperCase()} <input data-f="${k}" type="number" min="0" value="${w[k]}"></label>`).join("")}</div>
       <div class="row">${[["left", "Move left"], ["right", "Move right"], ["up", "Move up"], ["down", "Move down"], ["wider", "Wider"], ["narrower", "Narrower"], ["taller", "Taller"], ["shorter", "Shorter"], ["dup", "Duplicate"], ["rm", "Remove"]].map(([a, l]) => `<button type="button" data-act="${a}">${l}</button>`).join("")}</div>
+      ${type === "mimic" ? mimicEditor(w) : ""}
       <label>Settings for this widget (JSON) <textarea data-f="rest" spellcheck="false" rows="6">${esc(JSON.stringify(rest, null, 2))}</textarea></label><p class="err" data-err></p></details>`; }).join("") : `<p class="note">No widgets yet. Pick a type above and add one.</p>`;
   }
   const resolve = el => { const d = el.closest("details"); return d ? Number(d.dataset.i) : -1; };
@@ -284,7 +297,15 @@ async function viewDesigner(name) {
   });
   $("#wl").addEventListener("toggle", ev => { const i = resolve(ev.target); if (i >= 0) { const id = draft.widgets[i].id; ev.target.open ? open.add(id) : open.delete(id); } }, true);
   $("#wl").addEventListener("click", ev => {
-    const act = ev.target.dataset.act, i = resolve(ev.target);
+    const act = ev.target.dataset.act, i = resolve(ev.target), mm = ev.target.dataset.mm;
+    if (mm && i >= 0) {
+      const w = draft.widgets[i], k = Number(ev.target.closest("[data-k]")?.dataset.k ?? -1), s = w.shapes[k];
+      if (mm === "add") w.shapes.push({...MM_NEW[ev.target.closest("fieldset").querySelector("[data-ms]").value]});
+      else if (mm === "x") w.shapes.splice(k, 1);
+      else if (s) { const [axis, by] = {l: ["x", -10], r: ["x", 10], u: ["y", -10], d: ["y", 10]}[mm]; for (const f of MM[s.type]) if (new RegExp(`^c?${axis}[12]?$`).test(f)) s[f] += by; }
+      paintList(); repaint();
+      return;
+    }
     if (!act) return;
     const w = draft.widgets[i], step = {left: ["x", -1], right: ["x", 1], up: ["y", -1], down: ["y", 1], wider: ["w", 1], narrower: ["w", -1], taller: ["h", 1], shorter: ["h", -1]}[act];
     if (step) w[step[0]] = Math.max(step[0] === "w" || step[0] === "h" ? 1 : 0, w[step[0]] + step[1]);
@@ -293,7 +314,14 @@ async function viewDesigner(name) {
     paintList(); repaint();
   });
   $("#wl").addEventListener("change", ev => {
-    const f = ev.target.dataset.f, i = resolve(ev.target);
+    const f = ev.target.dataset.f, i = resolve(ev.target), mf = ev.target.dataset.mf, mc = ev.target.dataset.mc;
+    if ((mf || mc) && i >= 0) {
+      const w = draft.widgets[i], v = ev.target.value;
+      if (mc) w[mc] = Number(v);
+      else { const s = w.shapes[Number(ev.target.closest("[data-k]").dataset.k)]; if (MM[s.type].includes(mf)) s[mf] = Number(v); else if (v === "" && mf !== "text") delete s[mf]; else s[mf] = v; }
+      paintList(); repaint();
+      return;
+    }
     if (!f || i < 0) return;
     const w = draft.widgets[i], err = ev.target.closest("details").querySelector("[data-err]");
     if (f === "rest") {
