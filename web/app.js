@@ -363,6 +363,20 @@ async function viewAudit() {
   $("#au").innerHTML = rows.length ? `<table class="stack"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Detail</th></tr></thead><tbody>${rows.map(r => `<tr><td class="num" data-label="Time">${new Date(r.ts * 1000).toLocaleString()}</td><td data-label="User">${esc(r.user)}</td><td data-label="Action">${esc(r.action)}</td><td data-label="Detail">${esc(r.detail)}</td></tr>`).join("")}</tbody></table>` : "Nothing recorded yet. Config changes, set-value commands, acknowledgements and user changes appear here.";
 }
 
+// ---- an unattended console logs itself out: the page polls constantly, so only real input counts as activity
+const IDLE_MS = 30 * 60 * 1000;
+let lastInput = Date.now();
+for (const t of ["pointerdown", "keydown", "wheel", "touchstart"]) addEventListener(t, () => { lastInput = Date.now(); }, {passive: true});
+setInterval(async () => {
+  if (!me.name || Date.now() - lastInput < IDLE_MS) return;
+  await api("POST", "/api/logout", {}).catch(() => {});
+  me = {name: null, roles: ["anonymous"]};
+  location.hash = "";
+  route();
+  const msg = $("#li-msg");
+  if (msg) msg.textContent = "Logged out after 30 minutes without activity.";
+}, 30000);
+
 // ---- start
 (async () => {
   try { me = await api("GET", "/api/me"); } catch (e) { main.innerHTML = ""; const p = document.createElement("p"); p.className = "status err"; p.textContent = e.message; main.append(p); return; }

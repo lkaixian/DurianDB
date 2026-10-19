@@ -79,14 +79,19 @@ class Auth:
                 self.failures.clear()
             count += 1
             self.failures[name] = (count, time.time() + LOCK_SECONDS if count >= LOCK_AFTER else 0)
+            if user:  # only real accounts are audited: a stream of made-up names must not fill the trail
+                self.store.audit(name, "login.locked" if count == LOCK_AFTER else "login.failed", f"attempt {count}")
             raise AuthError("bad username or password")
         self.failures.pop(name, None)
+        self.store.audit(name, "login")
         token = secrets.token_urlsafe(32)
         self.sessions[token] = (name, time.time() + self.ttl)
         return token
 
     def logout(self, token):
-        self.sessions.pop(token, None)
+        name = self.sessions.pop(token, (None,))[0]
+        if name:
+            self.store.audit(name, "logout")
 
     # ---- machine tokens: for Node-RED, scripts and other systems. Scoped, expiring, revocable, stored only as a hash.
     TOKEN_SCOPES = ("read", "write", "ingest")  # read: look at data. write: also set points. ingest: push values into one source only.
