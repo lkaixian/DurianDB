@@ -147,3 +147,14 @@ fieldset.det{background:var(--paper)}
 details{margin:6px 0 16px}
 details summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
 #adv{min-height:220px}
+/* point page */
+.crumb{margin:18px 0 0;color:var(--muted);font-size:.9rem}
+.pd-val{font-size:2.6rem;font-weight:600;margin:6px 0 2px}
+.pd-val .u{font-size:1.1rem;font-weight:400;color:var(--muted)}
+.pd-grid{display:grid;gap:8px 40px;grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
+.pd-grid>section:nth-child(2){grid-column:1/-1}
+@media (max-width:900px){.pd-grid{grid-template-columns:minmax(0,1fr)}}
+h3{font-size:.95rem;margin:20px 0 6px}
+dl.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 20px;margin:0 0 12px}
+dl.kv dt{color:var(--muted)}
+dl.kv dd{margin:0}

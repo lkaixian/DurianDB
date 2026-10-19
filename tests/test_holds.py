@@ -40,6 +40,13 @@ app.tick(now)
 assert ("hot", "raised") in sent and ("sup", "raised") not in sent
 assert state("sup") == [("active_unacked", "suppressed")] and state("hot") == [("active_unacked", None)]
 
+# the single-point endpoint carries what the detail page needs; the events list can be narrowed to one point
+d = call(op, "GET", "/api/points/hot")[1]
+assert d["detectors"][0]["kind"] == "HIGH_LIMIT" and d["hold"] is None and d["source_type"] == "virtual" and d["quality"] == "good"
+assert call(op, "GET", "/api/points/ghost")[0] == 404 and call(ANON, "GET", "/api/points/hot")[0] == 404
+only = app.handle("GET", "/api/events", {"point": "hot"}, None, op)[1]
+assert only and {e["point"] for e in only} == {"hot"}
+
 # shelving: validated, audited, holds an active alarm, releases it (and announces it) when unshelved
 assert call(ANON, "POST", "/api/alarms/hot/shelve", {"minutes": 5, "reason": "sensor drift"})[0] == 401
 assert call(op, "POST", "/api/alarms/hot/shelve", {"minutes": 5})[0] == 422

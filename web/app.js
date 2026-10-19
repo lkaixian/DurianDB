@@ -32,13 +32,13 @@ function showErr(e, where) {
 }
 
 // ---- navigation
-const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, reports: viewReports, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount};
+const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, reports: viewReports, point: viewPoint, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount};
 function nav(view) {
   const groups = me.name ? [["Monitor", [["overview", "Overview"], ["dashboards", "Dashboards"], ["history", "History"], ["reports", "Reports"]]],
     ...(isAdmin() ? [["Configure", [["config", "Config"], ["users", "Users"], ["tokens", "Tokens"]]], ["System", [["database", "Database"], ["audit", "Audit"]]]] : []),
     ["Signed in", [["account", me.name]]]] : [];
   document.querySelector(".shell").classList.toggle("solo", !me.name);  // before sign-in there is nothing to navigate to
-  const cur = v => v === view || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : "";
+  const cur = v => v === view || (view === "point" && v === "overview") || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : "";
   $("#nav").innerHTML = groups.map(([g, items]) => `<p class="ng">${esc(g)}</p>${items.map(([v, l]) => `<a href="#${v}" ${cur(v)}>${esc(l)}</a>`).join("")}`).join("");
 }
 // The header shows how many alarms still wait for someone, whatever page is open. Text and colour together.
@@ -108,34 +108,8 @@ function viewOverview() {
   api("GET", "/api/watchlists").then(w => { $("#f-wl").insertAdjacentHTML("beforeend", w.map(x => `<option>${esc(x.name)}</option>`).join("")); }).catch(() => {});
   ptSig = "";
   $("#filter").addEventListener("input", () => { ptSig = ""; refreshOverview().catch(showErr); });
-  $("#alarms").addEventListener("click", async ev => {
-    const d = ev.target.dataset, id = d.ack;
-    if (!id && !d.shelve && !d.unshelve) return;
-    let call = ["POST", `/api/events/${id}/ack`, undefined];
-    if (d.shelve) {  // a native prompt keeps this keyboard and screen reader friendly with no extra markup
-      const reason = prompt(`Why shelve the alarm on ${d.shelve}? (3 to 200 characters)`);
-      if (reason === null) return;
-      const minutes = parseInt(prompt("Shelve for how many minutes? (1 to 1440)", "60"), 10);
-      if (!minutes) return;
-      call = ["POST", `/api/alarms/${encodeURIComponent(d.shelve)}/shelve`, {reason, minutes}];
-    } else if (d.unshelve) call = ["POST", `/api/alarms/${encodeURIComponent(d.unshelve)}/unshelve`, undefined];
-    ev.target.disabled = true;
-    try { await api(...call); await refreshOverview(); } catch (e) { ev.target.disabled = false; showErr(e, $("#alarms")); }
-  });
-  $("#points").addEventListener("submit", async ev => {
-    ev.preventDefault();
-    const name = ev.target.dataset.set, v = ev.target.value.value, out = ev.target.querySelector("output");
-    try {
-      const url = `/api/points/${encodeURIComponent(name)}/set`, value = ev.submitter?.dataset.release ? null : Number(v);
-      let res = await api("POST", url, {value});
-      if (res && res.confirm) {  // the point asks for a second step: a native dialog, then the same value with the token
-        if (!confirm(`Set ${name} to ${value}?`)) { out.textContent = "cancelled"; return; }
-        res = await api("POST", url, {value, confirm: res.confirm});
-      }
-      out.textContent = "sent";
-    }
-    catch (e) { out.textContent = e.message; }
-  });
+  bindAlarmActions($("#alarms"), refreshOverview);
+  bindSetForms($("#points"));
   every(refreshOverview, 2000);
   every(refreshKpis, 30000);
 }
@@ -161,11 +135,121 @@ async function refreshOverview() {
   renderAlarms(evs);
 }
 
+// Acknowledge, shelve and unshelve buttons inside `box`; `refresh` redraws the page afterwards.
+function bindAlarmActions(box, refresh) {
+  box.addEventListener("click", async ev => {
+    const d = ev.target.dataset, id = d.ack;
+    if (!id && !d.shelve && !d.unshelve) return;
+    let call = ["POST", `/api/events/${id}/ack`, undefined];
+    if (d.shelve) {  // a native prompt keeps this keyboard and screen reader friendly with no extra markup
+      const reason = prompt(`Why shelve the alarm on ${d.shelve}? (3 to 200 characters)`);
+      if (reason === null) return;
+      const minutes = parseInt(prompt("Shelve for how many minutes? (1 to 1440)", "60"), 10);
+      if (!minutes) return;
+      call = ["POST", `/api/alarms/${encodeURIComponent(d.shelve)}/shelve`, {reason, minutes}];
+    } else if (d.unshelve) call = ["POST", `/api/alarms/${encodeURIComponent(d.unshelve)}/unshelve`, undefined];
+    ev.target.disabled = true;
+    try { await api(...call); await refresh(); } catch (e) { ev.target.disabled = false; showErr(e, box); }
+  });
+}
+
+// Set / Release forms (form[data-set]) inside `box`, including the confirm step a point may ask for.
+function bindSetForms(box) {
+  box.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const name = ev.target.dataset.set, v = ev.target.value.value, out = ev.target.querySelector("output");
+    try {
+      const url = `/api/points/${encodeURIComponent(name)}/set`, value = ev.submitter?.dataset.release ? null : Number(v);
+      let res = await api("POST", url, {value});
+      if (res && res.confirm) {  // the point asks for a second step: a native dialog, then the same value with the token
+        if (!confirm(`Set ${name} to ${value}?`)) { out.textContent = "cancelled"; return; }
+        res = await api("POST", url, {value, confirm: res.confirm});
+      }
+      out.textContent = "sent";
+    }
+    catch (e) { out.textContent = e.message; }
+  });
+}
+
+function setFormHtml(p) {
+  return p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" type="number" step="any" required placeholder="${p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : "";
+}
+
+// ---- one point: what it is doing now, how it got here, what is wrong with it, and what an operator can do about it
+async function viewPoint(name) {
+  const q = encodeURIComponent(name);
+  main.innerHTML = `<p class="crumb"><a href="#overview">Overview</a> &rsaquo; Point</p>
+    <h2 id="pd-h">${esc(name)}</h2>
+    <div id="pd-top" class="status" data-live>Loading point...</div>
+    <div class="pd-grid">
+      <section aria-labelledby="pd-t"><h3 id="pd-t">Trend</h3>
+        <form class="row" id="pd-win"><label>Window <select id="pd-hours"><option value="3600">1 hour</option><option value="21600">6 hours</option><option value="86400" selected>24 hours</option><option value="604800">7 days</option></select></label></form>
+        <div id="pd-chart" class="status">Loading trend...</div></section>
+      <section aria-labelledby="pd-a"><h3 id="pd-a">Alarms on this point</h3><div id="pd-alarms" class="status" data-live>Loading alarms...</div></section>
+      <section id="pd-control-box" aria-labelledby="pd-c" hidden><h3 id="pd-c">Set the value</h3><div id="pd-control"></div></section>
+      <section aria-labelledby="pd-s"><h3 id="pd-s">Settings</h3><div id="pd-settings" class="status">Loading...</div></section>
+    </div>`;
+  const when = t => t == null ? "never" : fmt(t);
+  const fix = (p, v) => v == null ? "none" : p.decimals == null ? String(v) : Number(v).toFixed(p.decimals);
+  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for"};
+  let drawn = "";
+  async function refresh() {
+    let p;
+    try { p = await api("GET", `/api/points/${q}`); }
+    catch (e) {
+      if (e.status !== 404) throw e;
+      stopTimers();  // retrying will not make a missing point appear
+      main.innerHTML = `<p class="crumb"><a href="#overview">Overview</a> &rsaquo; Point</p><h2>No point named ${esc(name)}</h2><p class="status">It does not exist, or you cannot see it. Check the name, or ask an administrator.</p>`;
+      return;
+    }
+    const over = p.last != null && ((p.limits.high != null && p.last > p.limits.high) || (p.limits.low != null && p.last < p.limits.low));
+    const notes = [];
+    if (p.quality !== "good") notes.push(`Quality is ${p.quality}: ${p.quality === "bad" ? "the source is not supplying this value, so the last known one is shown." : "treat this value with care."}`);
+    if (p.source_down) notes.push(`Source ${p.source} is down: ${p.source_down}.`);
+    if (p.hold?.kind === "oos") notes.push(`Out of service since ${fmt(p.hold.created)} by ${p.hold.user}: ${p.hold.reason}. Its alarms are not evaluated.`);
+    if (p.hold?.kind === "shelved") notes.push(`Alarms shelved by ${p.hold.user} until ${fmt(p.hold.until)}: ${p.hold.reason}.`);
+    $("#pd-top").className = "";
+    $("#pd-top").innerHTML = `<p class="pd-val num ${over ? "over" : ""}">${p.last == null ? "no value yet" : esc(fix(p, p.last))}<span class="u"> ${esc(p.unit)}</span></p>
+      ${p.description ? `<p>${esc(p.description)}</p>` : ""}
+      <p class="note">Source ${esc(p.source)} (${esc(p.source_type)}). Value time ${esc(when(p.last_ts))}, received ${esc(when(p.received))}.${Object.keys(p.tags).length ? " Tags: " + esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(", ")) + "." : ""}</p>
+      ${notes.map(n => `<p class="err">${esc(n)}</p>`).join("")}`;
+    const sig = JSON.stringify([p.settable, p.set_limits]);
+    if (sig !== drawn) {  // keep what a person is typing: rebuild the form only when its rules change
+      drawn = sig;
+      $("#pd-control-box").hidden = !(p.settable && isUser());
+      $("#pd-control").innerHTML = setFormHtml(p) + (p.set_limits ? `<p class="note">${p.set_limits.min != null || p.set_limits.max != null ? `Accepts ${p.set_limits.min ?? "any"} to ${p.set_limits.max ?? "any"}. ` : ""}${p.set_limits.max_step != null ? `At most ${p.set_limits.max_step} away from the present value per write. ` : ""}${p.set_limits.confirm ? "Asks for confirmation. " : ""}Release hands the point back to its source.</p>` : "");
+    }
+    const lim = p.detectors.map(d => `${kinds[d.kind] || d.kind} ${d.limit ?? d.per_second ?? d.seconds}${d.kind === "NO_UPDATE" ? " s" : p.unit ? " " + p.unit : ""} (${String(d.level || "WARNING").toLowerCase()})`);
+    $("#pd-settings").className = "";
+    $("#pd-settings").innerHTML = `<dl class="kv"><dt>Alarms</dt><dd>${lim.length ? lim.map(esc).join("; ") : "none set"}</dd>
+      <dt>Engineering range</dt><dd>${p.eu.low == null && p.eu.high == null ? "not set" : `${p.eu.low ?? "any"} to ${p.eu.high ?? "any"}${p.unit ? " " + esc(p.unit) : ""}`}</dd>
+      <dt>Decimals shown</dt><dd>${p.decimals ?? "as received"}</dd></dl>
+      ${isAdmin() ? `<p><a class="btn" href="#config/point/${q}">Edit settings</a></p>` : ""}`;
+    const evs = await api("GET", `/api/events?point=${q}`);
+    $("#pd-alarms").className = evs.length ? "" : "status";
+    $("#pd-alarms").innerHTML = evs.length ? alarmTableHtml(evs.slice(0, 20), false) : "No alarms recorded for this point.";
+  }
+  const chart = async () => {
+    const box = $("#pd-chart"), win = Number($("#pd-hours").value);
+    box._t = 0;
+    await WIDGETS.chart.render(box, {type: "chart", title: "Average, last " + $("#pd-hours").selectedOptions[0].text, points: [name], window: win, rollup: "avg"}, {});
+  };
+  bindAlarmActions($("#pd-alarms"), refresh);
+  bindSetForms($("#pd-control"));
+  $("#pd-hours").addEventListener("change", () => chart().catch(e => showErr(e, $("#pd-chart"))));
+  every(refresh, 2000);
+  every(chart, 6000);
+}
+
 function renderAlarms(evs) {
   const box = $("#alarms"), open = evs.filter(e => e.acked_ts == null).length;
   $("#al-count").textContent = evs.length ? `${open} unacknowledged of ${evs.length}` : "";
   if (!evs.length) { box.className = "status"; box.textContent = "No alarms. One is raised when a point breaks a limit or stops reporting, and it stays here until someone acknowledges it."; return; }
   box.className = "";
+  box.innerHTML = alarmTableHtml(evs);
+}
+
+function alarmTableHtml(evs, showPoint = true) {
   const STATE = {active_unacked: e => "Active, not acknowledged", active_acked: e => `Active, acknowledged by ${esc(e.acked_by)} at ${fmt(e.acked_ts)}`,
     rtn_unacked: e => `Returned to normal at ${fmt(e.cleared_ts)}, not acknowledged`, closed: e => `Closed: returned to normal at ${fmt(e.cleared_ts)}, acknowledged by ${esc(e.acked_by)}`};
   const HELD = {shelved: "Shelved. ", suppressed: "Suppressed by design. "};
@@ -173,8 +257,8 @@ function renderAlarms(evs) {
   const shelving = e => !isUser() || e.cleared_ts != null ? "" : e.held === "shelved"
     ? `<button data-unshelve="${esc(e.point)}" aria-label="Unshelve alarm on ${esc(e.point)}">Unshelve</button>`
     : e.held ? "" : `<button data-shelve="${esc(e.point)}" aria-label="Shelve alarm on ${esc(e.point)}">Shelve</button>`;
-  box.innerHTML = `<table class="stack"><thead><tr><th>Level</th><th>Point</th><th>Detail</th><th>Raised</th><th>State</th><th><span class="sr">Action</span></th></tr></thead><tbody>` +
-    evs.map(e => `<tr class="${e.acked_ts == null ? "open" : "done"}"><td class="lvl" data-label="Level">${esc(e.level_name)}</td><td data-label="Point">${esc(e.point)}</td>
+  return `<table class="stack"><thead><tr><th>Level</th>${showPoint ? "<th>Point</th>" : ""}<th>Detail</th><th>Raised</th><th>State</th><th><span class="sr">Action</span></th></tr></thead><tbody>` +
+    evs.map(e => `<tr class="${e.acked_ts == null ? "open" : "done"}"><td class="lvl" data-label="Level">${esc(e.level_name)}</td>${showPoint ? `<td data-label="Point"><a href="#point/${encodeURIComponent(e.point)}">${esc(e.point)}</a></td>` : ""}
       <td class="num" data-label="Detail">${esc(e.message)}</td><td class="num" data-label="Raised">${fmt(e.ts)}</td><td data-label="State">${state(e)}</td>
       <td>${e.acked_ts == null && isUser() ? `<button data-ack="${e.id}" aria-label="Acknowledge alarm on ${esc(e.point)} raised at ${fmt(e.ts)}">Acknowledge</button>` : ""} ${shelving(e)}</td></tr>`).join("") + "</tbody></table>";
 }
@@ -195,8 +279,8 @@ function renderPoints(pts, filtered) {
   const sig = pts.map(p => p.name + (p.settable ? "*" : "")).join();
   if (sig !== ptSig) {  // rebuild only when the list changes, so typing in a set field is never interrupted
     ptSig = sig;
-    box.innerHTML = pts.map(p => `<div class="pt" data-pt="${esc(p.name)}"><div class="head"><span>${esc(p.name)} <span class="tags">${esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(" "))}</span>${p.description ? `<small class="note"> ${esc(p.description)}</small>` : ""}</span><span class="val num"></span></div><div class="spark"></div>
-      ${p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" type="number" step="any" required placeholder="${p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : ""}</div>`).join("");
+    box.innerHTML = pts.map(p => `<div class="pt" data-pt="${esc(p.name)}"><div class="head"><span><a href="#point/${encodeURIComponent(p.name)}">${esc(p.name)}</a> <span class="tags">${esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(" "))}</span>${p.description ? `<small class="note"> ${esc(p.description)}</small>` : ""}</span><span class="val num"></span></div><div class="spark"></div>
+      ${setFormHtml(p)}</div>`).join("");
   }
   for (const p of pts) {
     const row = [...box.children].find(r => r.dataset.pt === p.name), v = row.querySelector(".val");
@@ -257,7 +341,7 @@ function viewReports() {
     const f = v => v == null ? "none" : Number(v).toFixed(2).replace(/\.?0+$/, "");
     box.className = d.items.length ? "" : "status";
     box.innerHTML = d.items.length ? `<p class="note">${fmt(d.from)} to ${fmt(d.to)}. Bad samples are counted but left out of every figure.</p><table class="stack"><thead><tr><th>Point</th><th>Samples</th><th>Min</th><th>Max</th><th>Average</th><th>First</th><th>Last</th><th>Bad samples</th><th>Alarms</th></tr></thead><tbody>` +
-      d.items.map(i => `<tr><td data-label="Point">${esc(i.point)}${i.unit ? ` <small class="note">${esc(i.unit)}</small>` : ""}</td>${["samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms"].map(k => `<td class="num" data-label="${k}">${k === "samples" || k === "bad_samples" || k === "alarms" ? i[k] : f(i[k])}</td>`).join("")}</tr>`).join("") + "</tbody></table>"
+      d.items.map(i => `<tr><td data-label="Point"><a href="#point/${encodeURIComponent(i.point)}">${esc(i.point)}</a>${i.unit ? ` <small class="note">${esc(i.unit)}</small>` : ""}</td>${["samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms"].map(k => `<td class="num" data-label="${k}">${k === "samples" || k === "bad_samples" || k === "alarms" ? i[k] : f(i[k])}</td>`).join("")}</tr>`).join("") + "</tbody></table>"
       : "No points match, or you can see none.";
   };
   $("#rf").addEventListener("submit", ev => { ev.preventDefault(); show().catch(e => showErr(e, $("#rep"))); });

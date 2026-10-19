@@ -233,6 +233,12 @@ class App:
             return 200, {"ok": True}
         if (method, a) == ("GET", "points") and b is None:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
+        if (method, a, c) == ("GET", "points", None) and b:
+            p, s = self.visible_points(ident).get(b, (None, None))
+            if p is None:
+                raise ApiError(404, "unknown point")
+            return 200, {**self.point_view(p, s), "source_type": s.meta.get("type"), "source_down": s.down_reason,
+                         "detectors": p.meta.get("detector_cfg", []), "hold": self.holds.get(b)}
         if (method, a, b) == ("GET", "reports", "summary"):
             return self.report_summary(ident, query)
         if (method, a, c) == ("POST", "points", "set"):
@@ -264,7 +270,8 @@ class App:
             return self.history_csv(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
             ok = self.event_points(ident)
-            rows = [e for e in self.store.events(300) if e["point"] in ok][:100]
+            point = query.get("point")
+            rows = [e for e in self.store.events(300 if not point else 50, point) if e["point"] in ok][:100]
             for e in rows:
                 e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
             return 200, rows
