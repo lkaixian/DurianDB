@@ -121,6 +121,23 @@ for bad_cfg in ({"kind": "STATE"}, {"kind": "STATE", "states": []}, {"kind": "ST
     except ValueError:
         pass
 
+# ---- smoothness (scatter over a window) and CUSUM (small steady drift)
+eng, _ = run([5, 5, 5, 5, 5, 9, 1, 9, 1, 5, 5, 5, 5, 5, 5, 5], pt(kind="SMOOTHNESS", samples=4, limit=1))
+assert len(eng.events) == 1 and "scatter" in eng.events[0].message and eng.events[0].cleared_ts is not None, [(e.ts, e.message) for e in eng.events]
+eng, _ = run([5.0] * 12, pt(kind="SMOOTHNESS", samples=4, limit=1))
+assert not eng.events  # a steady value is smooth
+eng, _ = run([10, 10, 11, 11, 11, 11, 11, 11] + [10] * 30, pt(kind="CUSUM", target=10, slack=0.2, threshold=3))
+assert len(eng.events) == 1 and "above 10" in eng.events[0].message and eng.events[0].ts == 5.0 and eng.events[0].cleared_ts is not None, [(e.ts, e.message, e.cleared_ts) for e in eng.events]
+assert not run([9.9, 10.1] * 10, pt(kind="CUSUM", target=10, slack=0.2, threshold=3))[0].events  # noise around the target never accumulates
+eng, _ = run([10, 9, 9, 9, 9], pt(kind="CUSUM", target=10, slack=0, threshold=3))
+assert "below 10" in eng.events[0].message
+for bad_cfg in ({"kind": "SMOOTHNESS", "limit": 1, "samples": 2}, {"kind": "SMOOTHNESS"}, {"kind": "CUSUM", "target": 1}, {"kind": "CUSUM", "target": 1, "threshold": 1, "slack": -1}):
+    try:
+        make_detector(bad_cfg)
+        raise AssertionError(bad_cfg)
+    except ValueError:
+        pass
+
 # ---- interval logging: one sample per period, as the last value or an aggregate, stamped with the period's end
 from durian.core import Logging  # noqa: E402
 for mode, want in (("instant", [(3.0, 4.0), (6.0, 7.0)]), ("avg", [(3.0, 2.5), (6.0, 6.0)]), ("min", [(3.0, 1.0), (6.0, 5.0)]), ("max", [(3.0, 4.0), (6.0, 7.0)])):

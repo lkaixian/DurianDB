@@ -217,6 +217,8 @@ const DET = {
   RANGE: {label: "Outside or inside a range", args: [["low", "Low"], ["high", "High"], ["mode", "Alarm when", "select", opts(["outside", "outside the range"], ["inside", "inside the range"])]], late: true, start: {low: 0, high: 100, mode: "outside"}},
   CHANGE: {label: "Every change", args: [["tolerance", "Ignore changes of"]], start: {tolerance: 0}},
   NO_CHANGE: {label: "Stuck value", args: [["seconds", "Seconds unchanged"], ["tolerance", "Ignore changes of"]], start: {seconds: 600, tolerance: 0}},
+  SMOOTHNESS: {label: "Noisy signal", args: [["limit", "Scatter limit (std. deviation)"], ["samples", "Over this many samples"]], late: true, start: {limit: 1, samples: 10}},
+  CUSUM: {label: "Slow drift (CUSUM)", args: [["target", "Target value"], ["slack", "Allowance per sample"], ["threshold", "Alarm when the sum passes"]], late: true, start: {target: 0, slack: 0, threshold: 10}},
   NO_UPDATE: {label: "No update", args: [["seconds", "Seconds without a value"]], start: {seconds: 60}},
 };
 function detectorHtml(d, i) {

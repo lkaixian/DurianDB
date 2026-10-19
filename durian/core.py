@@ -225,8 +225,51 @@ class NoChange(Detector):
             return self.event
 
 
-DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange)}
-LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE")  # these take duration (on-delay) and off_delay
+class Smoothness(_Latch):
+    """Alarm while the last `samples` values scatter by more than `limit` (standard deviation): a noisy sensor, a hunting loop, a loose wire."""
+    kind = "SMOOTHNESS"
+
+    def __init__(self, limit, samples=10, level=Level.WARNING, duration=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
+        self.limit, self.window = limit, deque(maxlen=samples)
+
+    def reset(self):
+        super().reset()
+        self.window.clear()
+
+    def evaluate(self, point, value, ts):
+        self.window.append(value)
+        if len(self.window) < self.window.maxlen:
+            return None
+        mean = sum(self.window) / len(self.window)
+        sd = math.sqrt(sum((x - mean) ** 2 for x in self.window) / len(self.window))
+        return f"scatter {sd:.3g} > {self.limit:g} over {len(self.window)} samples" if sd > self.limit else None
+
+
+class Cusum(_Latch):
+    """Cumulative-sum drift alarm: adds up how far the value sits from `target` beyond a `slack` allowance, and alarms when that total passes `threshold`.
+    It catches a small steady offset that no single limit would, and the total drains back once the value returns to target."""
+    kind = "CUSUM"
+
+    def __init__(self, target, threshold, slack=0.0, level=Level.WARNING, duration=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
+        self.target, self.threshold, self.slack, self.hi, self.lo = target, threshold, slack, 0.0, 0.0
+
+    def reset(self):
+        super().reset()
+        self.hi = self.lo = 0.0
+
+    def evaluate(self, point, value, ts):
+        self.hi = max(0.0, self.hi + value - self.target - self.slack)
+        self.lo = max(0.0, self.lo + self.target - value - self.slack)
+        if self.hi > self.threshold:
+            return f"drifting above {self.target:g} (sum {self.hi:.3g} > {self.threshold:g})"
+        if self.lo > self.threshold:
+            return f"drifting below {self.target:g} (sum {self.lo:.3g} > {self.threshold:g})"
+
+
+DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange, Smoothness, Cusum)}
+LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE", "SMOOTHNESS", "CUSUM")  # these take duration (on-delay) and off_delay
 
 
 def make_detector(cfg: dict) -> Detector:
@@ -264,6 +307,13 @@ def make_detector(cfg: dict) -> Detector:
         if cfg.get("mode", "outside") not in ("outside", "inside"):
             raise ValueError("mode must be outside or inside")
         return RangeDetector(low, high, cfg.get("mode", "outside"), level, **late)
+    if kind == "SMOOTHNESS":
+        n = cfg.get("samples", 10)
+        if not isinstance(n, int) or isinstance(n, bool) or not 3 <= n <= 1000:
+            raise ValueError("samples must be a whole number from 3 to 1000")
+        return Smoothness(num("limit", lo=0), n, level, **late)
+    if kind == "CUSUM":
+        return Cusum(num("target"), num("threshold", lo=0), float(num("slack", 0, 0)), level, **late)
     if kind == "CHANGE":
         return ChangeDetector(float(num("tolerance", 0, 0)), level)
     return NoChange(num("seconds", lo=1), float(num("tolerance", 0, 0)), level)

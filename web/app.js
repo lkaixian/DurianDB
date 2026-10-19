@@ -217,7 +217,7 @@ async function viewPoint(name) {
     </div>`;
   const when = t => t == null ? "never" : fmt(t);
   const fix = (p, v) => v == null ? "none" : p.decimals == null ? String(v) : Number(v).toFixed(p.decimals);
-  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for"};
+  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for", SMOOTHNESS: "scatter above", CUSUM: "drift from"};
   let drawn = "", current = null;  // `current` is what the trend needs for its limit lines
   async function refresh() {
     let p;
@@ -247,7 +247,7 @@ async function viewPoint(name) {
       $("#pd-control-box").hidden = !(p.settable && isUser());
       $("#pd-control").innerHTML = setFormHtml(p) + (p.set_limits ? `<p class="note">${p.set_limits.min != null || p.set_limits.max != null ? `Accepts ${p.set_limits.min ?? "any"} to ${p.set_limits.max ?? "any"}. ` : ""}${p.set_limits.max_step != null ? `At most ${p.set_limits.max_step} away from the present value per write. ` : ""}${p.set_limits.confirm ? "Asks for confirmation. " : ""}Release hands the point back to its source.</p>` : "");
     }
-    const arg = d => d.kind === "STATE" ? (d.states || []).map(x => p.states?.[String(x)] ?? x).join(" or ") : d.kind === "RANGE" ? `${d.mode === "inside" ? "inside" : "outside"} ${d.low} to ${d.high}` : d.kind === "CHANGE" ? "" : d.limit ?? d.per_second ?? d.seconds;
+    const arg = d => d.kind === "STATE" ? (d.states || []).map(x => p.states?.[String(x)] ?? x).join(" or ") : d.kind === "RANGE" ? `${d.mode === "inside" ? "inside" : "outside"} ${d.low} to ${d.high}` : d.kind === "CHANGE" ? "" : d.kind === "CUSUM" ? `${d.target} (sum over ${d.threshold})` : d.limit ?? d.per_second ?? d.seconds;
     const lim = p.detectors.map(d => `${d.kind === "RANGE" ? "" : kinds[d.kind] || d.kind} ${arg(d)}${["NO_UPDATE", "NO_CHANGE"].includes(d.kind) ? " s" : ["HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE"].includes(d.kind) && p.unit ? " " + p.unit : ""} (${String(d.level || "WARNING").toLowerCase()})`.trim());
     $("#pd-settings").className = "";
     $("#pd-settings").innerHTML = `<dl class="kv"><dt>Alarms</dt><dd>${lim.length ? lim.map(esc).join("; ") : "none set"}</dd>
