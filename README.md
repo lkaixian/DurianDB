@@ -2,7 +2,7 @@
 
 An educational reference for how a SCADA / IoT data-acquisition platform fits together, studied from the public documentation and the black-box behavior of Mango (Radix IoT). DurianDB is an independent, original work. It contains no Mango code, assets or branding.
 
-What it does: collects values from data sources (a virtual generator, MQTT over TLS, Modbus over TCP, RTU and ASCII, HTTP JSON, and read-only SQL), stores history as a time series, raises and clears alarms with detectors, lets operators acknowledge alarms and set values, sends events to webhooks, publishes values over MQTT TLS, and shows it all in a browser console. Python standard library plus `paho-mqtt` (and `cryptography` for the lab script only).
+What it does: collects values from data sources (a virtual generator, MQTT over TLS, Modbus over TCP, RTU and ASCII, HTTP JSON, and read-only SQL), stores history as a time series, raises and clears alarms with detectors, lets operators acknowledge alarms and set values, sends events to webhooks, publishes values over MQTT TLS, and shows it all in a browser console, including dashboards you design and publish yourself. Python standard library plus `paho-mqtt` (and `cryptography` for the lab script only).
 
 ## Run
 
@@ -35,7 +35,8 @@ python tools/sim_publisher.py       # sends durian/mqtt-temp and durian/mqtt-flo
 | `durian/auth.py` | scrypt passwords, sessions, role inheritance, login lockout |
 | `durian/app.py` | The API as plain calls, with permission checks |
 | `durian/server.py` | HTTP shell: cookies, CSRF header, security headers |
-| `web/` | Console: overview, history, config editor, users, audit, account |
+| `durian/dashboards.py`, `web/dashboards.js` | Dashboards: widget validators and renderers, designer, kiosk and public views |
+| `web/` | Console: overview, dashboards, history, config editor, users, audit, account |
 | `tests/` | `python tests/run_all.py` runs every suite |
 | `tools/` | MQTT lab, sensor simulator, `browser_check.mjs` and `browser_modbus.mjs` (real browser), `e2e_check.py` (outputs) |
 | `docs/` | Clean-room policy and dated research notes |
@@ -44,6 +45,10 @@ python tools/sim_publisher.py       # sends durian/mqtt-temp and durian/mqtt-flo
 ## Security notes
 
 Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every state-changing request needs an `X-Requested-With` header. Five failed logins lock a name for five minutes. The page uses a strict Content-Security-Policy with no inline script or style. MQTT clients always verify the server certificate and hostname. Webhooks do not follow redirects. Object permissions are role lists that default to `user`, with `superadmin` always allowed. The server speaks plain HTTP on 127.0.0.1 only. Put it behind HTTPS before exposing it anywhere else.
+
+## Dashboards
+
+Open **Dashboards** in the console. The seeded `plant-overview` shows every widget type. Create your own with **New dashboard** (needs the `designer` or `superadmin` role): add widgets, set their place on the grid, edit each widget's settings, watch the live preview, save. A dashboard is plain JSON, so it can be copied between servers. Public means the role `anonymous` (superadmin only), and the data on it stays behind its own point permissions. To add a widget type, see the last section of `docs/research/09-dashboards.md`.
 
 ## Known limits (deliberate, see `ponytail:` comments and docs)
 
@@ -55,4 +60,4 @@ Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every 
 
 ## Status and research
 
-See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `08` (06 compares the enterprise and regular editions, 07 is Modbus, 08 is HTTP and SQL). Open questions: `docs/research/99-open-questions.md`.
+See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `09` (06 compares the enterprise and regular editions, 07 is Modbus, 08 is HTTP and SQL, 09 is dashboards and extension). Open questions: `docs/research/99-open-questions.md`.
