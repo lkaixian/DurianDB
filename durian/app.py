@@ -701,7 +701,7 @@ class App:
 
     def source_view(self, s):
         return {"name": s.name, "type": s.meta.get("type"), "points": len(s.points), "error": s.error,
-                "down": s.down_reason, "connected": getattr(s, "connected", None), "dropped": getattr(s, "dropped", None)}
+                "down": s.down_reason, "poll_ms": s.poll_ms, "overruns": s.overruns, "connected": getattr(s, "connected", None), "dropped": getattr(s, "dropped", None)}
 
     def series(self, ident, q):
         point = q.get("point")

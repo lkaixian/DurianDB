@@ -337,6 +337,9 @@ class Source:
     down_after: float = 10.0  # a failure must last this long before the source-down alarm, so a start-up or a blip does not alarm
     down_reason: Optional[str] = None  # why the source is down right now, None when it is not
     last_data: Optional[float] = None
+    period: Optional[float] = None  # seconds between polls, for sources that poll
+    poll_ms: Optional[float] = None  # how long the last poll took
+    overruns: int = 0  # polls that took longer than the period
     _down_since: Optional[float] = None
 
     def add(self, point: Point) -> Point:
@@ -351,11 +354,24 @@ class Engine:
     def __init__(self):
         self.sources, self.events, self.publishers = [], [], []
         self.down = {}  # source name -> its open source-down Event
+        self.slow = {}  # source name -> its open poll-overrun Event
 
     def _event(self, ev: Event):
         self.events.append(ev)
 
+    def _overrun(self, s, ts):
+        """A poll that takes longer than its period means readings are older than configured: say so until polls fit again."""
+        ev, late = self.slow.get(s.name), bool(s.period and s.poll_ms is not None and s.poll_ms / 1000 > s.period)
+        if late and ev is None:
+            s.overruns += 1
+            self.slow[s.name] = ev = Event(SOURCE + s.name, Level.URGENT, f"poll took {s.poll_ms / 1000:.1f}s, longer than its {s.period:g}s period", ts)
+            self._event(ev)
+        elif not late and ev is not None:
+            ev.cleared_ts = ts
+            del self.slow[s.name]
+
     def _watch(self, s, ts):
+        self._overrun(s, ts)
         """Source-down alarm: the link is lost, the source failed, or nothing good arrived within its heartbeat."""
         if s.last_data is None:
             s.last_data = ts

@@ -83,6 +83,19 @@ e.tick(150.0)
 e.tick(171.0)
 assert len(e.events) == 2
 
+# ---- poll overrun: a poll slower than its period raises an alarm once, and clears when polls fit again
+e, s = mk(down_after=0.0)
+s.period, s.poll_ms = 2.0, 500.0
+e.tick(1.0)
+assert e.events == []
+s.poll_ms = 3100.0
+e.tick(2.0)
+e.tick(3.0)
+assert len(e.events) == 1 and "poll took 3.1s" in e.events[0].message and e.events[0].level.name == "URGENT" and s.overruns == 1
+s.poll_ms = 800.0
+e.tick(4.0)
+assert e.events[0].cleared_ts == 4.0
+
 # ---- configuration and visibility through the app
 store = new_store()
 seed(store)
