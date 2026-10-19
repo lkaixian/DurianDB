@@ -186,6 +186,10 @@ class Store:
         return self.run("update events set acked_ts=?, acked_by=? where id=? and acked_ts is null",
                         (ts, user, event_id)).rowcount
 
+    def events_for_kpis(self, since):
+        """Alarms raised since `since`, plus every alarm still active however old."""
+        return self.q("select point, ts, cleared_ts, acked_ts, held from events where ts >= ? or cleared_ts is null", (since,))
+
     def events(self, limit=100):
         return self.q("select * from events order by acked_ts is not null, level desc, ts desc limit ?", (limit,))
 

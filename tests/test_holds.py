@@ -78,4 +78,22 @@ assert call(admin, "POST", "/api/alarms/hot/in-service")[0] == 200
 app.tick(now + 404)
 assert any(s[0] == "active_unacked" for s in state("hot"))
 assert {"alarm.shelve", "alarm.out-of-service", "alarm.in-service", "shelve.expired"} <= {r["action"] for r in store.audit_log(50)}
+
+# ---- KPIs, computed from stored alarms, only for points the caller can see
+st = app.store
+st.run("delete from events")
+st.run("delete from objects where kind='alarmhold'")
+app.holds = {}
+T = 1_000_000_200.0  # on a 10 minute boundary
+for point, dt_, ack in (("hot", 0, 30), ("hot", 100, None), ("hot", 200, 10), ("hot2", 5, None)):  # three inside one 10 minute bucket
+    st.run("insert into events(point,level,message,ts,acked_ts) values (?,?,?,?,?)", (point, 4, "x", T + dt_, None if ack is None else T + dt_ + ack))
+st.run("insert into events(point,level,message,ts,cleared_ts) values ('hot2',4,'old',?,?)", (T - 100 * 3600, T - 99 * 3600))  # outside the window
+st.run("insert into events(point,level,message,ts) values ('hot2',4,'stuck',?)", (T - 50 * 3600,))  # active for 50 h, outside the window
+k = app.alarm_kpis(app.visible_points(op), False, 24, now=T + 3600)
+assert (k["alarms"], k["peak_per_10min"], k["flood_10min_periods"]) == (4, 4, 0) and k["per_hour"] == 0.17, k
+assert k["top_points"][0] == {"point": "hot", "alarms": 3} and k["chattering_points"] == [{"point": "hot", "periods": 1}]
+assert k["median_seconds_to_acknowledge"] == 30 and k["unacknowledged_now"] == 3
+assert k["active_now"] == 5 and k["stale_now"] == 1, k
+assert app.alarm_kpis({}, False, 24, now=T)["alarms"] == 0  # a caller who sees no points sees no alarms
+assert call(op, "GET", "/api/alarms/kpis")[1]["hours"] == 24 and call(ANON, "GET", "/api/alarms/kpis")[1]["alarms"] == 0
 print("ok")

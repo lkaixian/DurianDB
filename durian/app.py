@@ -7,6 +7,7 @@ import json
 import math
 import re
 import time
+from collections import Counter
 from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
@@ -236,7 +237,7 @@ class App:
                 e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
             return 200, rows
         if a == "alarms":
-            return self.alarm_holds(method, b, c, body, ident)
+            return self.alarm_holds(method, b, c, body, ident, query)
         if (method, a, c) == ("POST", "events", "ack"):
             need(user)
             ev = self.store.q("select point from events where id=?", (int(b) if b.isdigit() else -1,))
@@ -352,11 +353,14 @@ class App:
         raise ApiError(405, "method not allowed")
 
     # ---- shelving and out of service
-    def alarm_holds(self, method, point, action, body, ident):
+    def alarm_holds(self, method, point, action, body, ident, query=None):
         """GET /api/alarms lists holds. POST /api/alarms/<point>/shelve|unshelve (users), out-of-service|in-service (superadmin)."""
         pts = self.visible_points(ident)
         if (method, point, action) == ("GET", None, None):
             return 200, [h for h in self.holds.values() if h["name"] in pts]
+        if (method, point, action) == ("GET", "kpis", None):
+            h = (query or {}).get("hours", "24")
+            return 200, self.alarm_kpis(pts, "superadmin" in ident["roles"], int(h) if h.isdigit() else 24)
         if method != "POST" or action not in ("shelve", "unshelve", "out-of-service", "in-service"):
             raise ApiError(404, "not found")
         if not ident["name"]:
@@ -401,6 +405,31 @@ class App:
             self._apply_holds(now)
         self.store.audit(ident["name"], "alarm." + action, f"{point}: {reason}" if reason else point)
         return 200, {"point": point, "action": action}
+
+    def alarm_kpis(self, pts, admin, hours, now=None):
+        """Alarm system performance over the last `hours`, in the spirit of ISA-18.2 / EEMUA 191. Only points the caller can see."""
+        now = now or time.time()
+        hours = hours if isinstance(hours, (int, float)) and 1 <= hours <= 720 else 24
+        rows = [e for e in self.store.events_for_kpis(now - hours * 3600) if e["point"] in pts or (e["point"] == SYSTEM and admin)]
+        inwin = [e for e in rows if e["ts"] >= now - hours * 3600]
+        buckets = Counter(int(e["ts"] // 600) for e in inwin)  # 10-minute buckets: the unit EEMUA 191 counts alarm floods in
+        per_point, chatter = Counter(e["point"] for e in inwin), Counter()
+        for (_, p), n in Counter((int(e["ts"] // 600), e["point"]) for e in inwin).items():
+            if n >= 3:
+                chatter[p] += 1  # three or more alarms of one point inside 10 minutes
+        waits = sorted(e["acked_ts"] - e["ts"] for e in inwin if e["acked_ts"] is not None)
+        active = [e for e in rows if e["cleared_ts"] is None]
+        return {"hours": hours, "alarms": len(inwin), "per_hour": round(len(inwin) / hours, 2),
+                "peak_per_10min": max(buckets.values(), default=0),
+                "flood_10min_periods": sum(1 for n in buckets.values() if n > 10),  # more than 10 alarms in 10 minutes
+                "top_points": [{"point": p, "alarms": n} for p, n in per_point.most_common(5)],
+                "chattering_points": [{"point": p, "periods": n} for p, n in chatter.most_common(5)],
+                "median_seconds_to_acknowledge": waits[len(waits) // 2] if waits else None,
+                "unacknowledged_now": sum(1 for e in rows if e["acked_ts"] is None),
+                "active_now": len(active), "stale_now": sum(1 for e in active if e["ts"] < now - 86400),  # active for over 24 h
+                "held_now": sum(1 for e in active if e["held"]),
+                "shelved_points": sum(1 for h in self.holds.values() if h["kind"] == "shelved" and h["name"] in pts),
+                "out_of_service_points": sum(1 for h in self.holds.values() if h["kind"] == "oos" and h["name"] in pts)}
 
     # ---- database health, retention, backups, import and export (superadmin)
     def database(self, method, what, name, body, ident):
