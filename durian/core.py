@@ -44,6 +44,13 @@ class Event:
     id: Optional[int] = None  # row id once stored
 
 
+def alarm_state(acked_ts, cleared_ts):
+    """ISA-18.2 state of a stored alarm. 'closed' is the old Normal: back to normal and acknowledged."""
+    if cleared_ts is None:
+        return "active_acked" if acked_ts is not None else "active_unacked"
+    return "closed" if acked_ts is not None else "rtn_unacked"
+
+
 class Detector:
     kind = ""
 
@@ -81,19 +88,21 @@ class _Latch(Detector):
 class HighLimit(_Latch):
     kind = "HIGH_LIMIT"
 
-    def __init__(self, limit, level=Level.WARNING, duration=0.0):
+    def __init__(self, limit, level=Level.WARNING, duration=0.0, deadband=0.0):
         super().__init__(level, duration)
-        self.limit = limit
+        self.limit, self.deadband = limit, deadband  # once raised, the value must pass the limit by `deadband` to clear, so a value hovering on the limit does not chatter
 
     def evaluate(self, point, value, ts):
-        return f"{value} > {self.limit}" if value > self.limit else None
+        edge = self.limit - self.deadband if self.event else self.limit
+        return f"{value} > {self.limit}" if value > edge else None
 
 
 class LowLimit(HighLimit):
     kind = "LOW_LIMIT"
 
     def evaluate(self, point, value, ts):
-        return f"{value} < {self.limit}" if value < self.limit else None
+        edge = self.limit + self.deadband if self.event else self.limit
+        return f"{value} < {self.limit}" if value < edge else None
 
 
 class RateOfChange(_Latch):
@@ -149,6 +158,11 @@ def make_detector(cfg: dict) -> Detector:
     if not isinstance(duration, (int, float)) or duration < 0:
         raise ValueError("duration must be a number of seconds, zero or more")
     extra = {} if kind == "NO_UPDATE" else {"duration": float(duration)}
+    if kind in ("HIGH_LIMIT", "LOW_LIMIT"):
+        deadband = cfg.get("deadband", 0)
+        if not isinstance(deadband, (int, float)) or isinstance(deadband, bool) or deadband < 0:
+            raise ValueError("deadband must be a number, zero or more")
+        extra["deadband"] = float(deadband)
     return DETECTORS[kind](cfg[arg], level, **extra)
 
 

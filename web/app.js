@@ -122,7 +122,9 @@ function renderAlarms(evs) {
   $("#al-count").textContent = evs.length ? `${open} unacknowledged of ${evs.length}` : "";
   if (!evs.length) { box.className = "status"; box.textContent = "No alarms. One is raised when a point breaks a limit or stops reporting, and it stays here until someone acknowledges it."; return; }
   box.className = "";
-  const state = e => e.acked_ts != null ? `Acknowledged by ${esc(e.acked_by)} at ${fmt(e.acked_ts)}` : e.cleared_ts != null ? `Returned to normal at ${fmt(e.cleared_ts)}` : "Active";
+  const STATE = {active_unacked: e => "Active, not acknowledged", active_acked: e => `Active, acknowledged by ${esc(e.acked_by)} at ${fmt(e.acked_ts)}`,
+    rtn_unacked: e => `Returned to normal at ${fmt(e.cleared_ts)}, not acknowledged`, closed: e => `Closed: returned to normal at ${fmt(e.cleared_ts)}, acknowledged by ${esc(e.acked_by)}`};
+  const state = e => STATE[e.state](e);
   box.innerHTML = `<table class="stack"><thead><tr><th>Level</th><th>Point</th><th>Detail</th><th>Raised</th><th>State</th><th><span class="sr">Action</span></th></tr></thead><tbody>` +
     evs.map(e => `<tr class="${e.acked_ts == null ? "open" : "done"}"><td class="lvl" data-label="Level">${esc(e.level_name)}</td><td data-label="Point">${esc(e.point)}</td>
       <td class="num" data-label="Detail">${esc(e.message)}</td><td class="num" data-label="Raised">${fmt(e.ts)}</td><td data-label="State">${state(e)}</td>
