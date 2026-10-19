@@ -34,7 +34,7 @@ W = lambda **k: {"id": "a", "type": "value", "point": "boiler-temp", "x": 0, "y"
 D = lambda *ws, **k: {"title": "T", "widgets": list(ws), **k}
 
 # every widget type has a validator, and the seeded dashboard is valid
-assert set(VALIDATORS) == {"value", "gauge", "chart", "alarms", "table", "setpoint", "text", "status"}
+assert set(VALIDATORS) == {"value", "gauge", "chart", "alarms", "table", "setpoint", "text", "status", "mimic"}
 s, seeded = call(viewer, "GET", "/api/dashboards/plant-overview")
 assert s == 200 and len(seeded["widgets"]) == 8 and seeded["editable"] is False
 assert call(admin, "PUT", "/api/dashboards/copy", {k: v for k, v in seeded.items() if k not in ("name", "editable")})[0] == 200
@@ -49,6 +49,21 @@ assert r[0] == 422 and {"title", "columns", "refresh", "read_roles", "widgets[1]
 assert "overlaps widget a" in str(r[1]["errors"])
 assert call(admin, "PUT", "/api/dashboards/ok", D(W(), W(id="b", x=3), W(id="c", type="gauge", min=0, max=1, zones=[{"from": 0.5, "to": 1, "tone": "alarm"}], x=6)))[0] == 200
 assert call(admin, "PUT", "/api/dashboards/bad name", D(W()))[0] == 422
+
+# ---- mimic: a fixed set of shapes, validated one by one
+M = lambda *shapes, **k: W(id="m", type="mimic", width=400, height=200, shapes=list(shapes), w=6, h=4, **k)
+good = [{"type": "rect", "x": 1, "y": 1, "w": 50, "h": 50, "label": "Tank", "point": "boiler-temp", "rules": [{"op": ">", "value": 90, "tone": "alarm"}]},
+        {"type": "line", "x1": 0, "y1": 0, "x2": 9, "y2": 9}, {"type": "circle", "cx": 5, "cy": 5, "r": 3}, {"type": "text", "x": 1, "y": 1, "text": "Boiler"},
+        {"type": "value", "x": 1, "y": 9, "point": "boiler-temp", "decimals": 1}]
+assert call(admin, "PUT", "/api/dashboards/mimic-ok", D(M(*good)))[0] == 200
+assert call(admin, "DELETE", "/api/dashboards/mimic-ok")[0] == 200  # the counts further down expect only the dashboards made there
+r = call(admin, "PUT", "/api/dashboards/mimic-bad", D(M({"type": "svg"}, {"type": "rect", "x": 1, "y": 1, "w": -5}, {"type": "text", "x": 1, "y": 1},
+                                                      {"type": "value", "x": 1, "y": 1}, {"type": "circle", "cx": 1, "cy": 1, "r": 1, "rules": [{"op": "~"}]},
+                                                      {"type": "line", "x1": 0, "y1": 0, "x2": 1, "y2": 1, "label": "x" * 101})))
+assert r[0] == 422 and {"widgets[0].shapes[0].type", "widgets[0].shapes[1].w", "widgets[0].shapes[1].h", "widgets[0].shapes[2].text", "widgets[0].shapes[3].point",
+                        "widgets[0].shapes[4].rules[0]", "widgets[0].shapes[5].label"} <= props(r), props(r)
+assert call(admin, "PUT", "/api/dashboards/mimic-big", D(M(*good * 20)))[0] == 422  # 100 shapes is too many
+assert call(admin, "PUT", "/api/dashboards/mimic-size", D({**M(*good), "width": 5000}))[0] == 422
 
 # ---- warnings: unknown points, and public dashboards over non-public points
 s, r = call(admin, "PUT", "/api/dashboards/warn", D(W(point="ghost"), read_roles=["user"]))

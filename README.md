@@ -66,6 +66,8 @@ Node-RED can push values with HTTP POST or GET (`/api/ingest/<source>`, scoped i
 
 **Reports.** `GET /api/reports/summary` (`hours`, or `from` and `to` as epoch seconds, up to 31 days; narrow with `watchlist` or `tag=key:value`; `format=csv` downloads) returns one row per point you can see: samples, min, max, average, first and last good value, bad samples and alarms in the window. Bad samples are counted but never enter a figure. At most 200 points per report. The Reports page shows the table and the download.
 
+**Mimics.** The dashboard widget `mimic` draws a process picture from a fixed set of shapes (`rect`, `line`, `circle`, `text`, `value`) on a canvas of up to 2000 by 2000, at most 80 shapes. A shape can follow a point with `point` and tone `rules` (normal, warn, alarm), which change its outline, dash and fill. Alarm and warn states are also written into the label and the hover text, and bad or uncertain values fade the shape, so colour is never the only signal. Author text is only ever inserted as text, never as markup.
+
 **Data quality.** Every value carries the source's own timestamp and a quality: `good`, `uncertain` or `bad`. A source that is down or cannot fill a point marks it `bad`: the last value is held, no alarm is evaluated on it, and charts, CSV export and rollups skip it (the history table keeps the row with its quality). A device clock more than a minute ahead, or a sender that says `"quality": "uncertain"`, makes the value `uncertain`. Values older than the newest one already received for a point are dropped. A "no update" alarm counts from when DurianDB received a value, not from the device's clock. Senders may add `ts` and `quality` to ingest and MQTT payloads.
 
 ## Database
