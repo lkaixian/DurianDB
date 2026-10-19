@@ -37,7 +37,7 @@ assert call(admin, "PUT", "/api/config/point/ro", {"source": "demo", "set_max": 
 # ---- the point view carries the fields
 v = next(p for p in call(admin, "GET", "/api/points")[1] if p["name"] == "sp")
 assert v["description"] == "Header pressure setpoint" and v["decimals"] == 1 and v["eu"] == {"low": 0, "high": 10}
-assert v["set_limits"] == {"min": 0, "max": 8, "max_step": 2, "confirm": True}  # min falls back to the engineering range
+assert v["set_limits"] == {"min": 0, "max": 8, "max_step": 2, "confirm": True, "reason_required": False}  # min falls back to the engineering range
 
 # ---- limits and step size are enforced before anything else happens
 assert call(admin, "POST", "/api/points/sp/set", {"value": 9})[0] == 422  # above set_max
@@ -66,6 +66,16 @@ assert call(admin, "POST", "/api/points/sp/set", {"value": 7, "confirm": r["conf
 
 # releasing needs neither limits nor confirmation
 assert call(admin, "POST", "/api/points/sp/set", {"value": None})[0] == 200
+
+# ---- reasons: a point can demand one with every write, and it lands in the audit log
+assert call(admin, "PUT", "/api/config/point/rs", {"source": "demo", "settable": True, "set_roles": ["user"], "require_reason": True, "generator": {"kind": "constant", "value": 1}})[0] == 200
+assert call(admin, "PUT", "/api/config/point/rs2", {"source": "demo", "require_reason": True})[0] == 422  # only for a settable point
+app.tick(time.time())
+assert call(admin, "POST", "/api/points/rs/set", {"value": 3})[0] == 422 and call(admin, "POST", "/api/points/rs/set", {"value": 3, "reason": "  "})[0] == 422
+assert call(admin, "POST", "/api/points/rs/set", {"value": 3, "reason": 5})[0] == 400 and call(admin, "POST", "/api/points/rs/set", {"value": 3, "reason": "x" * 201})[0] == 400
+assert call(admin, "POST", "/api/points/rs/set", {"value": 3, "reason": "valve swap"})[0] == 200
+assert any(a["detail"].endswith("-> 3 reason: valve swap") for a in call(admin, "GET", "/api/audit")[1])
+assert next(p for p in call(admin, "GET", "/api/points")[1] if p["name"] == "rs")["set_limits"]["reason_required"] is True
 
 # ---- binary and multistate points: labels for values, a labelled point view
 ST = {"source": "demo", "generator": {"kind": "constant", "value": 1}, "states": {"0": "Stopped", "1": "Running", "2": "Fault"},

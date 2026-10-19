@@ -259,7 +259,9 @@ def validate_point(name, b, store):
         add("max_step", "must be a number greater than zero")
     if not isinstance(b.get("confirm", False), bool):
         add("confirm", "must be true or false")
-    if not b.get("settable") and any(k in b for k in ("set_min", "set_max", "max_step", "confirm")):
+    if not isinstance(b.get("require_reason", False), bool):
+        add("require_reason", "must be true or false")
+    if not b.get("settable") and any(k in b for k in ("set_min", "set_max", "max_step", "confirm", "require_reason")):
         add("settable", "set limits and confirmation only apply to a settable point")
     fo = b.get("folder")
     if "folder" in b and not (isinstance(fo, str) and len(fo) <= 200 and all(0 < len(x.strip()) <= 64 for x in fo.split("/"))):
@@ -339,7 +341,7 @@ def make_point(name, b, source_name):
     for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
         if b.get(k):
             p.meta[k] = b[k]
-    for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm"):  # zero is a real value here
+    for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason"):  # zero is a real value here
         if k in b:
             p.meta[k] = b[k]
     return p

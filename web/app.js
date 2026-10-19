@@ -206,10 +206,11 @@ function bindSetForms(box) {
     const name = ev.target.dataset.set, v = ev.target.value.value, out = ev.target.querySelector("output");
     try {
       const url = `/api/points/${encodeURIComponent(name)}/set`, value = ev.submitter?.dataset.release ? null : ev.target.value.type === "text" ? v : Number(v);
-      let res = await api("POST", url, {value});
+      const reason = ev.target.reason?.value.trim() || undefined;
+      let res = await api("POST", url, {value, reason});
       if (res && res.confirm) {  // the point asks for a second step: a native dialog, then the same value with the token
         if (!confirm(`Set ${name} to ${value}?`)) { out.textContent = "cancelled"; return; }
-        res = await api("POST", url, {value, confirm: res.confirm});
+        res = await api("POST", url, {value, reason, confirm: res.confirm});
       }
       out.textContent = "sent";
     }
@@ -217,9 +218,10 @@ function bindSetForms(box) {
   });
 }
 
+const reasonHtml = p => p.set_limits?.reason_required ? `<input name="reason" required maxlength="200" placeholder="reason" aria-label="Reason for changing ${esc(p.name)}"> ` : "";
 function setFormHtml(p) {
-  if (p.settable && isUser() && p.states) return `<form data-set="${esc(p.name)}"><label class="inl">New state <select name="value" aria-label="New state for ${esc(p.name)}">${Object.entries(p.states).map(([k, l]) => `<option value="${esc(k)}" ${p.last === Number(k) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>`;
-  return p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" ${p.datatype === "text" ? 'type="text" maxlength="255"' : 'type="number" step="any"'} required placeholder="${p.datatype === "text" ? "" : p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : "";
+  if (p.settable && isUser() && p.states) return `<form data-set="${esc(p.name)}"><label class="inl">New state <select name="value" aria-label="New state for ${esc(p.name)}">${Object.entries(p.states).map(([k, l]) => `<option value="${esc(k)}" ${p.last === Number(k) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>${reasonHtml(p)}<button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>`;
+  return p.settable && isUser() ? `<form data-set="${esc(p.name)}"><input name="value" ${p.datatype === "text" ? 'type="text" maxlength="255"' : 'type="number" step="any"'} required placeholder="${p.datatype === "text" ? "" : p.set_limits.min ?? ""}${p.set_limits.min != null || p.set_limits.max != null ? " to " : "value"}${p.set_limits.max ?? ""}" ${p.set_limits.min != null ? `min="${p.set_limits.min}"` : ""} ${p.set_limits.max != null ? `max="${p.set_limits.max}"` : ""} aria-label="New value for ${esc(p.name)}${p.set_limits.max_step != null ? `, at most ${p.set_limits.max_step} away from the present value` : ""}">${reasonHtml(p)}<button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>` : "";
 }
 
 // ---- one point: what it is doing now, how it got here, what is wrong with it, and what an operator can do about it
