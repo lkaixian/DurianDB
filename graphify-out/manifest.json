@@ -1,0 +1,32 @@
+{
+  "durian/core.py": {
+    "mtime": 1792421719.8322196,
+    "seen": 1792421841.0367723,
+    "ast_hash": "ab6d1a2f14b173a1be66d3d2610756fd",
+    "semantic_hash": "ab6d1a2f14b173a1be66d3d2610756fd"
+  },
+  "README.md": {
+    "mtime": 1792421708.0169208,
+    "seen": 1792421841.0367777,
+    "ast_hash": "aefe7580a404c1126e0fe4b97ae57f60",
+    "semantic_hash": "aefe7580a404c1126e0fe4b97ae57f60"
+  },
+  "docs/00-clean-room-policy.md": {
+    "mtime": 1792421708.096352,
+    "seen": 1792421841.0367804,
+    "ast_hash": "eea328f5feda062484b75319b02d8880",
+    "semantic_hash": "eea328f5feda062484b75319b02d8880"
+  },
+  "docs/research/01-concepts.md": {
+    "mtime": 1792421708.3019583,
+    "seen": 1792421841.0367818,
+    "ast_hash": "db9b78970475a0acc907bcdceb886047",
+    "semantic_hash": "db9b78970475a0acc907bcdceb886047"
+  },
+  "docs/research/99-open-questions.md": {
+    "mtime": 1792421708.5238283,
+    "seen": 1792421841.0367837,
+    "ast_hash": "69357f7dba35f2926421fba6b00e5dfa",
+    "semantic_hash": "69357f7dba35f2926421fba6b00e5dfa"
+  }
+}
