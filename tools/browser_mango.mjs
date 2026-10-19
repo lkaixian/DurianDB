@@ -118,5 +118,9 @@ console.log("search jr-hot:", await ev(`[...new Set([...document.querySelectorAl
 await set('#aj [name=state]', "closed"); await sleep(1200);
 console.log("closed + search:", await text('#aj-out'));
 console.log("csv link:", await ev(`document.querySelector('#aj-csv').getAttribute('href')`));
+// 8. history compare: more than one point on one chart
+await go("#history"); await sleep(1500);
+await ev(`(()=>{const c=document.querySelector('#h-cmp');for(const o of c.options){if(['line-pressure','jr-hot'].includes(o.value))o.selected=true}c.dispatchEvent(new Event('change',{bubbles:true}))})()`); await sleep(3500);
+console.log("compare lines:", await ev(`document.querySelectorAll('#hist svg path').length`), "| legend:", (await text('#hist')).slice(-80));
 console.log("problems:", problems);
 process.exit(0);

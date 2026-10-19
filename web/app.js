@@ -193,7 +193,7 @@ async function viewPoint(name) {
   const when = t => t == null ? "never" : fmt(t);
   const fix = (p, v) => v == null ? "none" : p.decimals == null ? String(v) : Number(v).toFixed(p.decimals);
   const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for"};
-  let drawn = "";
+  let drawn = "", current = null;  // `current` is what the trend needs for its limit lines
   async function refresh() {
     let p;
     try { p = await api("GET", `/api/points/${q}`); }
@@ -210,6 +210,7 @@ async function viewPoint(name) {
     for (const m of p.maintenance || []) notes.push(`In maintenance window ${m.name}: ${{suppress: "alarms are held", acknowledge: "alarms are acknowledged at once", drop: "alarms are not recorded"}[m.mode]}.`);
     if (p.hold?.kind === "oos") notes.push(`Out of service since ${fmt(p.hold.created)} by ${p.hold.user}: ${p.hold.reason}. Its alarms are not evaluated.`);
     if (p.hold?.kind === "shelved") notes.push(`Alarms shelved by ${p.hold.user} until ${fmt(p.hold.until)}: ${p.hold.reason}.`);
+    current = p;
     $("#pd-top").className = "";
     $("#pd-top").innerHTML = `<p class="pd-val num ${over ? "over" : ""}">${p.last == null ? "no value yet" : esc(p.text ?? fix(p, p.last))}<span class="u"> ${p.text == null ? esc(p.unit) : ""}</span></p>
       ${p.description ? `<p>${esc(p.description)}</p>` : ""}
@@ -235,7 +236,7 @@ async function viewPoint(name) {
   const chart = async () => {
     const box = $("#pd-chart"), win = Number($("#pd-hours").value);
     box._t = 0;
-    await WIDGETS.chart.render(box, {type: "chart", title: "Average, last " + $("#pd-hours").selectedOptions[0].text, points: [name], window: win, rollup: "avg"}, {});
+    await WIDGETS.chart.render(box, {type: "chart", title: "Average, last " + $("#pd-hours").selectedOptions[0].text, points: [name], window: win, rollup: "avg"}, {points: current ? {[name]: current} : {}});
   };
   bindAlarmActions($("#pd-alarms"), refresh);
   bindSetForms($("#pd-control"));
@@ -298,7 +299,8 @@ const ROLL = {avg: "Average", min: "Minimum", max: "Maximum", last: "Last value"
 function viewHistory() {
   main.innerHTML = `<section aria-labelledby="h-h"><h2 id="h-h">History</h2><form id="hf" class="row"><label>Point <select id="h-point"></select></label>
     <label>Window <select id="h-win"><option value="300">5 minutes</option><option value="3600" selected>1 hour</option><option value="86400">24 hours</option></select></label>
-    <label>Rollup <select id="h-roll">${Object.entries(ROLL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label></form>
+    <label>Rollup <select id="h-roll">${Object.entries(ROLL).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
+    <label>Compare with (up to 5) <select id="h-cmp" multiple size="3"></select></label></form>
     <div id="hist" class="status" data-live>Loading history...</div></section>`;
   let known = [];
   $("#hf").addEventListener("change", () => draw(known).catch(e => showErr(e)));
@@ -308,6 +310,8 @@ function viewHistory() {
       const cur = $("#h-point").value;
       $("#h-point").innerHTML = pts.map(p => `<option>${esc(p.name)}</option>`).join("");
       if (pts.some(p => p.name === cur)) $("#h-point").value = cur;
+      const picked = new Set([...$("#h-cmp").selectedOptions].map(o => o.value));
+      $("#h-cmp").innerHTML = pts.map(p => `<option ${picked.has(p.name) ? "selected" : ""}>${esc(p.name)}</option>`).join("");
     }
     known = pts;
     await draw(pts);
@@ -392,6 +396,12 @@ async function draw(pts) {
   const box = $("#hist"), point = $("#h-point").value;
   if (!point) { box.className = "status"; box.textContent = "No points yet. They appear here as soon as a data source reports a value."; return; }
   const win = $("#h-win").value, roll = $("#h-roll").value, bucket = Math.max(1, Math.floor(win / 120));
+  const more = [...$("#h-cmp").selectedOptions].map(o => o.value).filter(n => n !== point).slice(0, 5);
+  if (more.length) {  // several points on one chart: each line has its own dash pattern and a legend, so no colour is needed to tell them apart
+    box._t = 0;
+    box.className = "";
+    return WIDGETS.chart.render(box, {type: "chart", title: `${ROLL[roll]}, last ${$("#h-win").selectedOptions[0].text}`, points: [point, ...more], window: Number(win), rollup: roll}, {points: Object.fromEntries(pts.map(x => [x.name, x]))});
+  }
   const r = await api("GET", `/api/series?point=${encodeURIComponent(point)}&window=${win}&rollup=${roll}&bucket=${bucket}`);
   const title = `${ROLL[roll]} of ${point}, per ${bucket} s, last ${$("#h-win").selectedOptions[0].text}`;
   if (r.items.length < 2) { box.className = "status"; box.textContent = `${title}: not enough history yet (${r.items.length} bucket${r.items.length === 1 ? "" : "s"}).`; return; }
