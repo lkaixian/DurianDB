@@ -137,4 +137,12 @@ for _ in range(50):
 import email  # noqa: E402
 csv_part = email.message_from_string(reports()[0]["body"]).get_payload()[1]
 assert len(reports()) == 2 and csv_part.get_filename() == "report.csv" and csv_part.get_payload(decode=True).startswith(b"point,unit,description"), MAIL
+# ---- slack: a webhook with {text}
+assert call("PUT", "/api/config/handler/sl", {"type": "slack", "url": "ftp://x"})[0] == 422
+assert call("PUT", "/api/config/handler/sl", {"type": "slack", "url": "http://127.0.0.1:9/x", "min_level": "URGENT"})[0] == 200
+sent = []
+app.outputs._put = lambda item: sent.append(item)
+from durian.core import Event, Level  # noqa: E402
+app.outputs.on_event(Event(point="hot", level=Level.URGENT, message="95 > 90", ts=1.0), "raised")
+assert [i[2]["text"] for i in sent if i[0] == "webhook" and "text" in i[2]] == ["[URGENT] hot: 95 > 90"], sent
 print("ok")

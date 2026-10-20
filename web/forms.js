@@ -160,7 +160,7 @@ const GROUPS = {
   maintenance: MAINT_GROUPS,
   source: (body) => [...SOURCE_GROUPS._common(body), ...(SOURCE_GROUPS[body.type] || (() => []))(body)],
   handler: body => [
-    {title: {webhook: "Webhook", email: "Email", setpoint: "Set a point", report: "Scheduled report"}[body.type] || "Handler", fields: [
+    {title: {webhook: "Webhook", email: "Email", setpoint: "Set a point", report: "Scheduled report", slack: "Slack"}[body.type] || "Handler", fields: [
       F("enabled", "Enabled", "check"),
       F("min_level", "Act from level", "select", {options: opts(...LEVELS)}),
       ...(body.type === "email" || body.type === "report" ? [
@@ -177,6 +177,7 @@ const GROUPS = {
         F("value", "Value when the alarm is raised", "number"),
         F("clear_value", "Value when it returns to normal", "number", {optional: true}),
         F("release_on_clear", "Release the point when it returns to normal", "check", {hint: "Used when there is no value above."})]
+        : body.type === "slack" ? [F("url", "Incoming webhook URL", "text", {hint: "From Slack's Incoming Webhooks app. Each alarm is posted as a message."}), F("on_clear", "Also post when the alarm returns to normal", "check")]
         : [F("url", "URL", "text", {hint: "Alarms are posted here as JSON."})])]},
     {title: "Which alarms", fields: [
       F("scope.points", "Points", "list", {optional: true, hint: "Leave all three empty for every alarm."}),

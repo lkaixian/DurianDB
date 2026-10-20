@@ -548,6 +548,7 @@ const TEMPLATES = {
   handler: {"Webhook": {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true},
     "Email": {type: "email", to: ["operator@example.com"], from: "durian@example.com", smtp: {host: "smtp.example.com", port: 587, security: "starttls"}, min_level: "URGENT", enabled: true},
     "Set a point": {type: "setpoint", point: "", value: 0, release_on_clear: true, min_level: "URGENT", enabled: true},
+    "Slack": {type: "slack", url: "https://hooks.slack.com/services/...", min_level: "URGENT", enabled: true},
     "Scheduled report": {type: "report", to: ["operator@example.com"], from: "durian@example.com", smtp: {host: "smtp.example.com", port: 587, security: "starttls"}, hour: 7, hours: 24, enabled: true}},
   publisher: {"MQTT over TLS": {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true},
     "HTTP sender": {type: "http", url: "https://other-host:8765/api/ingest/source-name", points: ["*"], enabled: true}},

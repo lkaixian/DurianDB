@@ -27,7 +27,7 @@ log = logging.getLogger("durian.outputs")
 
 opener = urllib.request.build_opener(NoRedirect)
 ADDRESS = re.compile(r"^[^@\s<>,;]{1,64}@[^@\s<>,;]{1,255}$")
-HANDLER_TYPES = ("webhook", "email", "setpoint", "report")
+HANDLER_TYPES = ("webhook", "email", "setpoint", "report", "slack")
 SECURITY = ("none", "starttls", "ssl")
 PUBLISHER_TYPES = ("mqtt", "http")
 
@@ -54,7 +54,7 @@ def validate_handler(name, b):
     if sc is not None and not (isinstance(sc, dict) and all(isinstance(sc.get(k, []), list) and all(isinstance(x, str) for x in sc.get(k, [])) for k in ("points", "sources"))
                                and isinstance(sc.get("tags", {}), dict)):
         add("scope", "must be {points: [...], tags: {...}, sources: [...]}; leave it out for every alarm")
-    if kind == "webhook":
+    if kind in ("webhook", "slack"):  # slack posts {text} to an incoming-webhook URL
         if not _http_url(b.get("url")):
             add("url", "must be an http or https URL")
     elif kind in ("email", "report"):  # a report is an email sent on a schedule instead of on an alarm
@@ -194,6 +194,8 @@ class Outputs:
             t = h.get("type", "webhook")
             if t == "webhook":
                 self._put(("webhook", h["url"], {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message, "ts": ev.ts, "cleared_ts": ev.cleared_ts}))
+            elif t == "slack" and (kind == "raised" or h.get("on_clear")):
+                self._put(("webhook", h["url"], {"text": f"{'' if kind == 'raised' else 'Back to normal: '}[{ev.level.name}] {ev.point}: {ev.message}"}))
             elif t == "report":
                 continue  # sent on its schedule, not by alarms
             elif t == "email" and (kind == "raised" or h.get("on_clear")):
