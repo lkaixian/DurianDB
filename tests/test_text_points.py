@@ -66,4 +66,9 @@ app.tick(time.time())
 assert call("POST", "/api/points/recipe/set", {"value": "B"})[0] == 200 and call("POST", "/api/points/recipe/set", {"value": 3})[0] == 400
 app.tick(time.time() + 1)
 assert call("GET", "/api/points/recipe")[1]["last"] == "B"
+
+# ---- config edits are audited with before -> after
+put("point", "num", {"source": "plc", "unit": "bar"})
+last = [a for a in call("GET", "/api/audit")[1] if a["action"] == "config.put"][0]
+assert "point/num" in last["detail"] and "unit: null -> \"bar\"" in last["detail"], last
 print("ok")
