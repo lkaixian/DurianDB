@@ -228,8 +228,8 @@ def validate_point(name, b, store):
         add("datatype", "must be number or text")
     text = text == "text"
     if text:
-        if src and src.get("type") not in ("virtual", "http_in"):
-            add("datatype", "text points are supported on virtual and http_in sources")
+        if src and src.get("type") not in ("virtual", "http_in", "mqtt"):
+            add("datatype", "text points are supported on virtual, http_in and mqtt sources")
         if b.get("logging") == "INTERVAL":
             add("logging", "a text point is logged on change or always, not at an interval")
     dets = b.get("detectors", [])

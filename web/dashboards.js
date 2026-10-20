@@ -7,18 +7,18 @@ const WIDGETS = {};
 function registerWidget(type, def) { WIDGETS[type] = def; }
 
 const TONE_RANK = {normal: 0, warn: 1, alarm: 2};
-const OPS = {">": (a, b) => a > b, "<": (a, b) => a < b, ">=": (a, b) => a >= b, "<=": (a, b) => a <= b, "==": (a, b) => a === b};
+const OPS = {">": (a, b) => a > b, "<": (a, b) => a < b, ">=": (a, b) => a >= b, "<=": (a, b) => a <= b, "==": (a, b) => a === b, "!=": (a, b) => a !== b};  // text points compare with == and != only
 function toneOf(rules, v) {  // the most severe matching rule wins
   let t = "normal";
   if (v == null) return t;
-  for (const r of rules || []) if (OPS[r.op]?.(v, r.value) && TONE_RANK[r.tone] > TONE_RANK[t]) t = r.tone;
+  for (const r of rules || []) if ((typeof v === typeof r.value || r.op === "!=") && OPS[r.op]?.(v, r.value) && TONE_RANK[r.tone] > TONE_RANK[t]) t = r.tone;
   return t;
 }
 const tagMatch = (p, tag) => { const [k, ...v] = tag.split(":"); return p.tags[k] === v.join(":"); };
 const heading = w => `<h3 class="wt">${esc(w.title || w.point || w.type)}</h3>`;
 const noAccess = name => `<p class="note">No access to ${esc(name)}, or it does not exist.</p>`;
 const QUALITY_NOTE = {bad: "Bad: the source is not supplying this value, showing the last known one", uncertain: "Uncertain: treat this value with care"};
-const formatted = (p, w) => p.last == null ? "no value yet" : p.text != null ? p.text : w.decimals == null ? String(p.last) : Number(p.last).toFixed(w.decimals);
+const formatted = (p, w) => p.last == null ? "no value yet" : p.text != null ? p.text : w.decimals == null || typeof p.last === "string" ? String(p.last) : Number(p.last).toFixed(w.decimals);
 
 registerWidget("value", {
   needs: ["points"], size: {w: 3, h: 2}, template: {type: "value", title: "Value", point: "boiler-temp", decimals: 1, rules: [{op: ">", value: 90, tone: "alarm"}]},
@@ -37,6 +37,7 @@ registerWidget("gauge", {
   render(box, w, ctx) {
     const p = ctx.points[w.point];
     if (!p) { box.innerHTML = heading(w) + noAccess(w.point); return; }
+    if (typeof p.last === "string") { box.innerHTML = heading(w) + `<p class="note">${esc(p.name)} holds text, which a gauge cannot show. Use a value widget.</p>`; return; }
     const span = w.max - w.min, x = v => 4 + (Math.min(w.max, Math.max(w.min, v)) - w.min) / span * 192;
     const zones = (w.zones || []).map(z => `<rect class="zone-${z.tone}" x="${x(z.from)}" y="14" width="${x(z.to) - x(z.from)}" height="10"/>`).join("");
     const tone = p.last == null ? "normal" : (w.zones || []).filter(z => p.last >= z.from && p.last <= z.to).reduce((t, z) => TONE_RANK[z.tone] > TONE_RANK[t] ? z.tone : t, "normal");
@@ -151,13 +152,13 @@ registerWidget("setpoint", {
     if (box.dataset.key !== key) {  // build the form once so typing is never interrupted by a refresh
       box.dataset.key = key;
       box.innerHTML = heading(w) + `<p class="big num"><span class="v"></span><span class="u"> ${esc(p.unit)}</span></p>` + (p.settable && isUser()
-        ? `<form class="inline"><input name="value" type="number" step="any" required placeholder="value" aria-label="New value for ${esc(p.name)}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>`
+        ? `<form class="inline"><input name="value" ${p.datatype === "text" ? 'type="text" maxlength="255"' : 'type="number" step="any"'} required placeholder="value" aria-label="New value for ${esc(p.name)}"><button type="submit">Set</button><button type="submit" data-release="1" formnovalidate>Release</button><output role="status"></output></form>`
         : `<p class="note">Read-only for you.</p>`);
       const form = box.querySelector("form");
       form?.addEventListener("submit", async ev => {
         ev.preventDefault();
         const out = form.querySelector("output");
-        try { await api("POST", `/api/points/${encodeURIComponent(w.point)}/set`, {value: ev.submitter?.dataset.release ? null : Number(form.value.value)}); out.textContent = "sent"; }
+        try { await api("POST", `/api/points/${encodeURIComponent(w.point)}/set`, {value: ev.submitter?.dataset.release ? null : p.datatype === "text" ? form.value.value : Number(form.value.value)}); out.textContent = "sent"; }
         catch (e) { out.textContent = e.message; }
       });
     }

@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from durian.app import ApiError, App  # noqa: E402
 from durian.config import seed  # noqa: E402
+from durian.mqtt_source import parse_text  # noqa: E402
 from _support import new_store  # noqa: E402
 
 store = new_store()
@@ -71,4 +72,6 @@ assert call("GET", "/api/points/recipe")[1]["last"] == "B"
 put("point", "num", {"source": "plc", "unit": "bar"})
 last = [a for a in call("GET", "/api/audit")[1] if a["action"] == "config.put"][0]
 assert "point/num" in last["detail"] and "unit: null -> \"bar\"" in last["detail"], last
+# ---- MQTT payloads for a text point: bare, JSON string or {"value"}; control characters and empty are dropped
+assert [parse_text(p) for p in (b"RUN", b'"RUN"', b'{"value": "RUN"}', b'{"value": 5}', b"", b"ab")] == ["RUN", "RUN", "RUN", None, None, None]
 print("ok")
