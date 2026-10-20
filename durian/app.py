@@ -39,6 +39,15 @@ PENDING_MAX = 200_000
 CONFIRM_SECONDS = 30
 
 
+
+def _diff(old, new):
+    """What a config save changed, as 'key: before -> after' (a new object is just 'created'). Config holds credential file paths, never secrets."""
+    if old is None:
+        return " (created)"
+    ch = [f"{k}: {json.dumps(old.get(k))[:60]} -> {json.dumps(new.get(k))[:60]}" for k in sorted(set(old) | set(new)) if old.get(k) != new.get(k)]
+    return " (" + "; ".join(ch)[:500] + ")" if ch else " (no change)"
+
+
 class App:
     def __init__(self, store, backup_dir=None):
         self.store, self.auth = store, Auth(store)
@@ -846,8 +855,9 @@ class App:
                     "watchlist": lambda: validate_watchlist(name, body), "maintenance": lambda: validate_maintenance(name, body)}[kind]()
             if errs:
                 raise ApiError(422, "validation failed", errs)
+            old = self.store.get(kind, name)
             self.store.put(kind, name, body)
-            self.store.audit(ident["name"], "config.put", f"{kind}/{name}")
+            self.store.audit(ident["name"], "config.put", f"{kind}/{name}" + _diff(old, body))
             self.load_windows() if kind == "maintenance" else self.reload()  # a window changes no engine object, so open alarms are left alone
             return 200, {"saved": name}
         if method == "DELETE":
