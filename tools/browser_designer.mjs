@@ -17,7 +17,7 @@ const shot = async n => fs.writeFileSync(`${out}/${n}.png`, Buffer.from((await s
 const mouse = (type, x, y) => send("Input.dispatchMouseEvent", {type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1});
 const centre = sel => ev(`(()=>{const r=document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2,r.right-4,r.bottom-4]})()`);
 const widgets = async () => { await ev(`document.querySelector('#tc').click()`); const j = JSON.parse(await ev(`document.querySelector('#code').value`)); await ev(`document.querySelector('#tv').click()`); await sleep(600); return j.widgets; };
-await send("Page.enable"); await send("Runtime.enable"); await send("Emulation.setDeviceMetricsOverride", {width: 1400, height: 900, deviceScaleFactor: 1, mobile: false});
+await send("Page.enable"); await send("Runtime.enable"); await send("Network.enable"); await send("Network.setCacheDisabled", {cacheDisabled: true}); await send("Emulation.setDeviceMetricsOverride", {width: 1400, height: 900, deviceScaleFactor: 1, mobile: false});
 await send("Page.navigate", {url: base + "/"}); await sleep(1500);
 await ev(`(()=>{const f=document.querySelector('#login');f.username.value='admin';f.password.value=${JSON.stringify(pw)};f.requestSubmit()})()`); await sleep(2000);
 await ev(`location.hash='#design/_new'`); await sleep(2000);
@@ -52,4 +52,16 @@ const msg = await ev(`document.querySelector('#dm').textContent`); if (!/Saved/.
 const saved = await ev(`fetch('/api/dashboards/built').then(r=>r.json())`); if (saved.title !== "From code" || saved.widgets.length !== 1) problems.push("saved wrong: " + JSON.stringify(saved).slice(0, 200));
 await ev(`document.querySelector('#tc').click()`); await ev(`document.querySelector('#code').value='{bad'`); await ev(`document.querySelector('#ap').click()`);
 if (!/Not applied/.test(await ev(`document.querySelector('#ce').textContent`))) problems.push("bad JSON was not refused");
+// removing: the x on the selected widget, the Delete key, and the panel button
+await ev(`location.hash='#dashboards'`); await sleep(800); await ev(`location.hash='#design/built'`); await sleep(2500);
+const count = () => ev(`document.querySelectorAll('.hit').length`);
+await ev(`document.querySelector('[data-add=text]').click()`); await sleep(600); await ev(`document.querySelector('[data-add=status]').click()`); await sleep(600); await ev(`document.querySelector('[data-add=alarms]').click()`); await sleep(800);
+let n0 = await count();
+await ev(`document.querySelector('.hit .x').click()`); await sleep(500);
+if (await count() !== n0 - 1) problems.push("x button did not remove");
+await ev(`document.querySelector('.hit').focus()`); await send("Input.dispatchKeyEvent", {type: "keyDown", key: "Delete", code: "Delete", windowsVirtualKeyCode: 46}); await send("Input.dispatchKeyEvent", {type: "keyUp", key: "Delete", code: "Delete", windowsVirtualKeyCode: 46}); await sleep(500);
+if (await count() !== n0 - 2) problems.push("Delete key did not remove: " + n0 + " now " + await count() );
+const [rx, ry] = await centre(".hit"); await mouse("mousePressed", rx, ry); await mouse("mouseReleased", rx, ry); await sleep(300);
+await ev(`document.querySelector('#pp [data-act=rm]').click()`); await sleep(500);
+if (await count() !== n0 - 3) problems.push("panel Remove did not remove");
 console.log(problems.length ? problems : "no problems"); ws.close();
