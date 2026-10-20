@@ -74,8 +74,16 @@ svg .lim{stroke:var(--accent);stroke-width:1;stroke-dasharray:4 3}
 #hist svg text{fill:var(--muted);font-size:11px;font-family:inherit}
 #hist svg .axis{stroke:var(--rule);stroke-width:1}
 #hist svg .line{stroke-width:2}
-.login{max-width:380px;margin-top:40px}
-.login form{display:flex;flex-direction:column;gap:14px}
+.login{max-width:400px;margin:56px auto 0}
+.login .card{background:var(--field);border:1px solid var(--rule);border-top:3px solid var(--ink);padding:24px 28px 20px}
+.login .brand{margin:0;font-size:.8rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.login h2{font-size:1.5rem;margin:4px 0 2px}
+.login form{display:flex;flex-direction:column;gap:14px;margin-top:16px}
+.login label{display:flex;flex-direction:column;gap:4px;font-size:.9rem;font-weight:600}
+.login input{font:inherit;font-weight:400;padding:8px 10px;min-height:44px;border:1px solid var(--muted);background:var(--field);color:var(--ink)}
+.login button.primary{background:var(--ink);color:var(--paper);min-height:44px;font-weight:600}
+.login .forgot{margin-top:18px;padding-top:12px;border-top:1px solid var(--rule)}
+.login summary{cursor:pointer;font-size:.9rem;min-height:32px}
 .list{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px;padding:0;list-style:none}
 .list button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
 ul.errors{margin:8px 0;padding-left:20px}

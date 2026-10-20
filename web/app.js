@@ -89,11 +89,18 @@ window.addEventListener("hashchange", route);
 
 // ---- login and account
 function viewLogin() {
-  main.innerHTML = `<section class="login" aria-labelledby="li-h"><h2 id="li-h">Log in</h2>
+  main.innerHTML = `<section class="login" aria-labelledby="li-h"><div class="card">
+    <p class="brand">DurianDB</p><h2 id="li-h">Sign in</h2><p class="note">Plant monitoring and alarm console.</p>
     <form id="login"><label>Username <input name="username" autocomplete="username" required></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
     <label id="li-code" hidden>Authentication code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></label>
-    <button type="submit">Log in</button><p id="li-msg" role="alert" class="err"></p></form></section>`;
+    <button type="submit" class="primary">Sign in</button><p id="li-msg" role="alert" class="err"></p></form>
+    <details class="forgot"><summary>Forgot your password?</summary>
+      <p class="note">Ask an administrator for a reset code (Users page, Reset password). The code works once and expires after an hour.</p>
+      <form id="reset"><label>Username <input name="username" autocomplete="username" required></label>
+      <label>Reset code <input name="code" autocomplete="off" required></label>
+      <label>New password (10+ characters) <input name="new" type="password" autocomplete="new-password" minlength="10" required></label>
+      <button type="submit">Set new password</button><p id="rs-msg" role="status"></p></form></details></div></section>`;
   $("#login").addEventListener("submit", async ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
@@ -102,6 +109,15 @@ function viewLogin() {
       $("#li-msg").textContent = e.status === 429 ? "Too many failed attempts. Wait a few minutes." : e.message;
       if (/code required/.test(e.message)) { $("#li-code").hidden = false; $("#li-code input").required = true; $("#li-code input").focus(); }
     }
+  });
+  $("#reset").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target), out = $("#rs-msg");
+    try {
+      await api("POST", "/api/reset", {username: f.get("username"), code: f.get("code").trim(), new: f.get("new")});
+      out.className = ""; out.textContent = "Password changed. Sign in with the new one.";
+      ev.target.reset();
+    } catch (e) { out.className = "err"; out.textContent = (e.errors || []).map(x => x.message).join(" ") || e.message; }
   });
   $("#login input").focus();
 }
@@ -691,9 +707,14 @@ async function viewUsers() {
   const load = async () => {
     const us = await api("GET", "/api/users");
     $("#ul").className = "";
-    $("#ul").innerHTML = `<table class="stack"><thead><tr><th>Name</th><th>Roles</th><th><span class="sr">Action</span></th></tr></thead><tbody>${us.map(u => `<tr><td data-label="Name">${esc(u.name)}</td><td data-label="Roles">${esc(u.roles.join(", "))}${u.mfa ? " (2FA)" : ""}</td><td>${u.mfa && u.name !== me.name ? `<button data-mfa="${esc(u.name)}" data-roles="${esc(u.roles.join(","))}" aria-label="Reset two-factor for ${esc(u.name)}">Reset 2FA</button> ` : ""}${u.name === me.name ? "" : `<button data-del="${esc(u.name)}" aria-label="Delete user ${esc(u.name)}">Delete</button>`}</td></tr>`).join("")}</tbody></table>`;
+    $("#ul").innerHTML = `<table class="stack"><thead><tr><th>Name</th><th>Roles</th><th><span class="sr">Action</span></th></tr></thead><tbody>${us.map(u => `<tr><td data-label="Name">${esc(u.name)}</td><td data-label="Roles">${esc(u.roles.join(", "))}${u.mfa ? " (2FA)" : ""}</td><td>${u.name !== me.name ? `<button data-rst="${esc(u.name)}">Reset password</button> ` : ""}${u.mfa && u.name !== me.name ? `<button data-mfa="${esc(u.name)}" data-roles="${esc(u.roles.join(","))}" aria-label="Reset two-factor for ${esc(u.name)}">Reset 2FA</button> ` : ""}${u.name === me.name ? "" : `<button data-del="${esc(u.name)}" aria-label="Delete user ${esc(u.name)}">Delete</button>`}</td></tr>`).join("")}</tbody></table>`;
   };
   $("#ul").addEventListener("click", async ev => {
+    const r = ev.target.dataset.rst;
+    if (r && confirm(`Make a one-time reset code for "${r}"? Give it to them in person or by phone; it works once for an hour.`)) {
+      try { const x = await api("POST", `/api/users/${encodeURIComponent(r)}/reset`, {}); $("#um").className = ""; $("#um").textContent = `Reset code for ${r}: ${x.code} (they enter it under "Forgot your password?" on the sign-in page)`; }
+      catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; }
+    }
     const m = ev.target.dataset.mfa;
     if (m && confirm(`Turn off two-factor sign-in for "${m}"?`)) { try { await api("PUT", `/api/users/${encodeURIComponent(m)}`, {roles: ev.target.dataset.roles.split(","), reset_mfa: true}); await load(); } catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; } }
     const n = ev.target.dataset.del;
