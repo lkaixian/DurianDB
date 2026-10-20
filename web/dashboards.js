@@ -312,7 +312,7 @@ async function viewDesigner(name) {
       let h = r.querySelector(`.hit[data-hit="${CSS.escape(w.id)}"]`);
       if (!h) { h = document.createElement("div"); h.className = "hit"; h.dataset.hit = w.id; h.tabIndex = 0; h.setAttribute("role", "button"); r.append(h); }
       h.setAttribute("aria-label", `${w.type} ${w.title || w.id}, column ${w.x + 1}, row ${w.y + 1}, ${w.w} wide, ${w.h} high. Arrow keys move, Shift and arrow keys resize.`);
-      h.innerHTML = `<span class="tag">${esc(w.type)}: ${esc(w.title || w.id)}</span><span class="grip" data-grip></span>`;
+      h.innerHTML = `<span class="tag">${esc(w.type)}: ${esc(w.title || w.id)}</span><span class="grip" data-grip></span>${i === sel ? `<button type="button" class="x" data-rm aria-label="Remove this widget">&times;</button>` : ""}`;
       h.classList.toggle("sel", i === sel);
       place(h, w);
     }
@@ -333,7 +333,7 @@ async function viewDesigner(name) {
     if (!w) { box.innerHTML = `<h3>Widget</h3><p class="note">Select a widget on the canvas to change it. Nothing selected: ${ws().length} widget${ws().length === 1 ? "" : "s"} on the dashboard.</p>`; return; }
     const rest = Object.fromEntries(Object.entries(w).filter(([k]) => !CORE.includes(k)));
     const scalars = Object.entries(rest).filter(([, v]) => v !== null && typeof v !== "object"), complex = Object.fromEntries(Object.entries(rest).filter(([, v]) => v === null || typeof v === "object"));
-    box.innerHTML = `<h3>${esc(w.type)}</h3><datalist id="ptl">${names.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+    box.innerHTML = `<div class="row phead"><h3>${esc(w.type)}</h3><button type="button" data-act="dup">Duplicate</button><button type="button" data-act="rm">Remove widget</button></div><datalist id="ptl">${names.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
       <label>Title <input data-f="title" value="${esc(w.title || "")}"></label>
       ${scalars.map(([k, v]) => typeof v === "boolean" ? `<label class="chk"><input type="checkbox" data-s="${esc(k)}" ${v ? "checked" : ""}> ${esc(k)}</label>`
         : `<label>${esc(k)} <input data-s="${esc(k)}" data-t="${typeof v}" ${typeof v === "number" ? 'type="number" step="any"' : ""} ${k === "point" ? 'list="ptl"' : ""} value="${esc(v)}" autocomplete="off"></label>`).join("")}
@@ -341,10 +341,10 @@ async function viewDesigner(name) {
         ${["x", "y", "w", "h"].map(k => `<label>${k.toUpperCase()} <input data-f="${k}" type="number" min="${k === "w" || k === "h" ? 1 : 0}" value="${w[k]}"></label>`).join("")}</div>
         <div class="row">${[["left", "Left"], ["right", "Right"], ["up", "Up"], ["down", "Down"], ["wider", "Wider"], ["narrower", "Narrower"], ["taller", "Taller"], ["shorter", "Shorter"]].map(([a, l]) => `<button type="button" data-act="${a}">${l}</button>`).join("")}</div></details>
       ${w.type === "mimic" ? mimicEditor(w) : ""}
-      <label>More settings (JSON) <textarea data-f="rest" spellcheck="false" rows="7" class="mono">${esc(JSON.stringify(complex, null, 2))}</textarea></label><p class="err" data-err></p>
-      <div class="row"><button type="button" data-act="dup">Duplicate</button><button type="button" data-act="rm">Remove</button></div>`;
+      <label>More settings (JSON) <textarea data-f="rest" spellcheck="false" rows="7" class="mono">${esc(JSON.stringify(complex, null, 2))}</textarea></label><p class="err" data-err></p>`;
   }
-  const select = i => { sel = i; for (const h of root().querySelectorAll(".hit")) h.classList.toggle("sel", h.dataset.hit === ws()[i]?.id); paintPanel(); };
+  const select = i => { sel = i; paintLayer(); paintPanel(); };
+  const removeAt = i => { ws().splice(i, 1); select(-1); repaint(); };
   const freeY = () => ws().reduce((m, w) => Math.max(m, w.y + w.h), 0);
   function add(type, x, y) {
     const def = WIDGETS[type];
@@ -371,11 +371,11 @@ async function viewDesigner(name) {
   // ---- moving and resizing on the canvas
   $("#pv").addEventListener("pointerdown", ev => {
     const h = ev.target.closest(".hit");
-    if (!h || ev.button) return;
+    if (!h || ev.button || ev.target.closest("[data-rm]")) return;
     const i = ws().findIndex(w => w.id === h.dataset.hit), w = ws()[i];
     select(i);
     drag = {w, resize: !!ev.target.closest("[data-grip]"), sx: ev.clientX, sy: ev.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false};
-    h.setPointerCapture(ev.pointerId);
+    try { h.setPointerCapture(ev.pointerId); } catch { /* a synthetic event has no pointer to capture */ }
     ev.preventDefault();
   });
   $("#pv").addEventListener("pointermove", ev => {
@@ -390,10 +390,13 @@ async function viewDesigner(name) {
     syncLayout();
   });
   const endDrag = () => { if (!drag) return; const moved = drag.moved; drag = null; if (moved) { paintLayer(); paintPanel(); repaint(); } };
+  $("#pv").addEventListener("click", ev => { const h = ev.target.closest("[data-rm]") && ev.target.closest(".hit"); if (h) removeAt(ws().findIndex(w => w.id === h.dataset.hit)); });
   $("#pv").addEventListener("pointerup", endDrag);
   $("#pv").addEventListener("pointercancel", endDrag);
   $("#pv").addEventListener("keydown", ev => {
-    const h = ev.target.closest(".hit"), k = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}[ev.key];
+    const h = ev.target.closest(".hit");
+    if (h && (ev.key === "Delete" || ev.key === "Backspace")) { ev.preventDefault(); removeAt(ws().findIndex(w => w.id === h.dataset.hit)); return; }
+    const k = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}[ev.key];
     if (!h || !k) return;
     const w = ws().find(o => o.id === h.dataset.hit), c = cols();
     ev.preventDefault();
@@ -419,7 +422,7 @@ async function viewDesigner(name) {
     if (!act) return;
     const step = {left: ["x", -1], right: ["x", 1], up: ["y", -1], down: ["y", 1], wider: ["w", 1], narrower: ["w", -1], taller: ["h", 1], shorter: ["h", -1]}[act];
     if (step) { w[step[0]] = Math.max(step[0] === "w" || step[0] === "h" ? 1 : 0, w[step[0]] + step[1]); settle(ws(), w); }
-    else if (act === "rm") { ws().splice(sel, 1); sel = -1; }
+    else if (act === "rm") return removeAt(sel);
     else if (act === "dup") { let n = 2; while (ws().some(o => o.id === w.id + "-" + n)) n++; const c = {...JSON.parse(JSON.stringify(w)), id: w.id + "-" + n, y: freeY()}; ws().push(c); sel = ws().length - 1; }
     paintLayer(); select(sel); repaint();
   });
