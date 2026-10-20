@@ -547,7 +547,8 @@ const TEMPLATES = {
   },
   handler: {"Webhook": {type: "webhook", url: "http://127.0.0.1:9000/hook", min_level: "WARNING", enabled: true},
     "Email": {type: "email", to: ["operator@example.com"], from: "durian@example.com", smtp: {host: "smtp.example.com", port: 587, security: "starttls"}, min_level: "URGENT", enabled: true},
-    "Set a point": {type: "setpoint", point: "", value: 0, release_on_clear: true, min_level: "URGENT", enabled: true}},
+    "Set a point": {type: "setpoint", point: "", value: 0, release_on_clear: true, min_level: "URGENT", enabled: true},
+    "Scheduled report": {type: "report", to: ["operator@example.com"], from: "durian@example.com", smtp: {host: "smtp.example.com", port: 587, security: "starttls"}, hour: 7, hours: 24, enabled: true}},
   publisher: {"MQTT over TLS": {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true},
     "HTTP sender": {type: "http", url: "https://other-host:8765/api/ingest/source-name", points: ["*"], enabled: true}},
   watchlist: {"By tag": {tags: {area: "boiler"}, points: [], read_roles: ["user"]}},
@@ -634,7 +635,7 @@ const tagText = t => Object.entries(t || {}).map(([k, v]) => k + ":" + v).join("
 const LISTS = {
   source: {cols: ["Name", "Type", "Enabled", "Points", "State", "Last poll", "Dropped", "Error"], cell: (i, x) => [null, i.type, yes(i.enabled !== false), x.points ?? "", x.down ? "Down: " + x.down : x.name ? "Up" : "Not running", x.poll_ms == null ? "" : `${(x.poll_ms / 1000).toFixed(2)} s${x.overruns ? `, ${x.overruns} too slow` : ""}`, x.dropped ?? "", x.error || ""]},
   point: {cols: ["Name", "Folder", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.folder || "", i.source, x.last == null ? "no value yet" : `${x.decimals == null || typeof x.last === "string" ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
-  handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.type === "email" ? (i.to || []).join(", ") : i.type === "setpoint" ? `${i.point} = ${i.value}` : i.url || "", i.min_level || "", yes(i.enabled !== false)]},
+  handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.type === "email" || i.type === "report" ? (i.to || []).join(", ") : i.type === "setpoint" ? `${i.point} = ${i.value}` : i.url || "", i.min_level || "", yes(i.enabled !== false)]},
   publisher: {cols: ["Name", "Type", "Topic prefix or URL", "Points", "Enabled"], cell: i => [null, i.type, i.prefix || i.url || "", (i.points || []).join(", "), yes(i.enabled !== false)]},
   maintenance: {cols: ["Name", "Applies to", "During", "When", "Enabled"], cell: i => [null, [...(i.scope?.points || []), ...(i.scope?.sources || []).map(s => "source " + s), tagText(i.scope?.tags)].filter(Boolean).join(", "), {suppress: "Hold alarms", acknowledge: "Acknowledge", drop: "Drop alarms"}[i.mode] || i.mode,
     i.schedule?.type === "weekly" ? `${(i.schedule.days || []).map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(" ")} ${i.schedule.start}-${i.schedule.end}` : i.schedule?.type === "once" ? `${fmt(i.schedule.from)} to ${fmt(i.schedule.to)}` : i.active ? "Switched on" : "Switched off", yes(i.enabled !== false)]},
