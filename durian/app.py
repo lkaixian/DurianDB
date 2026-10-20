@@ -4,6 +4,7 @@ The HTTP layer in server.py only translates requests into App.handle() calls.
 """
 import csv
 import datetime as dt
+import fnmatch
 import io
 import json
 import math
@@ -38,6 +39,15 @@ SYSTEM = "(system)"  # events about DurianDB itself rather than a point, visible
 PENDING_MAX = 200_000
 CONFIRM_SECONDS = 30
 
+
+
+def watch_match(w, name, p):
+    """Does a watch list's rule (tags, and/or a name pattern and description text) select this point? All the rule's parts must hold."""
+    if not (w.get("tags") or w.get("name_like") or w.get("text_like")):
+        return False
+    return (all(p.tags.get(k) == v for k, v in w.get("tags", {}).items())
+            and (not w.get("name_like") or fnmatch.fnmatchcase(name.lower(), w["name_like"].lower()))
+            and (not w.get("text_like") or w["text_like"].lower() in p.meta.get("description", "").lower()))
 
 
 def _diff(old, new):
@@ -717,8 +727,7 @@ class App:
             w = self.store.get("watchlist", wl)
             if not w or not self.watch_visible(ident, w):
                 raise ApiError(404, "unknown watch list")
-            pts = {n: ps for n, ps in pts.items()
-                   if n in w.get("points", []) or (w.get("tags") and all(ps[0].tags.get(k) == v for k, v in w["tags"].items()))}
+            pts = {n: ps for n, ps in pts.items() if n in w.get("points", []) or watch_match(w, n, ps[0])}
         if tag:
             k, _, v = tag.partition(":")
             pts = {n: ps for n, ps in pts.items() if ps[0].tags.get(k) == v}

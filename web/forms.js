@@ -191,6 +191,8 @@ const GROUPS = {
     F("points", "Points to publish", "list", {hint: "Point names, comma separated, or * for all."})]}],
   watchlist: () => [{title: "Watch list", fields: [
     F("tags", "Tags to match", "tags", {hint: "key:value pairs. A point matching all of them is included."}),
+    F("name_like", "Name pattern", "text", {optional: true, hint: "For example boiler-*. A query list: points matching every filled-in part are included."}),
+    F("text_like", "Description contains", "text", {optional: true}),
     F("points", "Points to include", "list", {hint: "Point names, comma separated."}),
     F("read_roles", "Who can read it", "roles", {hint: ROLE_HINT})]}],
 };

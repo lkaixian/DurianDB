@@ -323,8 +323,11 @@ def validate_watchlist(name, b):
         add("tags", "must be text key/value pairs")
     if not (isinstance(pts, list) and all(isinstance(p, str) for p in pts)):
         add("points", "must be a list of point names")
-    if not tags and not pts:
-        add("tags", "give tags to match or a list of points")
+    for k in ("name_like", "text_like"):  # a query list: a point name pattern (* and ?) and/or text in the description
+        if k in b and not (isinstance(b[k], str) and 0 < len(b[k]) <= 64):
+            add(k, "must be 1 to 64 characters")
+    if not tags and not pts and "name_like" not in b and "text_like" not in b:
+        add("tags", "give tags to match, a list of points, or a name or description query")
     if not _roles_ok(b.get("read_roles", ["user"])):
         add("read_roles", "must be a list of role names")
     return e

@@ -98,6 +98,11 @@ assert {p["name"] for p in call(viewer, "GET", "/api/points", tag="area:line")[1
 assert call(admin, "PUT", "/api/config/watchlist/line", {"tags": {"area": "line"}})[0] == 200
 assert {p["name"] for p in call(viewer, "GET", "/api/points", watchlist="line")[1]} == {"line-pressure", "pump-setpoint"}
 assert call(viewer, "GET", "/api/points", watchlist="nope")[0] == 404
+assert call(admin, "PUT", "/api/config/watchlist/pq", {"name_like": "*PRESS*"})[0] == 200
+assert {p["name"] for p in call(viewer, "GET", "/api/points", watchlist="pq")[1]} == {"line-pressure"}
+assert call(admin, "PUT", "/api/config/watchlist/pq2", {"tags": {"area": "line"}, "name_like": "pump*"})[0] == 200
+assert {p["name"] for p in call(viewer, "GET", "/api/points", watchlist="pq2")[1]} == {"pump-setpoint"}
+assert call(admin, "PUT", "/api/config/watchlist/pq3", {"name_like": ""})[0] == 422
 
 # validation reports every problem at once, with property names
 s, r = call(admin, "PUT", "/api/config/point/bad name", {"source": "ghost", "logging": "X", "tolerance": -1,
