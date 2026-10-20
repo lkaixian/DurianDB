@@ -63,6 +63,7 @@ class App:
         self.store, self.auth = store, Auth(store)
         self.maint = Maintenance(store, backup_dir or Path("backups"))
         self.engine, self.outputs, self.open_events = None, None, []
+        self.escalated = set()  # (handler, event id) already escalated
         self.confirms = {}  # token -> ((user, point, value), expiry) for writes waiting for their second step
         self.windows = []  # maintenance windows, see windows.py
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
@@ -735,6 +736,23 @@ class App:
 
     REPORT_MAX_POINTS = 200
     SYSTEM = {"name": "system", "roles": {"superadmin", "user", "anonymous"}}
+
+    def escalate(self, now=None):
+        """Call once a minute. An alarm still active and unacknowledged `escalate_after` minutes after it was raised is mailed to a
+        handler's escalate_to list, once. Held (shelved, suppressed) alarms are not announced, so they do not escalate."""
+        now = now or time.time()
+        for h in self.store.list("handler"):
+            if h.get("type") != "email" or not h.get("enabled", True) or "escalate_after" not in h:
+                continue
+            for ev in self.open_events:
+                key = (h["name"], ev.id)
+                if (ev.id is None or ev.held or ev.cleared_ts is not None or key in self.escalated or now - ev.ts < h["escalate_after"] * 60
+                        or ev.level < Level[h.get("min_level", "WARNING")] or not self.outputs._in_scope(h, ev)):
+                    continue
+                if self.store.q("select acked_ts from events where id=?", (ev.id,))[0]["acked_ts"] is None:
+                    self.escalated.add(key)
+                    self.outputs.escalate(h, ev)
+                    self.store.audit("system", "alarm.escalate", f"{ev.point} -> {h['name']}")
 
     def send_reports(self, now=None):
         """Email each report handler's CSV summary once a day, from its hour on. Call once a minute. Returns the names sent."""

@@ -168,6 +168,8 @@ const GROUPS = {
         F("smtp.host", "SMTP server", "text"), F("smtp.port", "SMTP port", "int", {hint: "25, 587 or 465."}),
         F("smtp.security", "Security", "select", {options: opts(["none", "None"], ["starttls", "STARTTLS"], ["ssl", "SSL/TLS"])}),
         F("creds", "Credentials file", "text", {optional: true, hint: "Optional JSON file with user and password, so the password is not stored in the settings."}),
+        ...(body.type === "email" ? [F("escalate_after", "Escalate if unacknowledged for (minutes)", "int", {optional: true, hint: "Leave empty for no escalation."}),
+          F("escalate_to", "Escalate to", "list", {optional: true, hint: "Email addresses to tell when nobody has acknowledged the alarm in time."})] : []),
         ...(body.type === "report" ? [F("hour", "Send daily from hour", "int", {hint: "0 to 23, server local time."}),
           F("hours", "Window (hours)", "int", {optional: true, hint: "Empty = 24. The summary covers this many hours before sending."}),
           F("watchlist", "Watch list", "text", {optional: true, hint: "A shared watch list to limit the points. Empty = every point."})]

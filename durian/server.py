@@ -133,6 +133,7 @@ def run_maintenance():
         try:
             app.maint.tick()
             app.send_reports()
+            app.escalate()
         except Exception:
             log.exception("maintenance failed")
 
