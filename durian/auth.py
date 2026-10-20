@@ -13,6 +13,7 @@ import time
 INHERIT = {"superadmin": {"superadmin", "user", "anonymous"}, "user": {"user", "anonymous"}, "anonymous": {"anonymous"}}
 MIN_PASSWORD = 10
 LOCK_AFTER, LOCK_SECONDS = 5, 300
+RESET_SECONDS = 3600  # an issued reset code works for one hour, once
 
 
 def totp(secret, t=None, step=30):
@@ -64,6 +65,7 @@ def check_password_strength(pw):
 class Auth:
     def __init__(self, store, session_seconds=8 * 3600):
         self.store, self.ttl = store, session_seconds
+        self.resets = {}  # user -> (sha256 of the code, expires)
         self.pending, self.last_step = {}, {}  # user -> secret not yet confirmed; user -> last accepted time step (a code works once)
         self.sessions, self.failures = {}, {}  # token -> (user, expires); user -> (count, locked_until)
         self._dummy = hash_password("not-a-real-password")
@@ -123,6 +125,28 @@ class Auth:
         token = secrets.token_urlsafe(32)
         self.sessions[token] = (name, time.time() + self.ttl)
         return token
+
+    def issue_reset(self, name):
+        """A one-time code an admin hands to a user who cannot sign in. Only its hash is kept, in memory, so a restart voids it."""
+        code = "rst_" + secrets.token_urlsafe(9)
+        self.resets[name] = (hashlib.sha256(code.encode()).hexdigest(), time.time() + RESET_SECONDS)
+        return code
+
+    def redeem_reset(self, name, code):
+        """Spend a reset code. Wrong guesses count toward the same lockout as passwords. Signs the user out everywhere and lifts any lockout."""
+        key = "reset:" + str(name)
+        count, until = self.failures.get(key, (0, 0))
+        if until > time.time():
+            raise AuthError("too many failed attempts, try again later", 429)
+        want, exp = self.resets.get(name, ("", 0))
+        if not (isinstance(code, str) and exp > time.time() and hmac.compare_digest(hashlib.sha256(code.encode()).hexdigest(), want)):
+            self.failures[key] = (count + 1, time.time() + LOCK_SECONDS if count + 1 >= LOCK_AFTER else 0)
+            raise AuthError("that reset code is wrong or has expired", 400)
+        self.resets.pop(name)
+        self.failures.pop(key, None)
+        self.failures.pop(name, None)
+        for t in [t for t, (u, _) in self.sessions.items() if u == name]:
+            del self.sessions[t]
 
     def logout(self, token):
         name = self.sessions.pop(token, (None,))[0]

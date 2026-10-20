@@ -279,6 +279,20 @@ class App:
         body = body or {}
         return self.auth.login(body.get("username"), body.get("password"), body.get("code"))
 
+    def reset_password(self, body):
+        """POST /api/reset {username, code, new}: spend a code from an admin and choose a new password. Needs no sign-in."""
+        body = body or {}
+        name = body.get("username")
+        try:
+            check_password_strength(body.get("new"))  # before the code is spent, so a weak password can be retried
+            if not (isinstance(name, str) and self.store.user(name)):
+                raise AuthError("that reset code is wrong or has expired", 400)
+            self.auth.redeem_reset(name, body.get("code"))
+        except AuthError as ex:
+            raise ApiError(ex.status, str(ex))
+        self.set_password(name, body["new"])
+        self.store.audit(name, "password.reset.done")
+
     # ---- API
     def handle(self, method, path, query, body, ident):
         m = ROUTE.match(path)
@@ -427,6 +441,11 @@ class App:
         need(admin)
         if a == "config" and b in KINDS:
             return self.config(method, b, c, body, ident)
+        if (method, a, c) == ("POST", "users", "reset") and b:  # a one-time code for a user who cannot sign in
+            if not self.store.user(b):
+                self._404()
+            self.store.audit(ident["name"], "password.reset.issue", b)
+            return 200, {"code": self.auth.issue_reset(b), "expires_in": 3600}
         if a == "users":
             return self.users(method, b, body, ident)
         if (method, a) == ("GET", "audit"):

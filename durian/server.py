@@ -89,6 +89,9 @@ class Handler(BaseHTTPRequestHandler):
                 ident = app.auth.identity(token)
                 cookie = f"{COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={app.auth.ttl}"
                 return self.send(200, {"name": ident["name"], "roles": sorted(ident["roles"])}, extra=[("Set-Cookie", cookie)])
+            if (method, url.path) == ("POST", "/api/reset"):
+                app.reset_password(body)
+                return self.send(200, {"ok": True})
             if (method, url.path) == ("POST", "/api/logout"):
                 app.auth.logout(self.token())
                 return self.send(200, {"ok": True}, extra=[("Set-Cookie", f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")])
