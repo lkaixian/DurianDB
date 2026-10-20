@@ -45,5 +45,9 @@ def v6_history_text(s):
     s.ddl("alter table history add column svalue {text}")  # the value of an alphanumeric point; value is null on those rows
 
 
+def v7_user_totp(s):
+    s.ddl("alter table users add column totp {text}")  # base32 secret of an enabled second factor; null when off
+
+
 MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens),
-              (4, "history quality", v4_history_quality), (5, "event held", v5_event_held), (6, "history text", v6_history_text)]
+              (4, "history quality", v4_history_quality), (5, "event held", v5_event_held), (6, "history text", v6_history_text), (7, "user totp", v7_user_totp)]
