@@ -70,6 +70,12 @@ def validate_handler(name, b):
             add("creds", "must be the path of a JSON file with user and password")
         if not isinstance(b.get("on_clear", False), bool):
             add("on_clear", "must be true or false")
+        if kind == "email" and ("escalate_after" in b or "escalate_to" in b):  # tell more people when an alarm stays unacknowledged
+            if not (isinstance(b.get("escalate_after"), int) and not isinstance(b["escalate_after"], bool) and 1 <= b["escalate_after"] <= 1440):
+                add("escalate_after", "must be a whole number of minutes from 1 to 1440")
+            es = b.get("escalate_to")
+            if not (isinstance(es, list) and 1 <= len(es) <= 20 and all(isinstance(a, str) and ADDRESS.match(a) for a in es)):
+                add("escalate_to", "must be 1 to 20 email addresses")
         if kind == "report":
             if not (isinstance(b.get("hour"), int) and not isinstance(b["hour"], bool) and 0 <= b["hour"] <= 23):
                 add("hour", "must be a whole hour from 0 to 23 (server local time)")
@@ -222,6 +228,12 @@ class Outputs:
         m["From"], m["To"], m["Subject"] = h["from"], ", ".join(h["to"]), f"DurianDB report: last {hours} h"
         m.set_content(f"Summary of the last {hours} hours is attached as CSV.\n")
         m.add_attachment(csv_bytes, maintype="text", subtype="csv", filename="report.csv")
+        self._put(("mail", h, m))
+
+    def escalate(self, h, ev):
+        """Mail the handler's escalate_to list about an alarm nobody has acknowledged."""
+        m = self.message({**h, "to": h["escalate_to"]}, ev, "raised")
+        m.replace_header("Subject", "[ESCALATED] " + m["Subject"])
         self._put(("mail", h, m))
 
     def _send_mail(self, h, m):

@@ -125,3 +125,5 @@ Open **Dashboards** in the console. The seeded `plant-overview` shows every widg
 ## Status and research
 
 See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `10` (10 is the SCADA baseline and gap analysis that sets the roadmap) (06 compares the enterprise and regular editions, 07 is Modbus, 08 is HTTP and SQL, 09 is dashboards and extension). Open questions: `docs/research/99-open-questions.md`.
+
+**Slack, escalation and query lists.** A handler of `type: slack` posts each alarm as `{text}` to an incoming-webhook URL (`on_clear` also posts the return to normal). An email handler with `escalate_after` (minutes) and `escalate_to` mails that second list once if the alarm is still active and unacknowledged, and audits it as `alarm.escalate`. Escalation is checked once a minute. A watch list can be a query: `name_like` (pattern with `*` and `?`) and/or `text_like` (text in the description), combined with `tags` when given.
