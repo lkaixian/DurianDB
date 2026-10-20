@@ -266,7 +266,7 @@ class App:
     # ---- auth
     def login(self, body):
         body = body or {}
-        return self.auth.login(body.get("username"), body.get("password"))
+        return self.auth.login(body.get("username"), body.get("password"), body.get("code"))
 
     # ---- API
     def handle(self, method, path, query, body, ident):
@@ -292,7 +292,7 @@ class App:
                 raise ApiError(404, "unknown point")
             return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "quality": Quality(p.quality).name.lower(), "unit": p.meta.get("unit", ""), "tags": p.tags, "source": s.name}
         if (method, a, b, c) == ("GET", "me", None, None):
-            return 200, {"name": ident["name"], "roles": sorted(ident["roles"])}
+            return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp"))}
         if (method, a, b, c) == ("GET", "health", None, None):
             return 200, {"ok": True}
         if (method, a) == ("GET", "points") and b is None:
@@ -384,6 +384,25 @@ class App:
             return self.my_list(method, b, body, ident)
         if a == "dashboards" and c is None:
             return self.dashboards(method, b, body, ident)
+        if a == "mfa" and method == "POST" and b in ("setup", "enable", "disable") and c is None:  # a second sign-in factor (TOTP) for your own account
+            need(ident["name"])
+            body = body or {}
+            u = self.store.user(ident["name"])
+            try:
+                if b == "setup":
+                    if u["totp"]:
+                        raise ApiError(409, "already enabled; disable it first")
+                    return 200, self.auth.mfa_setup(ident["name"])
+                if b == "enable":
+                    self.auth.mfa_enable(ident["name"], body.get("code"))
+                    return 200, {"ok": True}
+                if not verify_password(str(body.get("password", "")), u["hash"]):
+                    raise ApiError(403, "password is wrong")
+                self.store.run("update users set totp=null where name=?", (ident["name"],))
+                self.store.audit(ident["name"], "mfa.disable")
+                return 200, {"ok": True}
+            except AuthError as ex:
+                raise ApiError(ex.status, str(ex))
         if (method, a) == ("POST", "password") and b is None:
             need(ident["name"])
             body = body or {}
@@ -887,6 +906,9 @@ class App:
             if self.store.user(name):
                 if body.get("password"):
                     self.set_password(name, body["password"])
+                if body.get("reset_mfa"):  # lost phone: the admin clears the second factor
+                    self.store.run("update users set totp=null where name=?", (name,))
+                    self.store.audit(ident["name"], "mfa.reset", name)
                 self.store.run("update users set roles=? where name=?", (json.dumps(roles), name))
             else:
                 try:

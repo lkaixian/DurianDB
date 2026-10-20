@@ -247,7 +247,7 @@ class Store:
         return {**r[0], "roles": json.loads(r[0]["roles"])} if r else None
 
     def users(self):
-        return [{"name": u["name"], "roles": json.loads(u["roles"])} for u in self.q("select * from users order by name")]
+        return [{"name": u["name"], "roles": json.loads(u["roles"]), "mfa": bool(u["totp"])} for u in self.q("select * from users order by name")]
 
     def delete_user(self, name):
         return self.run("delete from users where name=?", (name,)).rowcount

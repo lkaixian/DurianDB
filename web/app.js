@@ -92,12 +92,16 @@ function viewLogin() {
   main.innerHTML = `<section class="login" aria-labelledby="li-h"><h2 id="li-h">Log in</h2>
     <form id="login"><label>Username <input name="username" autocomplete="username" required></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <label id="li-code" hidden>Authentication code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></label>
     <button type="submit">Log in</button><p id="li-msg" role="alert" class="err"></p></form></section>`;
   $("#login").addEventListener("submit", async ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    try { me = await api("POST", "/api/login", {username: f.get("username"), password: f.get("password")}); location.hash = "#overview"; route(); }
-    catch (e) { $("#li-msg").textContent = e.status === 429 ? "Too many failed attempts. Wait a few minutes." : e.message; }
+    try { me = await api("POST", "/api/login", {username: f.get("username"), password: f.get("password"), code: f.get("code") || undefined}); location.hash = "#overview"; route(); }
+    catch (e) {
+      $("#li-msg").textContent = e.status === 429 ? "Too many failed attempts. Wait a few minutes." : e.message;
+      if (/code required/.test(e.message)) { $("#li-code").hidden = false; $("#li-code input").required = true; $("#li-code input").focus(); }
+    }
   });
   $("#login input").focus();
 }
@@ -108,7 +112,33 @@ function viewAccount() {
     <form id="pw" class="row"><input class="sr" name="username" value="${esc(me.name)}" autocomplete="username" readonly tabindex="-1" aria-hidden="true"><label>Current password <input name="old" type="password" autocomplete="current-password" required></label>
     <label>New password (10+ characters) <input name="new" type="password" autocomplete="new-password" minlength="10" required></label>
     <button type="submit">Change password</button></form><p id="pw-msg" role="status"></p>
+    <h3>Two-factor sign-in</h3><div id="mfa"></div>
     <button id="logout" type="button">Log out</button></section>`;
+  const mfa = () => {
+    const box = $("#mfa");
+    box.innerHTML = me.mfa
+      ? `<p class="note">On. Signing in asks for a code from your authenticator app.</p><form id="mfa-off" class="row"><label>Password <input name="password" type="password" autocomplete="current-password" required></label><button type="submit">Turn off</button></form><p id="mfa-msg" role="status"></p>`
+      : `<button id="mfa-on" type="button">Set up an authenticator app</button><p id="mfa-msg" role="status"></p>`;
+    const say = (t, bad) => { $("#mfa-msg").className = bad ? "err" : ""; $("#mfa-msg").textContent = t; };
+    $("#mfa-on")?.addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/mfa/setup", {});
+        box.innerHTML = `<p class="note">Add this key to an authenticator app (type it in, or open <a href="${esc(r.uri)}">this link</a> on the phone), then enter the 6-digit code it shows.</p><p><code>${esc(r.secret)}</code></p>
+          <form id="mfa-ok" class="row"><label>Code <input name="code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required></label><button type="submit">Turn on</button></form><p id="mfa-msg" role="status"></p>`;
+        $("#mfa-ok").addEventListener("submit", async ev => {
+          ev.preventDefault();
+          try { await api("POST", "/api/mfa/enable", {code: new FormData(ev.target).get("code")}); me.mfa = true; mfa(); }
+          catch (e) { say(e.message, true); }
+        });
+      } catch (e) { say(e.message, true); }
+    });
+    $("#mfa-off")?.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      try { await api("POST", "/api/mfa/disable", {password: new FormData(ev.target).get("password")}); me.mfa = false; mfa(); }
+      catch (e) { say(e.message, true); }
+    });
+  };
+  mfa();
   $("#pw").addEventListener("submit", async ev => {
     ev.preventDefault();
     const f = new FormData(ev.target), out = $("#pw-msg");
@@ -659,9 +689,11 @@ async function viewUsers() {
   const load = async () => {
     const us = await api("GET", "/api/users");
     $("#ul").className = "";
-    $("#ul").innerHTML = `<table class="stack"><thead><tr><th>Name</th><th>Roles</th><th><span class="sr">Action</span></th></tr></thead><tbody>${us.map(u => `<tr><td data-label="Name">${esc(u.name)}</td><td data-label="Roles">${esc(u.roles.join(", "))}</td><td>${u.name === me.name ? "" : `<button data-del="${esc(u.name)}" aria-label="Delete user ${esc(u.name)}">Delete</button>`}</td></tr>`).join("")}</tbody></table>`;
+    $("#ul").innerHTML = `<table class="stack"><thead><tr><th>Name</th><th>Roles</th><th><span class="sr">Action</span></th></tr></thead><tbody>${us.map(u => `<tr><td data-label="Name">${esc(u.name)}</td><td data-label="Roles">${esc(u.roles.join(", "))}${u.mfa ? " (2FA)" : ""}</td><td>${u.mfa && u.name !== me.name ? `<button data-mfa="${esc(u.name)}" data-roles="${esc(u.roles.join(","))}" aria-label="Reset two-factor for ${esc(u.name)}">Reset 2FA</button> ` : ""}${u.name === me.name ? "" : `<button data-del="${esc(u.name)}" aria-label="Delete user ${esc(u.name)}">Delete</button>`}</td></tr>`).join("")}</tbody></table>`;
   };
   $("#ul").addEventListener("click", async ev => {
+    const m = ev.target.dataset.mfa;
+    if (m && confirm(`Turn off two-factor sign-in for "${m}"?`)) { try { await api("PUT", `/api/users/${encodeURIComponent(m)}`, {roles: ev.target.dataset.roles.split(","), reset_mfa: true}); await load(); } catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; } }
     const n = ev.target.dataset.del;
     if (n && confirm(`Delete user "${n}"?`)) { try { await api("DELETE", `/api/users/${encodeURIComponent(n)}`); await load(); } catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; } }
   });
