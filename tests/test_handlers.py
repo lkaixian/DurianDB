@@ -118,4 +118,23 @@ for _ in range(50):
 assert any(a["action"] == "set" and a["user"] == "handler close-valve" for a in store.audit_log(30))
 app.tick(time.time() + 2)  # the written value reaches the point on the next poll
 assert next(p for p in call("GET", "/api/points")[1] if p["name"] == "valve")["last"] == 0.0
+
+# ---- a scheduled report: validation, sent once a day from its hour, CSV attached
+import datetime as dt  # noqa: E402
+REP = {**MAIL_H, "type": "report", "hour": 7, "creds": str(creds)}
+for bad in ({"hour": 24}, {"hour": "7"}, {"hours": 0}, {"watchlist": ""}):
+    assert call("PUT", "/api/config/handler/rep", {**REP, **bad})[0] == 422, bad
+assert call("PUT", "/api/config/handler/rep", REP)[0] == 200
+MAIL.clear()
+day = lambda h: dt.datetime(2030, 1, 5, h).timestamp()
+assert app.send_reports(day(6)) == [] and app.send_reports(day(7)) == ["rep"] and app.send_reports(day(9)) == []
+assert app.send_reports(day(7) + 86400) == ["rep"]
+reports = lambda: [m for m in MAIL if "DurianDB report" in m["body"]]
+for _ in range(50):
+    if len(reports()) >= 2:
+        break
+    time.sleep(0.1)
+import email  # noqa: E402
+csv_part = email.message_from_string(reports()[0]["body"]).get_payload()[1]
+assert len(reports()) == 2 and csv_part.get_filename() == "report.csv" and csv_part.get_payload(decode=True).startswith(b"point,unit,description"), MAIL
 print("ok")

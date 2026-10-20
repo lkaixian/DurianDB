@@ -27,7 +27,7 @@ log = logging.getLogger("durian.outputs")
 
 opener = urllib.request.build_opener(NoRedirect)
 ADDRESS = re.compile(r"^[^@\s<>,;]{1,64}@[^@\s<>,;]{1,255}$")
-HANDLER_TYPES = ("webhook", "email", "setpoint")
+HANDLER_TYPES = ("webhook", "email", "setpoint", "report")
 SECURITY = ("none", "starttls", "ssl")
 PUBLISHER_TYPES = ("mqtt", "http")
 
@@ -57,7 +57,7 @@ def validate_handler(name, b):
     if kind == "webhook":
         if not _http_url(b.get("url")):
             add("url", "must be an http or https URL")
-    elif kind == "email":
+    elif kind in ("email", "report"):  # a report is an email sent on a schedule instead of on an alarm
         to = b.get("to")
         if not (isinstance(to, list) and 1 <= len(to) <= 20 and all(isinstance(a, str) and ADDRESS.match(a) for a in to)):
             add("to", "must be 1 to 20 email addresses")
@@ -70,6 +70,13 @@ def validate_handler(name, b):
             add("creds", "must be the path of a JSON file with user and password")
         if not isinstance(b.get("on_clear", False), bool):
             add("on_clear", "must be true or false")
+        if kind == "report":
+            if not (isinstance(b.get("hour"), int) and not isinstance(b["hour"], bool) and 0 <= b["hour"] <= 23):
+                add("hour", "must be a whole hour from 0 to 23 (server local time)")
+            if "hours" in b and not (isinstance(b["hours"], int) and not isinstance(b["hours"], bool) and 1 <= b["hours"] <= 744):
+                add("hours", "must be a whole number of hours from 1 to 744")
+            if "watchlist" in b and not (isinstance(b["watchlist"], str) and 0 < len(b["watchlist"]) <= 64):
+                add("watchlist", "must be the name of a shared watch list")
     elif kind == "setpoint":
         if not (isinstance(b.get("point"), str) and 0 < len(b["point"]) <= 64):
             add("point", "name the point to set")
@@ -187,8 +194,10 @@ class Outputs:
             t = h.get("type", "webhook")
             if t == "webhook":
                 self._put(("webhook", h["url"], {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message, "ts": ev.ts, "cleared_ts": ev.cleared_ts}))
+            elif t == "report":
+                continue  # sent on its schedule, not by alarms
             elif t == "email" and (kind == "raised" or h.get("on_clear")):
-                self._put(("mail", h, ev, kind))
+                self._put(("mail", h, self.message(h, ev, kind)))
             elif t == "setpoint" and self.setter:
                 if kind == "raised":
                     self._put(("set", h["point"], float(h["value"]), f"handler {h['name']}"))
@@ -206,7 +215,14 @@ class Outputs:
                       f"Raised at (epoch seconds): {ev.ts:.0f}\n")
         return m
 
-    def _send_mail(self, h, ev, kind):
+    def send_report(self, h, csv_bytes, hours):
+        m = email.message.EmailMessage()
+        m["From"], m["To"], m["Subject"] = h["from"], ", ".join(h["to"]), f"DurianDB report: last {hours} h"
+        m.set_content(f"Summary of the last {hours} hours is attached as CSV.\n")
+        m.add_attachment(csv_bytes, maintype="text", subtype="csv", filename="report.csv")
+        self._put(("mail", h, m))
+
+    def _send_mail(self, h, m):
         s = h["smtp"]
         creds = json.loads(Path(h["creds"]).read_text()) if h.get("creds") else {}
         cls = smtplib.SMTP_SSL if s.get("security") == "ssl" else smtplib.SMTP
@@ -216,7 +232,7 @@ class Outputs:
                 c.starttls(context=ssl.create_default_context())
             if creds.get("user"):
                 c.login(creds["user"], creds.get("password", ""))
-            c.send_message(self.message(h, ev, kind))
+            c.send_message(m)
 
     def _work(self):
         while True:

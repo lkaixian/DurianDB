@@ -725,6 +725,24 @@ class App:
         return pts
 
     REPORT_MAX_POINTS = 200
+    SYSTEM = {"name": "system", "roles": {"superadmin", "user", "anonymous"}}
+
+    def send_reports(self, now=None):
+        """Email each report handler's CSV summary once a day, from its hour on. Call once a minute. Returns the names sent."""
+        now = now or time.time()
+        local, sent = dt.datetime.fromtimestamp(now), []
+        for h in self.store.list("handler"):
+            key = f"last_report_{h['name']}"
+            if h.get("type") != "report" or not h.get("enabled", True) or local.hour < h["hour"] or self.store.get_setting(key) == local.strftime("%Y-%m-%d"):
+                continue
+            self.store.set_setting(key, local.strftime("%Y-%m-%d"))  # first, so a failure waits for tomorrow instead of retrying every minute
+            q = {"hours": h.get("hours", 24), "format": "csv", **({"watchlist": h["watchlist"]} if h.get("watchlist") else {})}
+            try:
+                self.outputs.send_report(h, self.report_summary(self.SYSTEM, q)[1].data, q["hours"])
+                sent.append(h["name"])
+            except ApiError as e:
+                self.store.audit("system", "report.failed", f"{h['name']}: {e}")
+        return sent
 
     def report_summary(self, ident, query):
         """One row per point for a time window: samples, min, max, average, first, last, bad samples and alarms. ?format=csv downloads it."""

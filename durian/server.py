@@ -132,6 +132,7 @@ def run_maintenance():
         time.sleep(60)
         try:
             app.maint.tick()
+            app.send_reports()
         except Exception:
             log.exception("maintenance failed")
 

@@ -160,15 +160,18 @@ const GROUPS = {
   maintenance: MAINT_GROUPS,
   source: (body) => [...SOURCE_GROUPS._common(body), ...(SOURCE_GROUPS[body.type] || (() => []))(body)],
   handler: body => [
-    {title: {webhook: "Webhook", email: "Email", setpoint: "Set a point"}[body.type] || "Handler", fields: [
+    {title: {webhook: "Webhook", email: "Email", setpoint: "Set a point", report: "Scheduled report"}[body.type] || "Handler", fields: [
       F("enabled", "Enabled", "check"),
       F("min_level", "Act from level", "select", {options: opts(...LEVELS)}),
-      ...(body.type === "email" ? [
+      ...(body.type === "email" || body.type === "report" ? [
         F("to", "To", "list", {hint: "Email addresses, comma separated."}), F("from", "From", "text"),
         F("smtp.host", "SMTP server", "text"), F("smtp.port", "SMTP port", "int", {hint: "25, 587 or 465."}),
         F("smtp.security", "Security", "select", {options: opts(["none", "None"], ["starttls", "STARTTLS"], ["ssl", "SSL/TLS"])}),
         F("creds", "Credentials file", "text", {optional: true, hint: "Optional JSON file with user and password, so the password is not stored in the settings."}),
-        F("on_clear", "Also send when the alarm returns to normal", "check")]
+        ...(body.type === "report" ? [F("hour", "Send daily from hour", "int", {hint: "0 to 23, server local time."}),
+          F("hours", "Window (hours)", "int", {optional: true, hint: "Empty = 24. The summary covers this many hours before sending."}),
+          F("watchlist", "Watch list", "text", {optional: true, hint: "A shared watch list to limit the points. Empty = every point."})]
+          : [F("on_clear", "Also send when the alarm returns to normal", "check")])]
         : body.type === "setpoint" ? [
         F("point", "Point to set", "text", {hint: "It must be settable. The same limits and step size as an operator apply; the confirm step does not."}),
         F("value", "Value when the alarm is raised", "number"),
