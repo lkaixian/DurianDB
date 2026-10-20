@@ -106,7 +106,7 @@ function pointGroups(body, sources) {
   return [
     {title: "Identity", fields: [
       F("source", "Data source", "select", {options: sources.length ? opts(...sources.map(s => [s.name, `${s.name} (${s.type})`])) : [["", "Create a source first"]]}),
-      F("datatype", "Value is", "select", {optional: true, options: opts(["number", "A number"], ["text", "Text (on virtual or HTTP in sources)"])}),
+      F("datatype", "Value is", "select", {optional: true, options: opts(["number", "A number"], ["text", "Text (on virtual, HTTP in or MQTT sources)"])}),
       F("folder", "Folder", "text", {optional: true, hint: "Groups points on the overview, for example Plant/Boiler."}),
       F("description", "Description", "text", {optional: true}), F("unit", "Unit", "text", {optional: true, hint: "For example C, bar or %."}),
       F("tags", "Tags", "tags", {hint: "key:value pairs, comma separated, for example area:boiler, line:2."})]},

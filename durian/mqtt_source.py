@@ -25,6 +25,20 @@ def parse(payload: bytes):
         return None
 
 
+def parse_text(payload: bytes):
+    """Text for an alphanumeric point: a JSON string, {"value": string}, or the bare payload. Printable, 1 to 255 characters, else None."""
+    try:
+        s = payload.decode()
+    except UnicodeDecodeError:
+        return None
+    try:
+        v = json.loads(s)
+        s = v.get("value") if isinstance(v, dict) else v if isinstance(v, str) else s
+    except ValueError:
+        pass
+    return s if isinstance(s, str) and 1 <= len(s) <= 255 and s.isprintable() else None
+
+
 def stamp(payload: bytes):
     """(source time, quality) from a {"value", "ts", "quality"} payload; either is None when absent or unusable."""
     from .ingest import parse_quality, parse_time  # ingest imports core only; deferred to keep this module's import light
@@ -82,7 +96,7 @@ class MqttSource(Source):
             except queue.Empty:
                 return out
             name = topic[len(self.prefix):]
-            v = parse(payload)
+            v = parse_text(payload) if getattr(self.points.get(name), "text", False) else parse(payload)
             if not name or v is None:
                 self.dropped += 1
                 continue

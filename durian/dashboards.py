@@ -11,7 +11,7 @@ from .store import ALL_ROLLUPS
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 TONES = ("normal", "warn", "alarm")  # fixed styles: the page keeps one accent colour and a strict content policy
-OPS = (">", "<", ">=", "<=", "==")
+OPS = (">", "<", ">=", "<=", "==", "!=")
 WINDOWS = (300, 3600, 86400, 604800)
 MAX_WIDGETS, MAX_ROW = 60, 200
 VALIDATORS = {}
@@ -55,8 +55,8 @@ class Ctx:
         if not isinstance(rules, list) or len(rules) > 10:
             return self.err(f"{p}.rules", "must be a list of at most 10")
         for i, r in enumerate(rules):
-            if not (isinstance(r, dict) and r.get("op") in OPS and _num(r.get("value")) and r.get("tone") in TONES):
-                self.err(f"{p}.rules[{i}]", f"needs op ({', '.join(OPS)}), a numeric value, and tone ({', '.join(TONES)})")
+            if not (isinstance(r, dict) and r.get("op") in OPS and (_num(r.get("value")) or (r["op"] in ("==", "!=") and isinstance(r.get("value"), str) and 0 < len(r["value"]) <= 255)) and r.get("tone") in TONES):
+                self.err(f"{p}.rules[{i}]", f"needs op ({', '.join(OPS)}), a numeric value (or text, for == and != on a text point), and tone ({', '.join(TONES)})")
 
 
 @widget("value")

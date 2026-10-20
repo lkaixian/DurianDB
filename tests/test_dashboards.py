@@ -96,4 +96,7 @@ assert call(ops, "GET", "/api/dashboards/secret")[0] == 200 and call(ops, "PUT",
 assert call(designer, "DELETE", "/api/dashboards/mine")[0] == 200 and call(designer, "DELETE", "/api/dashboards/mine")[0] == 404
 assert call(admin, "DELETE", "/api/dashboards/secret")[0] == 200
 assert [a["action"] for a in call(admin, "GET", "/api/audit")[1]][:2] == ["dashboard.delete", "dashboard.delete"]
+# ---- text rules: == and != take a string; ordering ops and an empty string do not
+txt = lambda op, v: call(admin, "PUT", "/api/dashboards/txt", D(W(rules=[{"op": op, "value": v, "tone": "alarm"}])))[0]
+assert txt("==", "FAULT") == 200 and txt("!=", "RUN") == 200 and txt(">", "A") == 422 and txt("==", "") == 422 and txt("!=", 3) == 200
 print("ok")
