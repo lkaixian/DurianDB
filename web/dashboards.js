@@ -254,93 +254,234 @@ const mimicEditor = w => `<fieldset class="mm-ed"><legend>Shapes</legend>
     ${[["l", "Left"], ["r", "Right"], ["u", "Up"], ["d", "Down"], ["x", "Remove"]].map(([a, t]) => `<button type="button" data-mm="${a}">${t}</button>`).join("")}</div>`).join("")}
   <div class="row"><label>Add shape <select data-ms>${Object.keys(MM).map(t => `<option>${t}</option>`).join("")}</select></label><button type="button" data-mm="add">Add shape</button></div>
   <p class="note">Left, right, up and down move a shape by 10. Colour rules by value are set in the JSON box below.</p></fieldset>`;
+// The designer is a canvas: the dashboard as it will look, live, with a transparent layer on top. Drag a widget to move it, drag its corner to
+// resize it, drag a type from the palette onto the canvas to add one. The panel on the right edits the selected widget and the Code tab edits the
+// whole dashboard as JSON. Arrow keys move the selected widget and Shift with arrows resizes it, so none of it needs a mouse.
+const GAP = 12, ROW = 72, CORE = ["id", "type", "title", "x", "y", "w", "h"];
+const hits = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+function settle(ws, pinned) {  // the widget being placed keeps its spot; any widget it lands on slides down to the first free row
+  const placed = [pinned];
+  for (const w of ws.filter(o => o !== pinned).sort((a, b) => a.y - b.y || a.x - b.x)) {
+    let c;
+    while ((c = placed.find(p => hits(p, w)))) w.y = c.y + c.h;
+    placed.push(w);
+  }
+}
+const place = (el, w) => { el.style.gridColumn = `${w.x + 1} / span ${w.w}`; el.style.gridRow = `${w.y + 1} / span ${w.h}`; };
+const PALETTE = {value: "Value", gauge: "Gauge", chart: "Trend chart", table: "Table", setpoint: "Set point", mimic: "Process picture", alarms: "Alarm list", status: "Source status", text: "Note"};
+
 async function viewDesigner(name) {
   const isNew = !name || name === "_new";
-  let draft = {title: "", columns: 12, refresh: 2, read_roles: ["user"], edit_roles: [], widgets: []}, data = null;
+  let draft = {title: "", columns: 12, refresh: 2, read_roles: ["user"], edit_roles: [], widgets: []}, data = null, sel = -1, drag = null;
   if (!isNew) {
     try { const {name: _n, editable, owner, ...rest} = await api("GET", `/api/dashboards/${encodeURIComponent(name)}`); if (!editable) throw Object.assign(new Error("You may view this dashboard but not edit it."), {status: 403}); draft = rest; }
     catch (e) { main.innerHTML = `<p class="status err"></p>`; main.firstChild.textContent = e.message; return; }
   }
-  const open = new Set();
-  main.innerHTML = `<section aria-labelledby="ds-h"><h2 id="ds-h">Dashboard designer</h2>
+  const names = (await api("GET", "/api/points").catch(() => [])).map(p => p.name);
+  main.innerHTML = `<section class="designer" aria-labelledby="ds-h"><h2 id="ds-h">Dashboard designer</h2>
+    <details class="dsettings" ${isNew ? "open" : ""}><summary>Dashboard settings</summary>
     <form id="df" class="row"><label>Name <input name="name" value="${esc(isNew ? "" : name)}" ${isNew ? "" : "readonly"} required pattern="[A-Za-z0-9_.\\-]{1,64}" autocomplete="off"></label>
       <label>Title <input name="title" value="${esc(draft.title)}" required maxlength="80" autocomplete="off"></label>
       <label>Columns <input name="columns" type="number" min="4" max="24" value="${draft.columns ?? 12}"></label>
       <label>Refresh (s) <input name="refresh" type="number" min="1" max="3600" value="${draft.refresh ?? 2}"></label>
       <label>Who can view (roles) <input name="read_roles" value="${esc((draft.read_roles || []).join(", "))}" autocomplete="off"></label>
       <label>Who can edit (roles) <input name="edit_roles" value="${esc((draft.edit_roles || []).join(", "))}" autocomplete="off"></label></form>
-    <p class="note">Public means the role <code>anonymous</code>, and only an administrator can set it. Viewing a dashboard never grants access to data: each point keeps its own permissions.</p>
-    <h3>Widgets</h3><div class="row"><label>Add <select id="at">${Object.keys(WIDGETS).map(t => `<option>${t}</option>`).join("")}</select></label><button id="aw" type="button">Add widget</button></div>
-    <div id="wl"></div>
-    <div class="row"><button id="sv" type="button">Save</button><a class="btn" id="ol" href="#d/${encodeURIComponent(name || "")}" ${isNew ? "hidden" : ""}>Open dashboard</a></div><div id="dm" role="status"></div>
-    <h3>Preview <small class="note">live data, grid as saved</small></h3><div id="pv" data-live>Loading preview...</div></section>`;
+    <p class="note">Public means the role <code>anonymous</code>, and only an administrator can set it. Viewing a dashboard never grants access to data: each point keeps its own permissions.</p></details>
+    <div class="row dbar"><div role="tablist" aria-label="Edit as"><button type="button" role="tab" id="tv" aria-selected="true">Visual</button><button type="button" role="tab" id="tc" aria-selected="false">Code</button></div>
+      <button id="sv" type="button" class="primary">Save</button><a class="btn" id="ol" href="#d/${encodeURIComponent(name || "")}" ${isNew ? "hidden" : ""}>Open dashboard</a></div>
+    <div id="dm" role="status"></div>
+    <div id="vis" class="dz">
+      <aside id="pal" aria-label="Add a widget"><h3>Add</h3>${Object.keys(WIDGETS).map(t => `<button type="button" draggable="true" data-add="${t}">${esc(PALETTE[t] || t)}</button>`).join("")}<p class="note">Drag onto the canvas, or press to add at the bottom.</p></aside>
+      <div id="cv"><div id="pv" data-live class="dgrid design"></div></div>
+      <aside id="pp" aria-label="Selected widget"></aside></div>
+    <div id="cd" hidden><label>The whole dashboard as JSON <textarea id="code" spellcheck="false" rows="28" class="mono"></textarea></label>
+      <p class="note">Apply replaces what the canvas shows. Name, title, columns, refresh and roles are part of it.</p><button type="button" id="ap">Apply code</button><p class="err" id="ce" role="alert"></p></div></section>`;
   const csv = s => s.split(",").map(x => x.trim()).filter(Boolean), cols = () => Number($("#df").columns.value) || 12;
-  const paintPreview = () => { if (data) paintDashboard($("#pv"), {...draft, columns: cols()}, data); };
-  const repaint = async () => { try { data = await loadData(draft); } catch (e) { showErr(e, $("#pv")); return; } paintPreview(); };
+  const root = () => $("#pv"), ws = () => draft.widgets, cur = () => ws()[sel];
+  const pitch = () => { const c = cols(), cw = (root().getBoundingClientRect().width - GAP * (c - 1)) / c; return {px: cw + GAP, py: ROW + GAP}; };
 
-  function paintList() {
-    $("#wl").innerHTML = draft.widgets.length ? draft.widgets.map((w, i) => { const {id, type, title, x, y, w: ww, h, ...rest} = w;
-      return `<details class="we" data-i="${i}" ${open.has(id) ? "open" : ""}><summary>${esc(type)}: ${esc(title || id)} <span class="note num">&nbsp;at ${x},${y} size ${ww} by ${h}</span></summary>
-      <div class="row"><label>Id <input data-f="id" value="${esc(id)}"></label><label>Title <input data-f="title" value="${esc(title || "")}"></label>
-        ${["x", "y", "w", "h"].map(k => `<label>${k.toUpperCase()} <input data-f="${k}" type="number" min="0" value="${w[k]}"></label>`).join("")}</div>
-      <div class="row">${[["left", "Move left"], ["right", "Move right"], ["up", "Move up"], ["down", "Move down"], ["wider", "Wider"], ["narrower", "Narrower"], ["taller", "Taller"], ["shorter", "Shorter"], ["dup", "Duplicate"], ["rm", "Remove"]].map(([a, l]) => `<button type="button" data-act="${a}">${l}</button>`).join("")}</div>
-      ${type === "mimic" ? mimicEditor(w) : ""}
-      <label>Settings for this widget (JSON) <textarea data-f="rest" spellcheck="false" rows="6">${esc(JSON.stringify(rest, null, 2))}</textarea></label><p class="err" data-err></p></details>`; }).join("") : `<p class="note">No widgets yet. Pick a type above and add one.</p>`;
+  function syncLayout() {  // positions only: moves the sections and the layer without redrawing any widget
+    const r = root();
+    for (const w of ws()) for (const el of r.querySelectorAll(`[data-id="${CSS.escape(w.id)}"],[data-hit="${CSS.escape(w.id)}"]`)) place(el, w);
+    r.style.minHeight = Math.max(ws().reduce((m, w) => Math.max(m, w.y + w.h), 0) + 2, 6) * (ROW + GAP) + "px";
   }
-  const resolve = el => { const d = el.closest("details"); return d ? Number(d.dataset.i) : -1; };
-  const freeY = () => draft.widgets.reduce((m, w) => Math.max(m, w.y + w.h), 0);
+  function paintLayer() {  // one transparent box per widget, added or removed as needed so a focused box keeps focus across refreshes
+    const r = root(), ids = new Set(ws().map(w => w.id));
+    for (const h of r.querySelectorAll(".hit")) if (!ids.has(h.dataset.hit)) h.remove();
+    for (const [i, w] of ws().entries()) {
+      let h = r.querySelector(`.hit[data-hit="${CSS.escape(w.id)}"]`);
+      if (!h) { h = document.createElement("div"); h.className = "hit"; h.dataset.hit = w.id; h.tabIndex = 0; h.setAttribute("role", "button"); r.append(h); }
+      h.setAttribute("aria-label", `${w.type} ${w.title || w.id}, column ${w.x + 1}, row ${w.y + 1}, ${w.w} wide, ${w.h} high. Arrow keys move, Shift and arrow keys resize.`);
+      h.innerHTML = `<span class="tag">${esc(w.type)}: ${esc(w.title || w.id)}</span><span class="grip" data-grip></span>`;
+      h.classList.toggle("sel", i === sel);
+      place(h, w);
+    }
+    syncLayout();
+  }
+  const paintPreview = () => {
+    if (!data) return;
+    const had = document.activeElement?.dataset?.hit;
+    paintDashboard(root(), {...draft, columns: cols()}, data);
+    paintLayer();
+    if (had && document.activeElement !== root().querySelector(`.hit[data-hit="${CSS.escape(had)}"]`)) root().querySelector(`.hit[data-hit="${CSS.escape(had)}"]`)?.focus();
+  };
+  const repaint = async () => { if (drag) return; try { data = await loadData(draft); } catch (e) { showErr(e, root()); return; } paintPreview(); };
 
-  $("#aw").addEventListener("click", () => {
-    const type = $("#at").value, def = WIDGETS[type];
-    let n = 1; while (draft.widgets.some(w => w.id === type + n)) n++;
-    draft.widgets.push({id: type + n, ...def.template, x: 0, y: freeY(), w: Math.min(def.size.w, cols()), h: def.size.h});
-    open.add(type + n); paintList(); repaint();
+  // ---- the panel for the selected widget
+  function paintPanel() {
+    const w = cur(), box = $("#pp");
+    if (!w) { box.innerHTML = `<h3>Widget</h3><p class="note">Select a widget on the canvas to change it. Nothing selected: ${ws().length} widget${ws().length === 1 ? "" : "s"} on the dashboard.</p>`; return; }
+    const rest = Object.fromEntries(Object.entries(w).filter(([k]) => !CORE.includes(k)));
+    const scalars = Object.entries(rest).filter(([, v]) => v !== null && typeof v !== "object"), complex = Object.fromEntries(Object.entries(rest).filter(([, v]) => v === null || typeof v === "object"));
+    box.innerHTML = `<h3>${esc(w.type)}</h3><datalist id="ptl">${names.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+      <label>Title <input data-f="title" value="${esc(w.title || "")}"></label>
+      ${scalars.map(([k, v]) => typeof v === "boolean" ? `<label class="chk"><input type="checkbox" data-s="${esc(k)}" ${v ? "checked" : ""}> ${esc(k)}</label>`
+        : `<label>${esc(k)} <input data-s="${esc(k)}" data-t="${typeof v}" ${typeof v === "number" ? 'type="number" step="any"' : ""} ${k === "point" ? 'list="ptl"' : ""} value="${esc(v)}" autocomplete="off"></label>`).join("")}
+      <details><summary>Position and size</summary><div class="row"><label>Id <input data-f="id" value="${esc(w.id)}"></label>
+        ${["x", "y", "w", "h"].map(k => `<label>${k.toUpperCase()} <input data-f="${k}" type="number" min="${k === "w" || k === "h" ? 1 : 0}" value="${w[k]}"></label>`).join("")}</div>
+        <div class="row">${[["left", "Left"], ["right", "Right"], ["up", "Up"], ["down", "Down"], ["wider", "Wider"], ["narrower", "Narrower"], ["taller", "Taller"], ["shorter", "Shorter"]].map(([a, l]) => `<button type="button" data-act="${a}">${l}</button>`).join("")}</div></details>
+      ${w.type === "mimic" ? mimicEditor(w) : ""}
+      <label>More settings (JSON) <textarea data-f="rest" spellcheck="false" rows="7" class="mono">${esc(JSON.stringify(complex, null, 2))}</textarea></label><p class="err" data-err></p>
+      <div class="row"><button type="button" data-act="dup">Duplicate</button><button type="button" data-act="rm">Remove</button></div>`;
+  }
+  const select = i => { sel = i; for (const h of root().querySelectorAll(".hit")) h.classList.toggle("sel", h.dataset.hit === ws()[i]?.id); paintPanel(); };
+  const freeY = () => ws().reduce((m, w) => Math.max(m, w.y + w.h), 0);
+  function add(type, x, y) {
+    const def = WIDGETS[type];
+    let n = 1; while (ws().some(w => w.id === type + n)) n++;
+    const w = {id: type + n, ...JSON.parse(JSON.stringify(def.template)), x: 0, y: freeY(), w: Math.min(def.size.w, cols()), h: def.size.h};
+    if (x != null) { w.x = Math.max(0, Math.min(x, cols() - w.w)); w.y = Math.max(0, y); }
+    ws().push(w);
+    settle(ws(), w);
+    paintLayer(); select(ws().length - 1); repaint();
+  }
+
+  // ---- palette
+  $("#pal").addEventListener("click", ev => { if (ev.target.dataset.add) add(ev.target.dataset.add); });
+  $("#pal").addEventListener("dragstart", ev => { if (ev.target.dataset.add) ev.dataTransfer.setData("text/plain", ev.target.dataset.add); });
+  $("#pv").addEventListener("dragover", ev => ev.preventDefault());
+  $("#pv").addEventListener("drop", ev => {
+    ev.preventDefault();
+    const t = ev.dataTransfer.getData("text/plain");
+    if (!WIDGETS[t]) return;
+    const r = root().getBoundingClientRect(), {px, py} = pitch();
+    add(t, Math.floor((ev.clientX - r.left) / px), Math.floor((ev.clientY - r.top) / py));
   });
-  $("#wl").addEventListener("toggle", ev => { const i = resolve(ev.target); if (i >= 0) { const id = draft.widgets[i].id; ev.target.open ? open.add(id) : open.delete(id); } }, true);
-  $("#wl").addEventListener("click", ev => {
-    const act = ev.target.dataset.act, i = resolve(ev.target), mm = ev.target.dataset.mm;
-    if (mm && i >= 0) {
-      const w = draft.widgets[i], k = Number(ev.target.closest("[data-k]")?.dataset.k ?? -1), s = w.shapes[k];
+
+  // ---- moving and resizing on the canvas
+  $("#pv").addEventListener("pointerdown", ev => {
+    const h = ev.target.closest(".hit");
+    if (!h || ev.button) return;
+    const i = ws().findIndex(w => w.id === h.dataset.hit), w = ws()[i];
+    select(i);
+    drag = {w, resize: !!ev.target.closest("[data-grip]"), sx: ev.clientX, sy: ev.clientY, ox: w.x, oy: w.y, ow: w.w, oh: w.h, moved: false};
+    h.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  $("#pv").addEventListener("pointermove", ev => {
+    if (!drag) return;
+    const {px, py} = pitch(), dx = Math.round((ev.clientX - drag.sx) / px), dy = Math.round((ev.clientY - drag.sy) / py), w = drag.w, c = cols();
+    const [nx, ny, nw, nh] = drag.resize ? [w.x, w.y, Math.max(1, Math.min(c - w.x, drag.ow + dx)), Math.max(1, drag.oh + dy)]
+      : [Math.max(0, Math.min(c - w.w, drag.ox + dx)), Math.max(0, drag.oy + dy), w.w, w.h];
+    if (nx === w.x && ny === w.y && nw === w.w && nh === w.h) return;
+    Object.assign(w, {x: nx, y: ny, w: nw, h: nh});
+    drag.moved = true;
+    settle(ws(), w);
+    syncLayout();
+  });
+  const endDrag = () => { if (!drag) return; const moved = drag.moved; drag = null; if (moved) { paintLayer(); paintPanel(); repaint(); } };
+  $("#pv").addEventListener("pointerup", endDrag);
+  $("#pv").addEventListener("pointercancel", endDrag);
+  $("#pv").addEventListener("keydown", ev => {
+    const h = ev.target.closest(".hit"), k = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}[ev.key];
+    if (!h || !k) return;
+    const w = ws().find(o => o.id === h.dataset.hit), c = cols();
+    ev.preventDefault();
+    if (ev.shiftKey) { w.w = Math.max(1, Math.min(c - w.x, w.w + k[0])); w.h = Math.max(1, w.h + k[1]); }
+    else { w.x = Math.max(0, Math.min(c - w.w, w.x + k[0])); w.y = Math.max(0, w.y + k[1]); }
+    settle(ws(), w);
+    paintLayer(); if (cur() === w) paintPanel();
+    clearTimeout(w._t); w._t = setTimeout(repaint, 250);  // redraw once the keys stop
+  });
+
+  // ---- the panel's fields
+  $("#pp").addEventListener("click", ev => {
+    const act = ev.target.dataset.act, mm = ev.target.dataset.mm, w = cur();
+    if (!w) return;
+    if (mm) {
+      const k = Number(ev.target.closest("[data-k]")?.dataset.k ?? -1), s = w.shapes[k];
       if (mm === "add") w.shapes.push({...MM_NEW[ev.target.closest("fieldset").querySelector("[data-ms]").value]});
       else if (mm === "x") w.shapes.splice(k, 1);
       else if (s) { const [axis, by] = {l: ["x", -10], r: ["x", 10], u: ["y", -10], d: ["y", 10]}[mm]; for (const f of MM[s.type]) if (new RegExp(`^c?${axis}[12]?$`).test(f)) s[f] += by; }
-      paintList(); repaint();
+      paintPanel(); repaint();
       return;
     }
     if (!act) return;
-    const w = draft.widgets[i], step = {left: ["x", -1], right: ["x", 1], up: ["y", -1], down: ["y", 1], wider: ["w", 1], narrower: ["w", -1], taller: ["h", 1], shorter: ["h", -1]}[act];
-    if (step) w[step[0]] = Math.max(step[0] === "w" || step[0] === "h" ? 1 : 0, w[step[0]] + step[1]);
-    else if (act === "rm") draft.widgets.splice(i, 1);
-    else if (act === "dup") { let n = 2; while (draft.widgets.some(o => o.id === w.id + "-" + n)) n++; draft.widgets.push({...JSON.parse(JSON.stringify(w)), id: w.id + "-" + n, y: freeY()}); }
-    paintList(); repaint();
+    const step = {left: ["x", -1], right: ["x", 1], up: ["y", -1], down: ["y", 1], wider: ["w", 1], narrower: ["w", -1], taller: ["h", 1], shorter: ["h", -1]}[act];
+    if (step) { w[step[0]] = Math.max(step[0] === "w" || step[0] === "h" ? 1 : 0, w[step[0]] + step[1]); settle(ws(), w); }
+    else if (act === "rm") { ws().splice(sel, 1); sel = -1; }
+    else if (act === "dup") { let n = 2; while (ws().some(o => o.id === w.id + "-" + n)) n++; const c = {...JSON.parse(JSON.stringify(w)), id: w.id + "-" + n, y: freeY()}; ws().push(c); sel = ws().length - 1; }
+    paintLayer(); select(sel); repaint();
   });
-  $("#wl").addEventListener("change", ev => {
-    const f = ev.target.dataset.f, i = resolve(ev.target), mf = ev.target.dataset.mf, mc = ev.target.dataset.mc;
-    if ((mf || mc) && i >= 0) {
-      const w = draft.widgets[i], v = ev.target.value;
-      if (mc) w[mc] = Number(v);
-      else { const s = w.shapes[Number(ev.target.closest("[data-k]").dataset.k)]; if (MM[s.type].includes(mf)) s[mf] = Number(v); else if (v === "" && mf !== "text") delete s[mf]; else s[mf] = v; }
-      paintList(); repaint();
+  $("#pp").addEventListener("change", ev => {
+    const t = ev.target, w = cur();
+    if (!w) return;
+    if (t.dataset.mf || t.dataset.mc) {
+      if (t.dataset.mc) w[t.dataset.mc] = Number(t.value);
+      else { const s = w.shapes[Number(t.closest("[data-k]").dataset.k)], mf = t.dataset.mf; if (MM[s.type].includes(mf)) s[mf] = Number(t.value); else if (t.value === "" && mf !== "text") delete s[mf]; else s[mf] = t.value; }
+      paintPanel(); repaint();
       return;
     }
-    if (!f || i < 0) return;
-    const w = draft.widgets[i], err = ev.target.closest("details").querySelector("[data-err]");
-    if (f === "rest") {
+    if (t.dataset.s) {  // a plain setting of this widget: text, number or switch
+      const k = t.dataset.s;
+      if (t.type === "checkbox") w[k] = t.checked;
+      else if (t.dataset.t === "number") { if (t.value === "") delete w[k]; else w[k] = Number(t.value); }
+      else w[k] = t.value;
+    } else if (t.dataset.f === "rest") {
+      const err = $("#pp [data-err]");
       let parsed;
-      try { parsed = JSON.parse(ev.target.value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("must be a JSON object"); } catch (e) { err.textContent = "Not applied: " + e.message; return; }
+      try { parsed = JSON.parse(t.value); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("must be a JSON object"); } catch (e) { err.textContent = "Not applied: " + e.message; return; }
       err.textContent = "";
-      const {id, type, title, x, y, w: ww, h} = w;
-      draft.widgets[i] = {id, type, title, x, y, w: ww, h, ...parsed, type: type};
-    } else w[f] = ["x", "y", "w", "h"].includes(f) ? Number(ev.target.value) : ev.target.value;
-    paintList(); repaint();
+      const keep = Object.fromEntries(Object.entries(w).filter(([k, v]) => CORE.includes(k) || (v !== null && typeof v !== "object")));
+      ws()[sel] = {...keep, ...parsed, type: w.type};
+    } else if (t.dataset.f) {
+      w[t.dataset.f] = ["x", "y", "w", "h"].includes(t.dataset.f) ? Number(t.value) : t.value;
+      settle(ws(), w);
+    }
+    paintLayer(); paintPanel(); repaint();
   });
   $("#df").addEventListener("change", repaint);
 
-  $("#sv").addEventListener("click", async () => {
-    const f = $("#df"), msg = $("#dm"), nm = f.name.value.trim();
-    const body = {title: f.title.value, columns: Number(f.columns.value), refresh: Number(f.refresh.value), read_roles: csv(f.read_roles.value), edit_roles: csv(f.edit_roles.value), widgets: draft.widgets};
+  // ---- the Code tab: the whole dashboard as JSON
+  const meta = () => { const f = $("#df"); return {title: f.title.value, columns: Number(f.columns.value), refresh: Number(f.refresh.value), read_roles: csv(f.read_roles.value), edit_roles: csv(f.edit_roles.value)}; };
+  const toCode = () => { $("#code").value = JSON.stringify({name: $("#df").name.value.trim(), ...meta(), widgets: draft.widgets}, null, 2); };
+  function fromCode() {
     try {
-      const r = await api("PUT", `/api/dashboards/${encodeURIComponent(nm)}`, body);
+      const d = JSON.parse($("#code").value);
+      if (!d || typeof d !== "object" || !Array.isArray(d.widgets)) throw new Error("needs an object with a widgets list");
+      const f = $("#df");
+      if (d.name && isNew) f.name.value = d.name;
+      f.title.value = d.title ?? ""; f.columns.value = d.columns ?? 12; f.refresh.value = d.refresh ?? 2;
+      f.read_roles.value = (d.read_roles || []).join(", "); f.edit_roles.value = (d.edit_roles || []).join(", ");
+      draft.widgets = d.widgets; sel = -1; $("#ce").textContent = "";
+      return true;
+    } catch (e) { $("#ce").textContent = "Not applied: " + e.message; return false; }
+  }
+  const tab = code => {
+    if (!code && !$("#cd").hidden && !fromCode()) return;
+    $("#vis").hidden = code; $("#cd").hidden = !code;
+    $("#tv").setAttribute("aria-selected", String(!code)); $("#tc").setAttribute("aria-selected", String(code));
+    if (code) toCode(); else { paintLayer(); paintPanel(); data = null; repaint(); }
+  };
+  $("#tv").addEventListener("click", () => tab(false));
+  $("#tc").addEventListener("click", () => tab(true));
+  $("#ap").addEventListener("click", () => { if (fromCode()) { $("#ce").textContent = "Applied."; } });
+
+  $("#sv").addEventListener("click", async () => {
+    if (!$("#cd").hidden && !fromCode()) return;
+    const f = $("#df"), msg = $("#dm"), nm = f.name.value.trim();
+    try {
+      const r = await api("PUT", `/api/dashboards/${encodeURIComponent(nm)}`, {...meta(), widgets: draft.widgets});
       msg.className = "";
       msg.innerHTML = "Saved." + (r.warnings?.length ? `<ul class="errors">${r.warnings.map(x => `<li>Warning: ${esc(x.message)}</li>`).join("")}</ul>` : "");
       $("#ol").href = `#d/${encodeURIComponent(nm)}`; $("#ol").hidden = false;
@@ -350,6 +491,7 @@ async function viewDesigner(name) {
       msg.innerHTML = esc(e.status === 422 ? "Not saved. Fix these:" : e.message) + (e.errors ? `<ul class="errors">${e.errors.map(x => `<li><code>${esc(x.property)}</code>: ${esc(x.message)}</li>`).join("")}</ul>` : "");
     }
   });
-  paintList();
+  paintPanel();
+  await repaint();
   every(repaint, 3000);
 }
