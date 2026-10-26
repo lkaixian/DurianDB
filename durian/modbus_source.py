@@ -3,6 +3,7 @@
 Failure handling follows the studied behavior: per-request timeout and retries, a device that rejects a read
 only loses those points, and a dead link backs off (period x scale^failures, capped) instead of hammering.
 """
+import math
 import threading
 import time
 
@@ -134,7 +135,10 @@ class ModbusSource(Source):
         if m["type"] == "bool":
             return 1.0 if raw[0] >> m.get("bit", 0) & 1 else 0.0
         v = decode(raw, m["type"], m.get("byte_order", "big"), m.get("word_order", "big"))
-        return v * m.get("multiplier", 1) + m.get("additive", 0)
+        v = v * m.get("multiplier", 1) + m.get("additive", 0)
+        if not math.isfinite(v):  # a float register can hold NaN or infinity, or scaling can overflow: no comparison against it is ever true
+            raise ValueError(f"{point.name} read {v} from the device")
+        return v
 
     def poll(self, ts):
         with self._lock:
