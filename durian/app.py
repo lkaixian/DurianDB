@@ -326,12 +326,12 @@ class App:
 
     # ---- auth
     def login(self, body):
-        body = body or {}
+        body = body if isinstance(body, dict) else {}
         return self.auth.login(body.get("username"), body.get("password"), body.get("code"))
 
     def reset_password(self, body):
         """POST /api/reset {username, code, new}: spend a code from an admin and choose a new password. Needs no sign-in."""
-        body = body or {}
+        body = body if isinstance(body, dict) else {}
         name = body.get("username")
         try:
             check_password_strength(body.get("new"))  # before the code is spent, so a weak password can be retried
@@ -349,6 +349,8 @@ class App:
         if not m:
             raise ApiError(404, "not found")
         a, b, c = m["a"], m["b"], m["c"]
+        if body is not None and not isinstance(body, (dict, str)):  # a JSON body is an object; imports arrive as text
+            raise ApiError(400, "body must be a JSON object")
         admin = "superadmin" in ident["roles"]
         user = "user" in ident["roles"]
 

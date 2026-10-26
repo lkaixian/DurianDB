@@ -161,7 +161,10 @@ def main():
     store = Store(os.environ.get("DURIAN_DB", str(ROOT / "durian.db")))
     seeded = seed(store, os.environ.get("DURIAN_MQTT_CREDS", ROOT / "lab" / "mqtt" / "creds.json"))
     app = App(store, ROOT / "backups")
-    pw = app.auth.bootstrap(os.environ.get("DURIAN_ADMIN_PASSWORD"))
+    try:
+        pw = app.auth.bootstrap(os.environ.get("DURIAN_ADMIN_PASSWORD"))
+    except AuthError as ex:  # a weak DURIAN_ADMIN_PASSWORD is a sentence, not a stack trace
+        raise SystemExit(f"cannot create the first administrator: {ex}")
     if pw:
         print(f"First run: log in as 'admin' with password {pw} (shown once; change it after logging in).")
     if seeded:

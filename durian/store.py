@@ -122,11 +122,20 @@ class Store:
 
     # ---- migrations
     def version(self):
+        """0 only when the table does not exist yet. A table that exists but cannot be read is an error: treating it as 0
+        would replay every migration over a live database."""
         try:
             r = self.q("select max(version) as v from schema_version")
             return r[0]["v"] or 0
-        except Exception:
-            return 0
+        except Exception as e:
+            if not self._has_table("schema_version"):
+                return 0
+            raise RuntimeError(f"the database schema version cannot be read: {type(e).__name__}. Restore the database or repair the schema_version table.") from e
+
+    def _has_table(self, name):
+        if self.kind == "mysql":
+            return bool(self.q("select 1 from information_schema.tables where table_schema = database() and table_name = ?", (name,)))
+        return bool(self.q("select 1 from sqlite_master where type='table' and name=?", (name,)))
 
     def migrate(self):
         with self.lock:
