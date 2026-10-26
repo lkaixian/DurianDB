@@ -1,0 +1,7 @@
+# Runtime dependencies. Everything else DurianDB uses is in the Python standard library.
+paho-mqtt>=2.0          # the MQTT source and publisher; 2.0 is required for CallbackAPIVersion.VERSION2
+pymysql>=1.1            # only needed when DURIAN_DB is a mysql:// URL
+pyserial>=3.5           # only needed by serial Modbus (RTU/ASCII) and the socket:// test path
+
+# Development and lab tools only.
+cryptography>=42        # tools/make_cert.py and tools/mqtt_lab.py
