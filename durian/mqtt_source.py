@@ -75,18 +75,25 @@ class MqttSource(Source):
         """`factory(name)` builds a Point for a topic seen for the first time; None drops unknown topics."""
         super().__init__(name)
         self.prefix, self.cmd_prefix, self.factory = prefix, cmd_prefix, factory
+        self.manages_error = True  # the paho callbacks report the link state, so a tick must not clear it
         self.q, self.dropped, self.connected = queue.Queue(), 0, False
+        self.error = f"not connected to {creds['host']}:{creds['port']} yet"
         self.client = tls_client(creds)
         self.client.on_connect = self._on_connect
-        self.client.on_disconnect = lambda c, u, f, rc, p: setattr(self, "connected", False)
+        self.client.on_disconnect = self._on_disconnect
         self.client.on_message = lambda c, u, m: self.q.put((m.topic, m.payload))
         self.client.connect_async(creds["host"], creds["port"])
         self.client.loop_start()
 
     def _on_connect(self, c, u, flags, rc, props):
         self.connected = rc == 0
+        self.error = None if rc == 0 else f"the broker refused the connection ({rc})"
         if rc == 0:  # subscribe on every (re)connect; subscriptions don't survive clean sessions
             c.subscribe(self.prefix + "#", qos=1)
+
+    def _on_disconnect(self, c, u, flags, rc, props):
+        self.connected = False
+        self.error = f"the connection to the broker was lost ({rc})" if rc else "the connection to the broker was closed"
 
     def poll(self, ts):
         out = {}  # ponytail: latest value per point per tick; keep every sample if the tick rate becomes the limit
