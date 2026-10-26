@@ -128,8 +128,14 @@ class RateOfChange(_Latch):
         self.per_second, self.prev = per_second, None
 
     def evaluate(self, point, value, ts):
-        prev, self.prev = self.prev, (value, ts)
-        if prev is None or ts <= prev[1]:
+        prev = self.prev
+        if prev is not None and ts <= prev[1]:
+            # A sample at or before the last one says nothing about the rate: there is no interval to divide by.
+            # It must not read as "normal", or an active alarm would clear on a repeated timestamp. Keep the
+            # earlier reference point and, if an alarm is up, leave it up: no evidence either way.
+            return self.event.message if self.event else None
+        self.prev = (value, ts)
+        if prev is None:
             return None
         rate = abs(value - prev[0]) / (ts - prev[1])
         return f"changing {rate:.2f}/s > {self.per_second}/s" if rate > self.per_second else None

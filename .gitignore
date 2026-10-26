@@ -13,3 +13,8 @@ backups/
 .claude/settings.local.json
 tools/cert.pem
 tools/cert.key
+
+# build output and local agent settings
+rust/target/
+.claude/
+graphify-out/cache/

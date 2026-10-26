@@ -29,3 +29,16 @@ jobs:
           node --check web/forms.js
           node --check web/dashboards.js
           node --check web/admin.js
+
+  rust:
+    name: real-time core (experimental)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test the detector core
+        working-directory: rust
+        run: cargo test --locked
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy --locked -- -D warnings
