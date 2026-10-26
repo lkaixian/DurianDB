@@ -124,6 +124,12 @@ Open **Dashboards** in the console. The seeded `plant-overview` shows every widg
 - Pulled values carry the engine's tick time, not the moment they were read, and a fast poll keeps only the latest value per tick.
 - History is never purged, and there is no clustering or high availability.
 
+## How this is tracked
+
+- `TECHNICAL_DEBT.md` — every known shortcut, defect and untrue claim, with where it is and what it costs.
+- `docs/12-error-handling.md` — how each failure reaches an operator, the gaps, and the rule for a new one.
+- `PROGRESS.md` — what is built, what is verified and how, and what is next.
+
 ## Status and research
 
 See `docs/00-clean-room-policy.md` first. Notes: `docs/research/01` to `10` (10 is the SCADA baseline and gap analysis that sets the roadmap) (06 compares the enterprise and regular editions, 07 is Modbus, 08 is HTTP and SQL, 09 is dashboards and extension). Open questions: `docs/research/99-open-questions.md`.

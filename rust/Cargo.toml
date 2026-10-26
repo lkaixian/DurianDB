@@ -1,0 +1,18 @@
+[package]
+name = "durian-rt"
+version = "0.1.0"
+edition = "2021"
+description = "Experimental real-time detector core for DurianDB: bounded memory, no panics on input, monotonic timestamps."
+publish = false
+
+[[bin]]
+name = "durian-rt"
+path = "src/main.rs"
+
+[dependencies]
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+overflow-checks = true
