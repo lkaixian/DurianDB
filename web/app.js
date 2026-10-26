@@ -666,28 +666,31 @@ function makeSortable(table) {
 // ---- config lists: one dense, filterable table per kind (rows open the editor)
 const yes = v => v ? "Yes" : "No";
 const tagText = t => Object.entries(t || {}).map(([k, v]) => k + ":" + v).join(", ");
+// what a handler or publisher's deliveries are doing: a route that has been failing for a week must be visible
+const delivery = o => !o ? "" : o.failed ? `${o.failed} failed, last ${o.last_error || "error"}` : o.last_ok ? "Working" : "Nothing sent yet";
 const LISTS = {
   source: {cols: ["Name", "Type", "Enabled", "Points", "State", "Last poll", "Dropped", "Error"], cell: (i, x) => [null, i.type, yes(i.enabled !== false), x.points ?? "", x.down ? "Down: " + x.down : x.name ? "Up" : "Not running", x.poll_ms == null ? "" : `${(x.poll_ms / 1000).toFixed(2)} s${x.overruns ? `, ${x.overruns} too slow` : ""}`, x.dropped ?? "", x.error || ""]},
   point: {cols: ["Name", "Folder", "Source", "Value", "Quality", "Alarms", "Settable", "Tags"], cell: (i, x) => [null, i.folder || "", i.source, x.last == null ? "no value yet" : `${x.decimals == null || typeof x.last === "string" ? x.last : Number(x.last).toFixed(x.decimals)}${x.unit ? " " + x.unit : ""}`, x.quality || "", (i.detectors || []).length || "none", yes(i.settable), tagText(i.tags)]},
-  handler: {cols: ["Name", "Type", "Target", "From level", "Enabled"], cell: i => [null, i.type, i.type === "email" || i.type === "report" ? (i.to || []).join(", ") : i.type === "setpoint" ? `${i.point} = ${i.value}` : i.url || "", i.min_level || "", yes(i.enabled !== false)]},
-  publisher: {cols: ["Name", "Type", "Topic prefix or URL", "Points", "Enabled"], cell: i => [null, i.type, i.prefix || i.url || "", (i.points || []).join(", "), yes(i.enabled !== false)]},
+  handler: {cols: ["Name", "Type", "Target", "From level", "Enabled", "Delivery"], cell: (i, x, o) => [null, i.type, i.type === "email" || i.type === "report" ? (i.to || []).join(", ") : i.type === "setpoint" ? `${i.point} = ${i.value}` : i.url || "", i.min_level || "", yes(i.enabled !== false), delivery(o)]},
+  publisher: {cols: ["Name", "Type", "Topic prefix or URL", "Points", "Enabled", "Delivery"], cell: (i, x, o) => [null, i.type, i.prefix || i.url || "", (i.points || []).join(", "), yes(i.enabled !== false), delivery(o)]},
   maintenance: {cols: ["Name", "Applies to", "During", "When", "Enabled"], cell: i => [null, [...(i.scope?.points || []), ...(i.scope?.sources || []).map(s => "source " + s), tagText(i.scope?.tags)].filter(Boolean).join(", "), {suppress: "Hold alarms", acknowledge: "Acknowledge", drop: "Drop alarms"}[i.mode] || i.mode,
     i.schedule?.type === "weekly" ? `${(i.schedule.days || []).map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(" ")} ${i.schedule.start}-${i.schedule.end}` : i.schedule?.type === "once" ? `${fmt(i.schedule.from)} to ${fmt(i.schedule.to)}` : i.active ? "Switched on" : "Switched off", yes(i.enabled !== false)]},
   watchlist: {cols: ["Name", "Tags", "Points", "Who can read"], cell: i => [null, tagText(i.tags), (i.points || []).join(", "), (i.read_roles || []).join(", ")]},
 };
 async function renderConfigList(kind, items) {
   const live = kind === "source" ? await api("GET", "/api/sources").catch(() => []) : kind === "point" ? await api("GET", "/api/points").catch(() => []) : [];
-  const by = Object.fromEntries(live.map(x => [x.name, x])), L = LISTS[kind], one = KINDS[kind].toLowerCase().replace(/s$/, "");
+  const outs = ["handler", "publisher"].includes(kind) ? await api("GET", "/api/outputs").catch(() => ({targets: []})) : {targets: []};
+  const by = Object.fromEntries(live.map(x => [x.name, x])), L = LISTS[kind], one = KINDS[kind].toLowerCase().replace(/s$/, ""), out = Object.fromEntries((outs.targets || []).map(t => [t.name, t]));
   const box = $("#cfg");
   box.className = "";
   box.innerHTML = `<div class="row"><a class="btn" href="#config/${kind}/_new">New ${one}</a>
     ${kind === "point" ? `<a class="btn" href="/api/export/points" download>Export CSV</a><label>Import CSV <input id="csv" type="file" accept=".csv,text/csv"></label>` : ""}
     ${items.length > 5 ? `<label>Filter <input id="lf" type="search" placeholder="name, source, tag" autocomplete="off"></label>` : ""}<span id="lcount" class="note" role="status"></span></div><div id="csv-out" role="status"></div>
     ${items.length ? `<table class="stack dense"><thead><tr>${L.cols.map(c => `<th>${c}</th>`).join("")}</tr></thead><tbody>${items.map(i => {
-      const cells = L.cell(i, by[i.name] || {});
+      const cells = L.cell(i, by[i.name] || {}, out[i.name]);
       return `<tr data-q="${esc((i.name + " " + cells.join(" ")).toLowerCase())}">${cells.map((c, n) => n === 0
         ? `<td data-label="${L.cols[0]}"><a href="#config/${kind}/${encodeURIComponent(i.name)}">${esc(i.name)}</a></td>`
-        : `<td data-label="${L.cols[n]}" class="${String(c).startsWith("Down") || c === "bad" || (L.cols[n] === "Error" && c) ? "err" : ""}">${esc(String(c))}</td>`).join("")}</tr>`;
+        : `<td data-label="${L.cols[n]}" class="${String(c).startsWith("Down") || c === "bad" || ((L.cols[n] === "Error" || L.cols[n] === "Delivery") && c && !String(c).startsWith("Working")) ? "err" : ""}">${esc(String(c))}</td>`).join("")}</tr>`;
     }).join("")}</tbody></table>` : `<p class="status">No ${KINDS[kind].toLowerCase()} yet. ${kind === "source" ? "Add a source first, then points that read from it." : kind === "point" ? "Create a source first, then add points that read from it." : `Use New ${one} to add one.`}</p>`}`;
   box.querySelector("table.dense") && makeSortable(box.querySelector("table.dense"));
   $("#csv")?.addEventListener("change", async ev => {  // check the whole file first; nothing is written until the person applies it

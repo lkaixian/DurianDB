@@ -141,7 +141,7 @@ assert len(reports()) == 2 and csv_part.get_filename() == "report.csv" and csv_p
 assert call("PUT", "/api/config/handler/sl", {"type": "slack", "url": "ftp://x"})[0] == 422
 assert call("PUT", "/api/config/handler/sl", {"type": "slack", "url": "http://127.0.0.1:9/x", "min_level": "URGENT"})[0] == 200
 sent = []
-app.outputs._put = lambda item: sent.append(item)
+app.outputs._put = lambda item, target=None: sent.append(item)
 from durian.core import Event, Level  # noqa: E402
 app.outputs.on_event(Event(point="hot", level=Level.URGENT, message="95 > 90", ts=1.0), "raised")
 assert [i[2]["text"] for i in sent if i[0] == "webhook" and "text" in i[2]] == ["[URGENT] hot: 95 > 90"], sent
@@ -150,7 +150,7 @@ assert call("PUT", "/api/config/handler/esc", {**MAIL_H, "escalate_after": 0, "e
 assert call("PUT", "/api/config/handler/esc", {**MAIL_H, "escalate_after": 5, "escalate_to": ["boss"]})[0] == 422
 assert call("PUT", "/api/config/handler/esc", {**MAIL_H, "scope": {"points": ["hot"]}, "escalate_after": 5, "escalate_to": ["boss@example.com"]})[0] == 200
 sent.clear()
-app.outputs._put = lambda item: sent.append(item)  # a config save rebuilt the outputs
+app.outputs._put = lambda item, target=None: sent.append(item)  # a config save rebuilt the outputs
 now = time.time()
 app.tick(now)
 hot = [e for e in app.open_events if e.point == "hot"]

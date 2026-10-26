@@ -140,7 +140,8 @@ class Outputs:
         self.handlers = [h for h in store.list("handler") if h.get("enabled", True)]
         self.resolve, self.setter = resolve or (lambda name: ({}, None)), setter
         self.q = queue.Queue(maxsize=1000)
-        self.failed = 0  # deliveries that did not work, for the health view
+        self.failed = 0  # every delivery that did not work, for the health view
+        self.status = {}  # target name -> {kind, failed, last_error, last_ok}; a dead route must not be invisible
         self.publishers, self.senders = [], []  # MQTT clients, and HTTP senders {url, names, headers, resend, sent}
         for p in store.list("publisher"):
             if not p.get("enabled", True):
@@ -148,10 +149,11 @@ class Outputs:
             if p.get("type") == "http":
                 try:
                     tok = json.loads(Path(p["creds"]).read_text())["token"] if p.get("creds") else None
-                except (OSError, ValueError, KeyError):
+                except (OSError, ValueError, KeyError) as ex:
                     log.warning("publisher %s not started: unreadable credentials", p["name"])
+                    self._note(p["name"], "publisher", ex)
                     continue
-                self.senders.append({"url": p["url"], "names": set(p["points"]), "resend": p.get("resend", 60), "sent": {},
+                self.senders.append({"name": p["name"], "url": p["url"], "names": set(p["points"]), "resend": p.get("resend", 60), "sent": {},
                                      "headers": {"Authorization": "Bearer " + tok} if tok else {}})
                 continue
             try:
@@ -162,6 +164,7 @@ class Outputs:
                 self.publishers.append((cl, p["prefix"], set(p["points"])))
             except Exception as ex:
                 log.warning("publisher %s not started: %s", p["name"], type(ex).__name__)
+                self._note(p["name"], "publisher", ex)
         self.worker = threading.Thread(target=self._work, daemon=True)
         self.worker.start()
 
@@ -172,7 +175,7 @@ class Outputs:
                 last = s["sent"].get(point.name)
                 if last is None or last[0] != value or now - last[1] >= s["resend"]:
                     s["sent"][point.name] = (value, now)
-                    self._put(("webhook", s["url"], {"point": point.name, "value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}, s["headers"]))
+                    self._put(("webhook", s["url"], {"point": point.name, "value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}, s["headers"]), s["name"])
         for cl, prefix, names in self.publishers:
             if "*" in names or point.name in names:
                 cl.publish(prefix + point.name, json.dumps({"value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}), qos=1)
@@ -186,11 +189,27 @@ class Outputs:
         tags, source = self.resolve(ev.point)
         return windows.covers({"scope": sc}, ev.point, tags, source)
 
-    def _put(self, item):
+    def _note(self, name, kind, ex=None, ok=False):
+        """Remember how one handler or publisher is doing, so a route that has been dead for a week is visible."""
+        st = self.status.setdefault(name, {"kind": kind, "failed": 0, "failing": 0, "last_error": None, "last_ok": None, "since": None})
+        if ok:
+            st["last_ok"], st["failing"], st["last_error"], st["since"] = time.time(), 0, None, None
+            return
+        self.failed += 1
+        st["failed"] += 1
+        st["failing"] += 1
+        st["last_error"] = f"{type(ex).__name__}: {ex}"[:300]
+        st["since"] = st["since"] or time.time()
+
+    def faults(self):
+        """Targets whose deliveries are failing right now: a route that is working again is not a fault."""
+        return [{"name": n, **st} for n, st in sorted(self.status.items()) if st["failing"]]
+
+    def _put(self, item, target=None):
         try:
-            self.q.put_nowait(item)
+            self.q.put_nowait((target, item))
         except queue.Full:
-            self.failed += 1
+            self._note(target or item[0], "output", queue.Full("the delivery queue is full"))
             log.warning("output queue full, dropping %s", item[0])
 
     def on_event(self, ev, kind):
@@ -199,20 +218,20 @@ class Outputs:
                 continue
             t = h.get("type", "webhook")
             if t == "webhook":
-                self._put(("webhook", h["url"], {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message, "ts": ev.ts, "cleared_ts": ev.cleared_ts}))
+                self._put(("webhook", h["url"], {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message, "ts": ev.ts, "cleared_ts": ev.cleared_ts}), h["name"])
             elif t == "slack" and (kind == "raised" or h.get("on_clear")):
-                self._put(("webhook", h["url"], {"text": f"{'' if kind == 'raised' else 'Back to normal: '}[{ev.level.name}] {ev.point}: {ev.message}"}))
+                self._put(("webhook", h["url"], {"text": f"{'' if kind == 'raised' else 'Back to normal: '}[{ev.level.name}] {ev.point}: {ev.message}"}), h["name"])
             elif t == "report":
                 continue  # sent on its schedule, not by alarms
             elif t == "email" and (kind == "raised" or h.get("on_clear")):
-                self._put(("mail", h, self.message(h, ev, kind)))
+                self._put(("mail", h, self.message(h, ev, kind)), h["name"])
             elif t == "setpoint" and self.setter:
                 if kind == "raised":
-                    self._put(("set", h["point"], float(h["value"]), f"handler {h['name']}"))
+                    self._put(("set", h["point"], float(h["value"]), f"handler {h['name']}"), h["name"])
                 elif "clear_value" in h:
-                    self._put(("set", h["point"], float(h["clear_value"]), f"handler {h['name']}"))
+                    self._put(("set", h["point"], float(h["clear_value"]), f"handler {h['name']}"), h["name"])
                 elif h.get("release_on_clear"):
-                    self._put(("set", h["point"], None, f"handler {h['name']}"))
+                    self._put(("set", h["point"], None, f"handler {h['name']}"), h["name"])
 
     @staticmethod
     def message(h, ev, kind):
@@ -228,13 +247,13 @@ class Outputs:
         m["From"], m["To"], m["Subject"] = h["from"], ", ".join(h["to"]), f"DurianDB report: last {hours} h"
         m.set_content(f"Summary of the last {hours} hours is attached as CSV.\n")
         m.add_attachment(csv_bytes, maintype="text", subtype="csv", filename="report.csv")
-        self._put(("mail", h, m))
+        self._put(("mail", h, m), h["name"])
 
     def escalate(self, h, ev):
         """Mail the handler's escalate_to list about an alarm nobody has acknowledged."""
         m = self.message({**h, "to": h["escalate_to"]}, ev, "raised")
         m.replace_header("Subject", "[ESCALATED] " + m["Subject"])
-        self._put(("mail", h, m))
+        self._put(("mail", h, m), h["name"])
 
     def _send_mail(self, h, m):
         s = h["smtp"]
@@ -250,7 +269,7 @@ class Outputs:
 
     def _work(self):
         while True:
-            item = self.q.get()
+            target, item = self.q.get()
             try:
                 if item[0] == "stop":
                     return
@@ -262,14 +281,17 @@ class Outputs:
                 elif item[0] == "set":
                     self.setter(*item[1:])
             except (urllib.error.URLError, OSError, ValueError, smtplib.SMTPException) as ex:
-                self.failed += 1
+                self._note(target or item[0], "output", ex)
                 log.warning("%s delivery failed: %s", item[0], type(ex).__name__)
             except Exception as ex:  # a handler bug must not stop the worker
-                self.failed += 1
+                self._note(target or item[0], "output", ex)
                 log.warning("%s delivery crashed: %s", item[0], type(ex).__name__)
+            else:
+                if target:
+                    self._note(target, "output", ok=True)
 
     def stop(self):
-        self.q.put(("stop",))
+        self.q.put((None, ("stop",)))
         for cl, _, _ in self.publishers:
             cl.loop_stop()
             cl.disconnect()

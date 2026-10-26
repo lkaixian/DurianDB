@@ -353,9 +353,11 @@ class App:
             return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp"))}
         if (method, a, b, c) == ("GET", "health", None, None):
             # The data plane's own state. A stalled loop is the one failure a console cannot otherwise see.
-            return 200, {"ok": self.tick_failures == 0, "tick_failures": self.tick_failures, "tick_error": self.tick_error,
+            faults = self.outputs.faults() if self.outputs else []
+            return 200, {"ok": self.tick_failures == 0 and not faults, "tick_failures": self.tick_failures, "tick_error": self.tick_error,
                          "tick_ok_ts": self.tick_ok_ts, "buffered_samples": len(self.pending), "lost_samples": self.lost,
-                         "unstored_events": len(self.unstored)}
+                         "unstored_events": len(self.unstored), "failed_deliveries": self.outputs.failed if self.outputs else 0,
+                         "faults": faults}
         if (method, a) == ("GET", "points") and b is None:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
         if (method, a, c) == ("GET", "points", None) and b:
@@ -497,6 +499,17 @@ class App:
             return 200, {"code": self.auth.issue_reset(b), "expires_in": 3600}
         if a == "users":
             return self.users(method, b, body, ident)
+        if (method, a, b) == ("GET", "outputs", None):
+            # Every handler and publisher with how its deliveries are going: a dead route must not be invisible.
+            st = self.outputs.status if self.outputs else {}
+            rows = []
+            for kind in ("handler", "publisher"):
+                for o in self.store.list(kind):
+                    s = st.get(o["name"], {})
+                    rows.append({"name": o["name"], "kind": kind, "type": o.get("type"), "enabled": o.get("enabled", True),
+                                 "failed": s.get("failed", 0), "last_error": s.get("last_error"), "last_ok": s.get("last_ok"),
+                                 "since": s.get("since")})
+            return 200, {"failed_deliveries": self.outputs.failed if self.outputs else 0, "targets": rows}
         if (method, a) == ("GET", "audit"):
             return 200, self.store.audit_log()
         if a == "tokens" and c is None:
