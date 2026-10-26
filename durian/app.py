@@ -4,6 +4,7 @@ The HTTP layer in server.py only translates requests into App.handle() calls.
 """
 import csv
 import datetime as dt
+import logging
 import fnmatch
 import io
 import json
@@ -25,6 +26,8 @@ from .testsource import test_source
 from .outputs import Outputs, validate_handler, validate_publisher
 from .store import ALL_ROLLUPS
 
+log = logging.getLogger("durian.app")
+
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance")
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
 
@@ -37,6 +40,7 @@ class ApiError(Exception):
 
 SYSTEM = "(system)"  # events about DurianDB itself rather than a point, visible to superadmins only
 PENDING_MAX = 200_000
+EVENT_PENDING_MAX = 5_000  # alarms waiting for a database that failed: a storm during an outage must not exhaust memory
 CONFIRM_SECONDS = 30
 TICK_ALARM_AFTER = 3  # consecutive failed polls before a (system) alarm is raised: one blip is not news
 
@@ -69,6 +73,7 @@ class App:
         self.windows = []  # maintenance windows, see windows.py
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
         self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
+        self.events_lost = 0  # alarms dropped because the database refused writes for too long; announced when it recovers
         self.tick_failures, self.tick_error, self.tick_ok_ts = 0, None, None  # the poll loop failing is otherwise invisible
         self.tick_event = None  # id of the (system) alarm that says the loop is failing
         self.reload()
@@ -108,21 +113,24 @@ class App:
         self.tick_failures, self.tick_error, self.tick_ok_ts = 0, None, ts or time.time()
         self._tick_alarm(None)
 
-    def _tick_alarm(self, error):
-        """Raise, keep, or clear the one (system) alarm that says the poll loop is failing."""
+    def _sys_alarm(self, attr, message):
+        """Raise or clear one (system) alarm, kept on `attr` (its event id). Raising again while it is up does nothing."""
         try:
-            if error is None:
-                if self.tick_event is not None:
-                    if self.tick_event > 0:
-                        self.store.clear_event(self.tick_event, time.time())
-                    self.tick_event = None
+            if message is None:
+                ev = getattr(self, attr)
+                if ev is not None:
+                    if ev > 0:
+                        self.store.clear_event(ev, time.time())
+                    setattr(self, attr, None)
                 return
-            if self.tick_event is None:
-                self.tick_event = self.store.add_event(Event(SYSTEM, Level.URGENT, f"the poll loop is failing: {error}", time.time()))
+            if getattr(self, attr) is None:
+                setattr(self, attr, self.store.add_event(Event(SYSTEM, Level.URGENT, message, time.time())))
         except Exception:
-            self.tick_event = -1  # the database is down too; the health view still carries the count and the error
-            if error is None:
-                self.tick_event = None
+            setattr(self, attr, None if message is None else -1)  # the database is down too; /api/health still says so
+
+    def _tick_alarm(self, error):
+        """Raise, keep, or clear the (system) alarm that says the poll loop is failing."""
+        self._sys_alarm("tick_event", None if error is None else f"the poll loop is failing: {error}")
 
     def _tick(self, ts):
         with self.store.lock:
@@ -131,7 +139,7 @@ class App:
             self.pending.extend((p.name, t, v, q) for s in self.engine.sources for p in s.points.values() for t, v, q in p.take_unsaved())
             self._flush_history(ts)
             new, self.engine.events = self.unstored + self.engine.events, []
-            self.unstored = []
+            self.unstored, stored = [], False
             for i, ev in enumerate(new):
                 try:
                     pts = self.points()
@@ -144,10 +152,19 @@ class App:
                         self.store.ack_event(ev.id, f"maintenance: {w['name']}", ts)
                 except Exception:  # the database is unavailable: keep the rest and try again next tick
                     self.unstored = new[i:]
+                    if len(self.unstored) > EVENT_PENDING_MAX:  # an alarm storm during an outage must not exhaust memory
+                        self.events_lost += len(self.unstored) - EVENT_PENDING_MAX
+                        del self.unstored[:len(self.unstored) - EVENT_PENDING_MAX]
+                        log.warning("dropped %d unstored alarm(s): the database has been unavailable too long", self.events_lost)
                     break
+                if not stored:
+                    stored = True
                 self.open_events.append(ev)
                 if ev.held is None:
                     self.outputs.on_event(ev, "raised")
+            if stored and self.events_lost:  # now that writes work, say what the outage cost. It cannot be said while they fail.
+                self.store.add_event(Event(SYSTEM, Level.URGENT, f"{self.events_lost} alarm(s) were dropped while the database was unavailable", ts))
+                self.events_lost = 0
             self._apply_holds(ts)
             still = []
             for ev in self.open_events:
@@ -356,7 +373,7 @@ class App:
             faults = self.outputs.faults() if self.outputs else []
             return 200, {"ok": self.tick_failures == 0 and not faults, "tick_failures": self.tick_failures, "tick_error": self.tick_error,
                          "tick_ok_ts": self.tick_ok_ts, "buffered_samples": len(self.pending), "lost_samples": self.lost,
-                         "unstored_events": len(self.unstored), "failed_deliveries": self.outputs.failed if self.outputs else 0,
+                         "unstored_events": len(self.unstored), "events_lost": self.events_lost, "failed_deliveries": self.outputs.failed if self.outputs else 0,
                          "faults": faults}
         if (method, a) == ("GET", "points") and b is None:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
