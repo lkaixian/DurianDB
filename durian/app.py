@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
-from . import pointcsv, windows
+from . import notes, pointcsv, windows
 from .config import (build_engine, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .dashboards import validate_dashboard
@@ -329,6 +329,19 @@ class App:
             return 200, {**self.point_view(p, s), "source_type": s.meta.get("type"), "source_down": s.down_reason,
                          "detectors": p.meta.get("detector_cfg", []), "hold": self.holds.get(b),
                          "maintenance": [{"name": m["name"], "mode": m["mode"]} for m in self.windows if windows.active(m, time.time()) and windows.covers(m, b, p.tags, s.name)]}
+        if a == "notes" and b and c is None and method in ("GET", "POST"):
+            p0, _s = self.visible_points(ident).get(b, (None, None))
+            if p0 is None:
+                raise ApiError(404, "unknown point")
+            if method == "GET":
+                return 200, notes.for_point(self.store, b)
+            need(user)
+            errs = notes.validate(body)
+            if errs:
+                raise ApiError(422, "validation failed", errs)
+            n = notes.add(self.store, b, body["text"], ident["name"])
+            self.store.audit(ident["name"], "note.add", b)
+            return 201, n
         if (method, a, b) == ("GET", "reports", "summary"):
             return self.report_summary(ident, query)
         if (method, a, c) == ("POST", "points", "set"):

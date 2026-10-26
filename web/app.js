@@ -282,6 +282,9 @@ async function viewPoint(name) {
         <div id="pd-chart" class="status">Loading trend...</div></section>
       <section aria-labelledby="pd-a"><h3 id="pd-a">Alarms on this point</h3><div id="pd-alarms" class="status" data-live>Loading alarms...</div></section>
       <section id="pd-control-box" aria-labelledby="pd-c" hidden><h3 id="pd-c">Set the value</h3><div id="pd-control"></div></section>
+      <section aria-labelledby="pd-n"><h3 id="pd-n">Operator notes</h3>
+        <div id="pd-notes" class="status" data-live>Loading notes...</div>
+        <form id="pd-note-f" class="row" hidden><label>Add a note <input name="text" maxlength="2000" required autocomplete="off" placeholder="What the next shift should know"></label><button type="submit">Add</button><small class="fe" id="pd-note-e" role="alert"></small></form></section>
       <section aria-labelledby="pd-s"><h3 id="pd-s">Settings</h3><div id="pd-settings" class="status">Loading...</div></section>
     </div>`;
   const when = t => t == null ? "never" : fmt(t);
@@ -323,6 +326,7 @@ async function viewPoint(name) {
       <dt>Engineering range</dt><dd>${p.eu.low == null && p.eu.high == null ? "not set" : `${p.eu.low ?? "any"} to ${p.eu.high ?? "any"}${p.unit ? " " + esc(p.unit) : ""}`}</dd>
       <dt>Decimals shown</dt><dd>${p.decimals ?? "as received"}</dd></dl>
       ${isAdmin() ? `<p><a class="btn" href="#config/point/${q}">Edit settings</a></p>` : ""}`;
+    await drawNotes();
     const evs = await api("GET", `/api/events?point=${q}`);
     $("#pd-alarms").className = evs.length ? "" : "status";
     $("#pd-alarms").innerHTML = evs.length ? alarmTableHtml(evs.slice(0, 20), false) : "No alarms recorded for this point.";
@@ -333,6 +337,19 @@ async function viewPoint(name) {
     if (current?.datatype === "text") { box.textContent = "A text point has no trend. Its changes are in History export."; return; }
     await WIDGETS.chart.render(box, {type: "chart", title: "Average, last " + $("#pd-hours").selectedOptions[0].text, points: [name], window: win, rollup: "avg"}, {points: current ? {[name]: current} : {}});
   };
+  async function drawNotes() {
+    const ns = await api("GET", `/api/notes/${q}`), box = $("#pd-notes");
+    $("#pd-note-f").hidden = !isUser();
+    box.className = ns.length ? "" : "status";
+    box.innerHTML = ns.length ? `<ul class="list">${ns.map(n => `<li><p>${esc(n.text)}</p><p class="note">${esc(n.user)} at ${fmt(n.ts)}</p></li>`).join("")}</ul>`
+      : "No notes yet. Anything a shift writes here stays with the point, visible to everyone who can see it.";
+  }
+  $("#pd-note-f").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const out = $("#pd-note-e"), text = ev.target.text.value;
+    try { await api("POST", `/api/notes/${q}`, {text}); ev.target.reset(); out.textContent = ""; await drawNotes(); }
+    catch (e) { out.textContent = (e.errors || []).map(x => x.message).join(". ") || e.message; }
+  });
   bindAlarmActions($("#pd-alarms"), refresh);
   bindSetForms($("#pd-control"));
   $("#pd-hours").addEventListener("change", () => chart().catch(e => showErr(e, $("#pd-chart"))));
