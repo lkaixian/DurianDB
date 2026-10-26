@@ -1019,8 +1019,19 @@ class App:
                 raise ApiError(422, "validation failed", errs)
             old = self.store.get(kind, name)
             self.store.put(kind, name, body)
+            try:
+                self.load_windows() if kind == "maintenance" else self.reload()  # a window changes no engine object, so open alarms are left alone
+            except Exception as ex:  # a config the server cannot run must not be left stored
+                if old is None:
+                    self.store.delete(kind, name)
+                else:
+                    self.store.put(kind, name, old)
+                try:
+                    self.reload()
+                except Exception:
+                    log.exception("reload failed after rolling back %s/%s", kind, name)
+                raise ApiError(409, f"{kind} '{name}' was not saved: it could not be started ({type(ex).__name__}: {ex}). The previous version is still in place.")
             self.store.audit(ident["name"], "config.put", f"{kind}/{name}" + _diff(old, body))
-            self.load_windows() if kind == "maintenance" else self.reload()  # a window changes no engine object, so open alarms are left alone
             return 200, {"saved": name}
         if method == "DELETE":
             if kind == "source" and any(p.get("source") == name for p in self.store.list("point")):

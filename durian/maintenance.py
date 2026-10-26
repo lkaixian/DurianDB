@@ -177,22 +177,23 @@ class Maintenance:
             return errors, None
         summary = {k: {"created": 0, "updated": 0, "unchanged": 0, "deleted": 0} for k in KINDS}
         order = ("source", "point", "handler", "publisher", "watchlist", "maintenance", "dashboard")
-        for kind in order:
-            for name, body in objs.get(kind, {}).items():
-                if kind == "dashboard":
-                    body = {**body, "owner": body.get("owner", owner)}
-                have = self.store.get(kind, name)
-                summary[kind]["unchanged" if have == body else "updated" if have is not None else "created"] += 1
-                if not dry_run and have != body:
-                    self.store.put(kind, name, body)
-        if mode == "replace":
-            for kind in reversed(order):  # points before the sources they belong to
-                keep = set(objs.get(kind, {}))
-                for o in self.store.list(kind):
-                    if o["name"] not in keep:
-                        summary[kind]["deleted"] += 1
-                        if not dry_run:
-                            self.store.delete(kind, o["name"])
+        with self.store.atomic():  # a failure halfway leaves the stored configuration exactly as it was
+            for kind in order:
+                for name, body in objs.get(kind, {}).items():
+                    if kind == "dashboard":
+                        body = {**body, "owner": body.get("owner", owner)}
+                    have = self.store.get(kind, name)
+                    summary[kind]["unchanged" if have == body else "updated" if have is not None else "created"] += 1
+                    if not dry_run and have != body:
+                        self.store.put(kind, name, body)
+            if mode == "replace":
+                for kind in reversed(order):  # points before the sources they belong to
+                    keep = set(objs.get(kind, {}))
+                    for o in self.store.list(kind):
+                        if o["name"] not in keep:
+                            summary[kind]["deleted"] += 1
+                            if not dry_run:
+                                self.store.delete(kind, o["name"])
         return [], summary
 
     # ---- history as CSV

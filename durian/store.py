@@ -9,6 +9,7 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 import urllib.parse
 from pathlib import Path
 
@@ -25,6 +26,7 @@ TYPES = {
 class Store:
     def __init__(self, url=":memory:"):
         self.url, self.lock = url, threading.RLock()  # the lock also guards the engine's runtime objects, see app
+        self._tx = 0  # depth of an enclosing atomic() block; run() does not commit inside one
         if url.startswith("mysql://"):
             self.kind = "mysql"
             u = urllib.parse.urlparse(url)
@@ -78,8 +80,26 @@ class Store:
     def run(self, sql, args=()):
         with self.lock:
             cur = self._exec(sql, args)
-            self.db.commit()
+            if not self._tx:
+                self.db.commit()
             return cur
+
+    @contextmanager
+    def atomic(self):
+        """Everything written inside is one transaction: a failure halfway undoes all of it. Nests safely."""
+        with self.lock:
+            self._tx += 1
+            try:
+                yield
+            except BaseException:
+                self._tx = 0
+                self.db.rollback()
+                raise
+            finally:
+                self._tx -= 1
+                if self._tx <= 0:
+                    self._tx = 0
+                    self.db.commit()
 
     def many(self, sql, rows):
         with self.lock:
@@ -93,7 +113,8 @@ class Store:
                     raise
             else:
                 self.db.executemany(sql, rows)
-            self.db.commit()
+            if not self._tx:
+                self.db.commit()
 
     def close(self):
         with self.lock:
