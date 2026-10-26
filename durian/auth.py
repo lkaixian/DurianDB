@@ -108,6 +108,7 @@ class Auth:
             raise AuthError("too many failed attempts, try again later", 429)
         user = self.store.user(name) if isinstance(name, str) else None
         ok = verify_password(pw if isinstance(pw, str) else "", user["hash"] if user else self._dummy) and user
+        ok = ok and not user.get("disabled")  # the same message as a wrong password: a disabled account is not advertised
         if ok and user.get("totp"):
             if code is None:  # right password: ask for the second factor without counting it as a failure
                 raise AuthError("authentication code required")
@@ -145,6 +146,10 @@ class Auth:
         self.resets.pop(name)
         self.failures.pop(key, None)
         self.failures.pop(name, None)
+        self.end_sessions(name)
+
+    def end_sessions(self, name):
+        """Sign a person out everywhere: used on a password reset and when an administrator disables the account."""
         for t in [t for t, (u, _) in self.sessions.items() if u == name]:
             del self.sessions[t]
 
@@ -170,7 +175,7 @@ class Auth:
         if not row or row["disabled"] or (row["expires"] and row["expires"] < time.time()):
             return None
         user = self.store.user(row["owner"])
-        if not user:
+        if not user or user.get("disabled"):  # a disabled account's tokens stop working at once
             return None
         if time.time() - (row["last_used"] or 0) > 60:  # at most one write a minute per token
             self.store.touch_token(row["id"], time.time())
@@ -181,7 +186,7 @@ class Auth:
         name, exp = self.sessions.get(token, (None, 0))
         if name and exp > time.time():
             user = self.store.user(name)
-            if user:
+            if user and not user.get("disabled"):
                 return {"name": name, "roles": held(user["roles"])}
         self.sessions.pop(token, None)
         return {"name": None, "roles": {"anonymous"}}

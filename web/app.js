@@ -707,13 +707,21 @@ async function viewUsers() {
   const load = async () => {
     const us = await api("GET", "/api/users");
     $("#ul").className = "";
-    $("#ul").innerHTML = `<table class="stack"><thead><tr><th>Name</th><th>Roles</th><th><span class="sr">Action</span></th></tr></thead><tbody>${us.map(u => `<tr><td data-label="Name">${esc(u.name)}</td><td data-label="Roles">${esc(u.roles.join(", "))}${u.mfa ? " (2FA)" : ""}</td><td>${u.name !== me.name ? `<button data-rst="${esc(u.name)}">Reset password</button> ` : ""}${u.mfa && u.name !== me.name ? `<button data-mfa="${esc(u.name)}" data-roles="${esc(u.roles.join(","))}" aria-label="Reset two-factor for ${esc(u.name)}">Reset 2FA</button> ` : ""}${u.name === me.name ? "" : `<button data-del="${esc(u.name)}" aria-label="Delete user ${esc(u.name)}">Delete</button>`}</td></tr>`).join("")}</tbody></table>`;
+    $("#ul").innerHTML = `<table class="stack"><thead><tr><th>Name</th><th>Roles</th><th><span class="sr">Action</span></th></tr></thead><tbody>${us.map(u => `<tr><td data-label="Name">${esc(u.name)}</td><td data-label="Roles">${esc(u.roles.join(", "))}${u.mfa ? " (2FA)" : ""}${u.disabled ? " (disabled)" : ""}</td><td>${u.name !== me.name ? `<button data-rst="${esc(u.name)}">Reset password</button> ` : ""}${u.name !== me.name ? `<button data-dis="${esc(u.name)}" data-roles="${esc(u.roles.join(","))}" data-off="${u.disabled ? "1" : ""}">${u.disabled ? "Enable" : "Disable"}</button> ` : ""}${u.mfa && u.name !== me.name ? `<button data-mfa="${esc(u.name)}" data-roles="${esc(u.roles.join(","))}" aria-label="Reset two-factor for ${esc(u.name)}">Reset 2FA</button> ` : ""}${u.name === me.name ? "" : `<button data-del="${esc(u.name)}" aria-label="Delete user ${esc(u.name)}">Delete</button>`}</td></tr>`).join("")}</tbody></table>`;
   };
   $("#ul").addEventListener("click", async ev => {
     const r = ev.target.dataset.rst;
     if (r && confirm(`Make a one-time reset code for "${r}"? Give it to them in person or by phone; it works once for an hour.`)) {
       try { const x = await api("POST", `/api/users/${encodeURIComponent(r)}/reset`, {}); $("#um").className = ""; $("#um").textContent = `Reset code for ${r}: ${x.code} (they enter it under "Forgot your password?" on the sign-in page)`; }
       catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; }
+    }
+    const g = ev.target.dataset.dis;
+    if (g) {
+      const off = ev.target.dataset.off === "1";
+      if (confirm(`${off ? "Enable" : "Disable"} the account "${g}"?${off ? "" : " It is signed out at once and its API tokens stop working."}`)) {
+        try { await api("PUT", `/api/users/${encodeURIComponent(g)}`, {roles: ev.target.dataset.roles.split(","), disabled: !off}); await load(); }
+        catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; }
+      }
     }
     const m = ev.target.dataset.mfa;
     if (m && confirm(`Turn off two-factor sign-in for "${m}"?`)) { try { await api("PUT", `/api/users/${encodeURIComponent(m)}`, {roles: ev.target.dataset.roles.split(","), reset_mfa: true}); await load(); } catch (e) { $("#um").className = "err"; $("#um").textContent = e.message; } }

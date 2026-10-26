@@ -973,6 +973,13 @@ class App:
                 if body.get("reset_mfa"):  # lost phone: the admin clears the second factor
                     self.store.run("update users set totp=null where name=?", (name,))
                     self.store.audit(ident["name"], "mfa.reset", name)
+                if isinstance(body.get("disabled"), bool):  # an account that must stop working now, e.g. someone who left
+                    if body["disabled"] and name == ident["name"]:
+                        raise ApiError(409, "you cannot disable your own account")
+                    self.store.set_disabled(name, body["disabled"])
+                    if body["disabled"]:
+                        self.auth.end_sessions(name)
+                    self.store.audit(ident["name"], "user.disabled" if body["disabled"] else "user.enabled", name)
                 self.store.run("update users set roles=? where name=?", (json.dumps(roles), name))
             else:
                 try:

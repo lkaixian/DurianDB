@@ -247,7 +247,11 @@ class Store:
         return {**r[0], "roles": json.loads(r[0]["roles"])} if r else None
 
     def users(self):
-        return [{"name": u["name"], "roles": json.loads(u["roles"]), "mfa": bool(u["totp"])} for u in self.q("select * from users order by name")]
+        return [{"name": u["name"], "roles": json.loads(u["roles"]), "mfa": bool(u["totp"]), "disabled": bool(u["disabled"])}
+                for u in self.q("select * from users order by name")]
+
+    def set_disabled(self, name, disabled):
+        return self.run("update users set disabled=? where name=?", (1 if disabled else 0, name)).rowcount
 
     def delete_user(self, name):
         return self.run("delete from users where name=?", (name,)).rowcount
