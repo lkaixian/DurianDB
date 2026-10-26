@@ -10,7 +10,9 @@ What it does: collects values from data sources (a virtual generator, MQTT over 
 python -m durian.server            # http://127.0.0.1:8765
 ```
 
-First run prints the generated `admin` password once. Set `DURIAN_ADMIN_PASSWORD` to choose it. Other settings: `DURIAN_DB`, `DURIAN_PORT`, `DURIAN_TICK` (seconds between polls), `DURIAN_MQTT_CREDS`.
+First run prints the generated `admin` password once. Set `DURIAN_ADMIN_PASSWORD` to choose it. Other settings: `DURIAN_DB`, `DURIAN_PORT`, `DURIAN_HOST`, `DURIAN_TLS_CERT` and `DURIAN_TLS_KEY`, `DURIAN_TICK` (seconds between polls), `DURIAN_MQTT_CREDS`.
+
+**Reaching it from another machine.** It listens on `127.0.0.1` only. To open it on the network, give it a certificate: `python tools/make_cert.py plant-pc.local` writes `tools/cert.pem` and `cert.key`, then `DURIAN_HOST=0.0.0.0 DURIAN_TLS_CERT=tools/cert.pem DURIAN_TLS_KEY=tools/cert.key python -m durian.server` serves HTTPS only (TLS 1.2 or newer), sends HSTS, and marks the session cookie `Secure`. Without a certificate it refuses to start on any other address rather than put a password on the network in clear. A self-signed certificate has to be trusted by the browser, or replaced with one from a certificate authority.
 
 MQTT lab (isolated TLS broker on port 18883, does not touch any broker already running):
 
@@ -46,7 +48,7 @@ python tools/sim_publisher.py       # sends durian/mqtt-temp and durian/mqtt-flo
 
 ## Security notes
 
-Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every state-changing request needs an `X-Requested-With` header. Five failed logins lock a name for five minutes. The page uses a strict Content-Security-Policy with no inline script or style. MQTT clients always verify the server certificate and hostname. Webhooks do not follow redirects. Object permissions are role lists that default to `user`, with `superadmin` always allowed. The server speaks plain HTTP on 127.0.0.1 only. Put it behind HTTPS before exposing it anywhere else.
+Passwords use scrypt. Sessions are HttpOnly, SameSite=Strict cookies, and every state-changing request needs an `X-Requested-With` header. Five failed logins lock a name for five minutes. The page uses a strict Content-Security-Policy with no inline script or style. MQTT clients always verify the server certificate and hostname. Webhooks do not follow redirects. Object permissions are role lists that default to `user`, with `superadmin` always allowed. The server speaks plain HTTP on 127.0.0.1 only; on any other address it serves HTTPS with a certificate you supply, and will not start without one.
 
 ## Node-RED and other systems
 

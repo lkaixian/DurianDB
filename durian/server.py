@@ -1,12 +1,15 @@
 ﻿"""HTTP shell around durian.app. Run: python -m durian.server
 
 Cookies are HttpOnly and SameSite=Strict, and every state-changing request must carry
-X-Requested-With: durian (CSRF). Serve behind HTTPS if it is ever reachable beyond this machine.
+X-Requested-With: durian (CSRF). It listens on 127.0.0.1 only. To reach it from another machine, set
+DURIAN_HOST=0.0.0.0 and DURIAN_TLS_CERT/DURIAN_TLS_KEY to a certificate and key; the server then serves
+HTTPS only and sends HSTS. Plain HTTP off localhost is refused, so a password never crosses the network in clear.
 """
 import json
 import logging
 import os
 import re
+import ssl
 import threading
 import time
 from http.cookies import SimpleCookie
@@ -30,6 +33,12 @@ COOKIE = "durian_session"
 MAX_BODY, MAX_IMPORT = 1_000_000, 5_000_000
 log = logging.getLogger("durian")
 app: App = None
+TLS = False  # set by main() when the server is given a certificate; the session cookie is then marked Secure
+
+
+def session_cookie(token, max_age):
+    """The session cookie. Secure under HTTPS, so a browser never returns it over plain HTTP."""
+    return f"{COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}" + ("; Secure" if TLS else "")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -44,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         for k, v in (("Content-Type", ctype), ("Content-Length", str(len(data))), ("X-Content-Type-Options", "nosniff"),
                      ("Content-Security-Policy", CSP), ("Referrer-Policy", "no-referrer"), ("X-Frame-Options", "DENY"),
-                     ("Cache-Control", "no-store"), *extra):
+                     ("Cache-Control", "no-store"), *([("Strict-Transport-Security", "max-age=31536000")] if TLS else []), *extra):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
@@ -87,14 +96,14 @@ class Handler(BaseHTTPRequestHandler):
             if (method, url.path) == ("POST", "/api/login"):
                 token = app.login(body)
                 ident = app.auth.identity(token)
-                cookie = f"{COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={app.auth.ttl}"
+                cookie = session_cookie(token, app.auth.ttl)
                 return self.send(200, {"name": ident["name"], "roles": sorted(ident["roles"])}, extra=[("Set-Cookie", cookie)])
             if (method, url.path) == ("POST", "/api/reset"):
                 app.reset_password(body)
                 return self.send(200, {"ok": True})
             if (method, url.path) == ("POST", "/api/logout"):
                 app.auth.logout(self.token())
-                return self.send(200, {"ok": True}, extra=[("Set-Cookie", f"{COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")])
+                return self.send(200, {"ok": True}, extra=[("Set-Cookie", session_cookie("", 0))])
             query = {k: v[0] for k, v in parse_qs(url.query).items()}
             if bearer:  # a presented token is used or refused, never silently replaced by a cookie session
                 ident = app.auth.token_identity(bearer)
@@ -142,8 +151,13 @@ def run_maintenance():
 
 
 def main():
-    global app
+    global app, TLS
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    host = os.environ.get("DURIAN_HOST", "127.0.0.1")
+    cert, key = os.environ.get("DURIAN_TLS_CERT"), os.environ.get("DURIAN_TLS_KEY")
+    if cert and not key:
+        raise SystemExit("DURIAN_TLS_CERT needs DURIAN_TLS_KEY")
+    TLS = bool(cert)
     store = Store(os.environ.get("DURIAN_DB", str(ROOT / "durian.db")))
     seeded = seed(store, os.environ.get("DURIAN_MQTT_CREDS", ROOT / "lab" / "mqtt" / "creds.json"))
     app = App(store, ROOT / "backups")
@@ -155,8 +169,18 @@ def main():
     threading.Thread(target=run_ticks, args=(float(os.environ.get("DURIAN_TICK", 2)),), daemon=True).start()
     threading.Thread(target=run_maintenance, daemon=True).start()
     port = int(os.environ.get("DURIAN_PORT", 8765))
-    print(f"DurianDB on http://127.0.0.1:{port}")
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    scheme = "http"
+    if cert:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(cert, key)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        scheme = "https"
+    elif host not in ("127.0.0.1", "::1", "localhost"):
+        raise SystemExit(f"Refusing to serve plain HTTP on {host}: set DURIAN_TLS_CERT and DURIAN_TLS_KEY, or use 127.0.0.1.")
+    print(f"DurianDB on {scheme}://{host}:{port}")
+    httpd.serve_forever()
 
 
 if __name__ == "__main__":

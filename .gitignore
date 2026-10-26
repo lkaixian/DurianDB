@@ -1,5 +1,7 @@
 ﻿__pycache__/
 durian.db
+durian.db-shm
+durian.db-wal
 *.crdownload
 app/
 app-en/
@@ -8,3 +10,6 @@ app-en.zip
 lab/
 docs/research/observed/raw/admin/
 backups/
+.claude/settings.local.json
+tools/cert.pem
+tools/cert.key
