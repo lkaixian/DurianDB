@@ -38,6 +38,7 @@ class ApiError(Exception):
 SYSTEM = "(system)"  # events about DurianDB itself rather than a point, visible to superadmins only
 PENDING_MAX = 200_000
 CONFIRM_SECONDS = 30
+TICK_ALARM_AFTER = 3  # consecutive failed polls before a (system) alarm is raised: one blip is not news
 
 
 
@@ -68,6 +69,8 @@ class App:
         self.windows = []  # maintenance windows, see windows.py
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
         self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
+        self.tick_failures, self.tick_error, self.tick_ok_ts = 0, None, None  # the poll loop failing is otherwise invisible
+        self.tick_event = None  # id of the (system) alarm that says the loop is failing
         self.reload()
 
     # ---- runtime
@@ -92,6 +95,36 @@ class App:
                 p.in_service = self.holds.get(name, {}).get("kind") != "oos"
 
     def tick(self, ts=None):
+        """One poll of every source, then store what it produced. Failures are counted: after three in a row the
+        engine is not running at all, and that must reach an operator instead of staying in the log."""
+        try:
+            self._tick(ts)
+        except Exception as e:
+            self.tick_error = f"{type(e).__name__}: {e}"
+            self.tick_failures += 1
+            if self.tick_failures >= TICK_ALARM_AFTER:
+                self._tick_alarm(self.tick_error)
+            raise
+        self.tick_failures, self.tick_error, self.tick_ok_ts = 0, None, ts or time.time()
+        self._tick_alarm(None)
+
+    def _tick_alarm(self, error):
+        """Raise, keep, or clear the one (system) alarm that says the poll loop is failing."""
+        try:
+            if error is None:
+                if self.tick_event is not None:
+                    if self.tick_event > 0:
+                        self.store.clear_event(self.tick_event, time.time())
+                    self.tick_event = None
+                return
+            if self.tick_event is None:
+                self.tick_event = self.store.add_event(Event(SYSTEM, Level.URGENT, f"the poll loop is failing: {error}", time.time()))
+        except Exception:
+            self.tick_event = -1  # the database is down too; the health view still carries the count and the error
+            if error is None:
+                self.tick_event = None
+
+    def _tick(self, ts):
         with self.store.lock:
             ts = ts or time.time()
             self.engine.tick(ts)
@@ -319,7 +352,10 @@ class App:
         if (method, a, b, c) == ("GET", "me", None, None):
             return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp"))}
         if (method, a, b, c) == ("GET", "health", None, None):
-            return 200, {"ok": True}
+            # The data plane's own state. A stalled loop is the one failure a console cannot otherwise see.
+            return 200, {"ok": self.tick_failures == 0, "tick_failures": self.tick_failures, "tick_error": self.tick_error,
+                         "tick_ok_ts": self.tick_ok_ts, "buffered_samples": len(self.pending), "lost_samples": self.lost,
+                         "unstored_events": len(self.unstored)}
         if (method, a) == ("GET", "points") and b is None:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
         if (method, a, c) == ("GET", "points", None) and b:
