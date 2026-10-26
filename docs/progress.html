@@ -1,0 +1,547 @@
+<title>DurianDB Progress History</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout: one reading column; two chart cards side by side on desktop, stacked on a phone.
+     Palette from DESIGN.md: cool grey surfaces, slate ink, one rust accent for what needs a decision. */
+  :root {
+    --bg: #f2f4f7;
+    --surface: #ffffff;
+    --surface-sunk: #eaedf2;
+    --ink: #1a2430;
+    --muted: #4b5766;
+    --faint: #7b8796;
+    --line: #d3d9e1;
+    --line-soft: #e3e7ed;
+    --accent: #9a3b00;
+    --accent-wash: #f7e9e1;
+    --good: #1f6b45;
+    --good-wash: #e4f0e9;
+    --warn: #7a5a00;
+    --warn-wash: #f6eed8;
+    --bar: #1f2a37;
+    --bar-ink: #eef2f6;
+    --chart-series: #1a2430;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14181d;
+      --surface: #1b2128;
+      --surface-sunk: #10151a;
+      --ink: #e6eaef;
+      --muted: #a0abb8;
+      --faint: #7e8b99;
+      --line: #2d3742;
+      --line-soft: #242d37;
+      --accent: #ff9a5c;
+      --accent-wash: #3a2418;
+      --good: #6fcf9a;
+      --good-wash: #17301f;
+      --warn: #e0bd6a;
+      --warn-wash: #342a12;
+      --bar: #0e1217;
+      --bar-ink: #e6eaef;
+      --chart-series: #e6eaef;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14181d;
+    --surface: #1b2128;
+    --surface-sunk: #10151a;
+    --ink: #e6eaef;
+    --muted: #a0abb8;
+    --faint: #7e8b99;
+    --line: #2d3742;
+    --line-soft: #242d37;
+    --accent: #ff9a5c;
+    --accent-wash: #3a2418;
+    --good: #6fcf9a;
+    --good-wash: #17301f;
+    --warn: #e0bd6a;
+    --warn-wash: #342a12;
+    --bar: #0e1217;
+    --bar-ink: #e6eaef;
+    --chart-series: #e6eaef;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 0 56px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+
+  .topbar {
+    background: var(--bar);
+    color: var(--bar-ink);
+    margin-inline: calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .topbar-inner {
+    max-width: 960px; margin: 0 auto; padding-block: 14px;
+    display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: baseline;
+  }
+  .topbar .brand { font-weight: 650; letter-spacing: .01em; }
+  .topbar .sub { font-size: 13px; opacity: .72; }
+  .topbar .spacer { flex: 1 1 40px; }
+  .topbar a { color: inherit; text-decoration: none; border-bottom: 1px solid currentColor; font-size: 13px; }
+  .topbar a:hover { opacity: .75; }
+
+  header.page { padding-block: 34px 6px; }
+  h1 {
+    font-size: clamp(25px, 4.4vw, 33px);
+    line-height: 1.15;
+    letter-spacing: -.015em;
+    margin: 0 0 8px;
+    text-wrap: balance;
+    font-weight: 660;
+  }
+  .lede { color: var(--muted); max-width: 62ch; margin: 0; }
+
+  h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    font-weight: 640;
+    margin: 0 0 12px;
+  }
+  section { margin-top: 38px; }
+
+  .figures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 26px;
+  }
+  .fig { background: var(--surface); padding: 13px 15px 14px; }
+  .fig .k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); }
+  .fig .v { font-size: 23px; font-weight: 620; font-variant-numeric: tabular-nums; letter-spacing: -.02em; margin-top: 3px; }
+  .fig .n { font-size: 12px; color: var(--muted); }
+
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .charts { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px 16px 10px;
+    min-width: 0;
+  }
+  .card h3 { font-size: 14px; margin: 0; font-weight: 620; }
+  .card .summary { font-size: 12px; color: var(--muted); margin: 2px 0 6px; font-variant-numeric: tabular-nums; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 18px; height: 0; border-top: 2px solid var(--chart-series); display: inline-block; }
+  .swatch.dashed { border-top-style: dashed; }
+  .chart-wrap { position: relative; }
+  svg.chart { display: block; width: 100%; height: auto; max-width: 460px; overflow: visible; }
+  svg.chart text { font-family: var(--sans); font-size: 11px; fill: var(--faint); font-variant-numeric: tabular-nums; }
+  svg.chart .grid { stroke: var(--line-soft); stroke-width: 1; }
+  svg.chart .axis { stroke: var(--line); stroke-width: 1; }
+  .tip {
+    position: absolute; pointer-events: none; z-index: 5;
+    background: var(--bar); color: var(--bar-ink);
+    border-radius: 3px; padding: 6px 9px;
+    font-size: 11px; line-height: 1.5; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    transform: translate(-50%, -100%);
+    opacity: 0; transition: opacity .08s;
+  }
+  .tip.on { opacity: 1; }
+  .tip b { font-weight: 640; }
+  @media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); font-weight: 620; background: var(--surface-sunk); }
+  td.num, th.num { text-align: right; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.dim td { color: var(--faint); }
+  tbody tr.today td { font-weight: 600; }
+  td.name { white-space: normal; min-width: 180px; }
+
+  .note {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-wash);
+    padding: 12px 15px;
+    border-radius: 0 3px 3px 0;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .note p { margin: 0; }
+  .note p + p { margin-top: 8px; }
+
+  ol.steps { margin: 0; padding-left: 0; list-style: none; counter-reset: step; display: grid; gap: 10px; }
+  ol.steps li { counter-increment: step; display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: baseline; }
+  ol.steps li::before {
+    content: counter(step);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    width: 22px; height: 22px;
+    display: grid; place-items: center;
+    grid-row: 1;
+  }
+  ol.steps .body { grid-column: 2; }
+  ol.steps strong { font-weight: 620; }
+
+  ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 7px; }
+  ul.plain li::marker { color: var(--faint); }
+
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    border: 1px solid transparent;
+    font-weight: 600;
+    letter-spacing: .01em;
+  }
+  .pill.done { background: var(--good-wash); color: var(--good); border-color: var(--good); }
+  .pill.part { background: var(--warn-wash); color: var(--warn); border-color: var(--warn); }
+  .pill.none { background: var(--surface-sunk); color: var(--muted); border-color: var(--line); }
+
+  code {
+    font-family: var(--mono);
+    font-size: .9em;
+    background: var(--surface-sunk);
+    padding: 1px 4px;
+    border-radius: 2px;
+  }
+  .meta { color: var(--muted); font-size: 13px; }
+  footer {
+    margin-top: 46px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+  }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">DurianDB</span>
+    <span class="sub">SCADA reference · progress history</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/lkaixian/DurianDB">repository</a>
+  </div>
+</div>
+
+<div class="wrap">
+  <header class="page">
+    <h1>Nine days, two bursts, and what they built</h1>
+    <p class="lede">Every figure on this page is recomputed from the repository at the last commit of each UTC
+      day, the same way a daily build report would count it. Where a day shows no change, the tree genuinely
+      did not change.</p>
+  </header>
+
+  <div class="figures">
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">5,153</div><div class="n">lines, 25 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">2,877</div><div class="n">lines, 31 suites, all passing</div></div>
+    <div class="fig"><div class="k">Commits</div><div class="v">99</div><div class="n">across 9 calendar days</div></div>
+    <div class="fig"><div class="k">Open debt</div><div class="v">48</div><div class="n">entries, 14 high severity</div></div>
+  </div>
+
+  <section>
+    <h2>Growth over time</h2>
+    <div class="charts">
+      <div class="card">
+        <h3>Code in the tree</h3>
+        <div class="summary">Server 5,153 lines · tests 2,877 lines</div>
+        <div class="legend">
+          <span><i class="swatch"></i>server</span>
+          <span><i class="swatch dashed"></i>tests</span>
+        </div>
+        <div class="chart-wrap" id="wrap-code"></div>
+      </div>
+      <div class="card">
+        <h3>Test suites</h3>
+        <div class="summary">31 suites · one process each, <code>run_all.py</code></div>
+        <div class="chart-wrap" id="wrap-suites"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Daily history</h2>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date (UTC)</th>
+            <th class="num">Commits</th>
+            <th class="num">Modules</th>
+            <th class="num">Test suites</th>
+            <th class="num">Server lines</th>
+            <th class="num">Test lines</th>
+          </tr>
+        </thead>
+        <tbody id="history"></tbody>
+      </table>
+    </div>
+    <p class="meta" style="margin:9px 0 0">Cumulative counts at the last commit of the day. Module and line
+      counts cover <code>durian/*.py</code> only; suites cover <code>tests/test_*.py</code>.</p>
+  </section>
+
+  <section>
+    <h2>What the two bursts produced</h2>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Area</th><th>Built</th><th>Verified by</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="name">Data in</td><td class="name">Virtual, MQTT over TLS, Modbus TCP/RTU/ASCII, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens</td><td class="name"><code>test_modbus*</code>, <code>test_pull_sources</code>, <code>test_ingest</code></td></tr>
+          <tr><td class="name">Data model</td><td class="name">Numeric and text points, engineering range, units, decimals, binary and multistate labels, folders, tags, descriptions</td><td class="name"><code>test_app</code>, <code>test_text_points</code></td></tr>
+          <tr><td class="name">Quality and time</td><td class="name">GOOD / UNCERTAIN / BAD per value, source timestamps, future-clock and stale rules, out-of-order drop</td><td class="name"><code>test_quality</code></td></tr>
+          <tr><td class="name">Alarms</td><td class="name">11 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all</td><td class="name"><code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
+          <tr><td class="name">Control</td><td class="name">Permissioned writes, engineering limits, max step, two-step confirm, reason required, audit with old and new value</td><td class="name"><code>test_safe_control</code></td></tr>
+          <tr><td class="name">Outbound</td><td class="name">Webhook, email, Slack, escalation, set-point handler, scheduled reports, MQTT publisher, HTTP sender</td><td class="name"><code>test_handlers</code>, <code>test_http_sender</code></td></tr>
+          <tr><td class="name">HMI</td><td class="name">Overview, point page with trend and logbook, history comparison, dashboards with 9 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>; 11 browser scripts</td></tr>
+          <tr><td class="name">Accounts</td><td class="name">scrypt passwords, sessions, role inheritance, lockout, TOTP second factor, reset by one-time code, account disable, offline admin reset, scoped machine tokens</td><td class="name"><code>test_auth</code>, <code>test_mfa</code>, <code>test_disabled</code>, <code>test_reset</code></td></tr>
+          <tr><td class="name">Storage</td><td class="name">SQLite or MySQL/MariaDB, versioned migrations, eight rollups, retention, backups, buffered writes with a system alarm</td><td class="name"><code>test_store</code>, <code>test_series</code>, <code>test_maintenance</code></td></tr>
+          <tr><td class="name">Transport</td><td class="name">TLS 1.2+ with HSTS and Secure cookies when a certificate is given; plain HTTP refuses any non-local address</td><td class="name"><code>test_tls</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Security, in the order it was built</h2>
+    <ol class="steps">
+      <li><span class="body"><strong>Sign-in foundation.</strong> scrypt password hashing, HttpOnly + SameSite=Strict
+        session cookies, an <code>X-Requested-With</code> header required on every write, and a strict
+        Content-Security-Policy with no inline script or style.</span></li>
+      <li><span class="body"><strong>Least privilege.</strong> Role lists per object type with
+        <code>superadmin</code> always allowed, and machine tokens scoped to named points and actions.</span></li>
+      <li><span class="body"><strong>Brute force and audit.</strong> Five failed logins lock a name. Failed
+        sign-ins and lockouts of real accounts are audited; made-up names are not, so an outsider cannot fill
+        the audit trail.</span></li>
+      <li><span class="body"><strong>Outbound trust.</strong> MQTT verifies the broker certificate and hostname,
+        webhooks do not follow redirects, and SMTP passwords live in a credential file rather than the
+        config.</span></li>
+      <li><span class="body"><strong>Session lifecycle.</strong> The console signs itself out after 30 minutes
+        without input, sessions end after 8 hours regardless, and a password reset or account disable signs
+        the person out everywhere at once.</span></li>
+      <li><span class="body"><strong>A second factor.</strong> TOTP with single-use codes; losing the phone
+        needs a live administrator, not an email link.</span></li>
+      <li><span class="body"><strong>Secure transport.</strong> TLS 1.2 or newer, HSTS, and a
+        <code>Secure</code> cookie flag. Without a certificate the server refuses to listen on any address
+        other than localhost, so a password is never put on the network in clear.</span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Open gaps, worst first</h2>
+    <div class="note">
+      <p>These are the findings of the 2026-10-27 audit, in <code>docs/12-error-handling.md</code>. The first
+        one is the serious one: a failing tick loop is logged and the loop continues, so the console keeps
+        showing the last values while the data plane is dead.</p>
+    </div>
+    <ol class="steps" style="margin-top:16px">
+      <li><span class="body">A failing tick loop is invisible to operators.</span></li>
+      <li><span class="body">Handler and publisher delivery failures are counters no page shows.</span></li>
+      <li><span class="body">The event write path retries without a cap, so a database outage during an alarm
+        storm grows memory without bound.</span></li>
+      <li><span class="body">Config import has no rollback, and config is saved before the reload that
+        activates it.</span></li>
+      <li><span class="body">A few envelope cases reach the caller as 500s or tracebacks instead of
+        sentences: a non-object JSON body, a corrupt schema version, a bootstrap auth error.</span></li>
+      <li><span class="body">Modbus values are never checked for finiteness, so NaN can enter history where
+        every comparison is silently false.</span></li>
+      <li><span class="body">The source-down alarm drops the real failure reason.</span></li>
+      <li><span class="body">One global lock spans the tick and <code>reload()</code>, so a slow tick stalls
+        every request.</span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Next</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Work</th><th>State</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td class="name">Authentication</td><td><span class="pill part">partial</span></td><td class="name">TOTP, reset, disable and machine tokens done. SSO / OIDC not started.</td></tr>
+          <tr><td class="name">Data extraction</td><td><span class="pill part">partial</span></td><td class="name">Reports, CSV in and out, history CSV, SQL source and REST done. Scheduled export bundles not started.</td></tr>
+          <tr><td class="name">Data modelling</td><td><span class="pill part">partial</span></td><td class="name">Calculated points, engineering ranges and multistate labels done. Unit conversion and tag inheritance not started.</td></tr>
+          <tr><td class="name">AI and machine learning</td><td><span class="pill none">not started</span></td><td class="name">No model, no anomaly scoring, no forecasting.</td></tr>
+          <tr><td class="name">Data input</td><td><span class="pill part">partial</span></td><td class="name">Six source types. OPC UA, BACnet, DNP3, SNMP and Sparkplug B not started.</td></tr>
+          <tr><td class="name">Rust real-time core</td><td><span class="pill part">experiment</span></td><td class="name">Detector layer ported, 19 tests. Not wired into the server.</td></tr>
+          <tr><td class="name">Progress tracking</td><td><span class="pill done">done</span></td><td class="name">This page and <code>PROGRESS.md</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <span>Method: one point per UTC day, the tree at the last commit of that day.</span>
+    <span>Sources: <code>PROGRESS.md</code>, <code>TECHNICAL_DEBT.md</code>, <code>docs/12-error-handling.md</code>.</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27"];
+  var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"];
+  var COMMITS = [34, 94, 94, 94, 94, 94, 94, 94, 99];
+  var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 25];
+  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 31];
+  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 5153];
+  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 2877];
+
+  var NS = "http://www.w3.org/2000/svg";
+  var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
+  var PW = W - PL - PR, PH = H - PT - PB;
+
+  function fmt(n) { return n.toLocaleString("en-US"); }
+
+  function el(name, attrs) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function niceMax(v) {
+    var raw = v * 1.08;
+    var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var steps = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i] * mag >= raw) return steps[i] * mag;
+    }
+    return 10 * mag;
+  }
+
+  function build(host, series, opts) {
+    var wrap = document.getElementById(host);
+    var svg = el("svg", { "class": "chart", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": opts.label });
+    var max = niceMax(Math.max.apply(null, series.reduce(function (a, s) { return a.concat(s.values); }, [])));
+    var n = DATES.length;
+    var x = function (i) { return PL + (n === 1 ? PW / 2 : (PW * i) / (n - 1)); };
+    var y = function (v) { return PT + PH * (1 - v / max); };
+
+    // horizontal grid and value labels
+    for (var t = 0; t <= 4; t++) {
+      var val = (max / 4) * t;
+      var yy = y(val);
+      if (t > 0) svg.appendChild(el("line", { "class": "grid", x1: PL, x2: PL + PW, y1: yy, y2: yy }));
+      var lab = el("text", { x: PL - 7, y: yy + 3.5, "text-anchor": "end" });
+      lab.textContent = fmt(Math.round(val));
+      svg.appendChild(lab);
+    }
+    svg.appendChild(el("line", { "class": "axis", x1: PL, x2: PL + PW, y1: PT + PH, y2: PT + PH }));
+
+    // x labels
+    DATES.forEach(function (d, i) {
+      var tx = el("text", { x: x(i), y: H - 7, "text-anchor": "middle" });
+      tx.textContent = d;
+      svg.appendChild(tx);
+    });
+
+    // series
+    series.forEach(function (s) {
+      var d = s.values.map(function (v, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
+      var attrs = {
+        d: d, fill: "none", stroke: "var(--chart-series)", "stroke-width": 2,
+        "stroke-linejoin": "round", "stroke-linecap": "round"
+      };
+      if (s.dashed) attrs["stroke-dasharray"] = "5 4";
+      svg.appendChild(el("path", attrs));
+      var last = s.values.length - 1;
+      svg.appendChild(el("circle", {
+        cx: x(last), cy: y(s.values[last]), r: 3.2,
+        fill: "var(--chart-series)", stroke: "var(--surface)", "stroke-width": 2
+      }));
+      var name = el("text", {
+        x: x(last) + 8, y: y(s.values[last]) + 3.5,
+        fill: "var(--muted)", "font-size": 10.5
+      });
+      name.textContent = s.short;
+      svg.appendChild(name);
+    });
+
+    // hover bands
+    var bandW = PW / (n - 1);
+    var tip = document.createElement("div");
+    tip.className = "tip";
+    wrap.appendChild(tip);
+
+    DATES.forEach(function (d, i) {
+      var bx = Math.max(PL, x(i) - bandW / 2);
+      var bw = Math.min(PL + PW, x(i) + bandW / 2) - bx;
+      var band = el("rect", { x: bx, y: PT, width: bw, height: PH, fill: "transparent", style: "cursor:crosshair" });
+      band.addEventListener("mouseenter", function () { show(i, band); });
+      band.addEventListener("focus", function () { show(i, band); });
+      band.addEventListener("mouseleave", hide);
+      band.addEventListener("blur", hide);
+      band.setAttribute("tabindex", "-1");
+      svg.appendChild(band);
+    });
+
+    function show(i, band) {
+      var rows = series.map(function (s) { return s.name + " <b>" + fmt(s.values[i]) + "</b>"; }).join("<br>");
+      tip.innerHTML = "<b>" + FULL[i] + "</b><br>" + rows;
+      var r = band.getBoundingClientRect();
+      var wr = wrap.getBoundingClientRect();
+      tip.style.left = (r.left + r.width / 2 - wr.left) + "px";
+      tip.style.top = (r.top - wr.top - 6) + "px";
+      tip.classList.add("on");
+    }
+    function hide() { tip.classList.remove("on"); }
+
+    wrap.insertBefore(svg, tip);
+  }
+
+  build("wrap-code", [
+    { name: "Server lines", short: "5,153", values: SERVER },
+    { name: "Test lines", short: "2,877", values: TESTS, dashed: true }
+  ], { label: "Lines of code in durian and tests, 19 to 27 October" });
+
+  build("wrap-suites", [
+    { name: "Test suites", short: "31", values: SUITES }
+  ], { label: "Number of test suites, 19 to 27 October" });
+
+  // daily table
+  var tbody = document.getElementById("history");
+  var prev = null;
+  DATES.forEach(function (d, i) {
+    var tr = document.createElement("tr");
+    var flat = i > 0 && SERVER[i] === SERVER[i - 1] && SUITES[i] === SUITES[i - 1];
+    if (flat) tr.className = "dim";
+    if (i === DATES.length - 1) tr.className = "today";
+    tr.innerHTML =
+      "<td>" + FULL[i] + "</td>" +
+      '<td class="num">' + COMMITS[i] + "</td>" +
+      '<td class="num">' + MODULES[i] + "</td>" +
+      '<td class="num">' + SUITES[i] + "</td>" +
+      '<td class="num">' + fmt(SERVER[i]) + "</td>" +
+      '<td class="num">' + fmt(TESTS[i]) + "</td>";
+    tbody.appendChild(tr);
+  });
+})();
+</script>
