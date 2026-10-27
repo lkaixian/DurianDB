@@ -23,6 +23,7 @@ from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, forecast as forecast_series
 from .ingest import HttpInSource, parse_payload
+from .jobs import Jobs
 from .maintenance import Maintenance, Raw
 from .testsource import test_source
 from .outputs import Outputs, validate_handler, validate_publisher
@@ -69,6 +70,7 @@ class App:
     def __init__(self, store, backup_dir=None):
         self.store, self.auth = store, Auth(store)
         self.maint = Maintenance(store, backup_dir or Path("backups"))
+        self.jobs = Jobs()  # slow work runs off the request thread; GET /api/jobs/<id> reports it
         self.engine, self.outputs, self.open_events = None, None, []
         self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
         self.escalated = set()  # (handler, event id) already escalated
@@ -446,6 +448,13 @@ class App:
                          "tick_ok_ts": self.tick_ok_ts, "buffered_samples": len(self.pending), "lost_samples": self.lost,
                          "unstored_events": len(self.unstored), "events_lost": self.events_lost, "failed_deliveries": self.outputs.failed if self.outputs else 0,
                          "faults": faults}
+        if (method, a, c) == ("GET", "jobs", None) and b:
+            rec = self.jobs.get(int(b) if b.isdigit() else -1)
+            if rec is None:
+                raise ApiError(404, "unknown job")
+            if "superadmin" not in ident["roles"] and rec.get("owner") != ident["name"]:
+                raise ApiError(403, "not allowed")
+            return 200, {k: rec.get(k) for k in ("id", "name", "state", "result", "error", "started", "finished")}
         if (method, a) == ("GET", "points") and b is None:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
         if (method, a, c) == ("GET", "points", "forecast") and b:
@@ -520,7 +529,10 @@ class App:
             return 200, rows
         if (method, a, b) == ("POST", "test", "source"):
             need(admin)
-            return 200, test_source(body)
+            if query.get("wait") == "1":  # scripts and old callers keep the synchronous answer
+                return 200, test_source(body)
+            jid = self.jobs.submit("test source", lambda: test_source(body), ident["name"])
+            return 202, {"job": jid, "state": "running", "message": f"the source test is running; ask GET /api/jobs/{jid}"}
         if a == "alarms":
             return self.alarm_holds(method, b, c, body, ident, query)
         if (method, a, b, c) == ("POST", "events", "ack-many", None):
@@ -607,7 +619,7 @@ class App:
         if a == "tokens" and c is None:
             return self.tokens(method, b, body, ident)
         if a == "database":
-            return self.database(method, b, c, body, ident)
+            return self.database(method, b, c, body, ident, query)
         if (method, a) == ("GET", "export") and b is None:
             doc = json.dumps(self.maint.export_config(), indent=2).encode()
             return 200, Raw(doc, "application/json", "durian-config-" + dt.date.today().isoformat() + ".json")
@@ -802,7 +814,7 @@ class App:
                 "out_of_service_points": sum(1 for h in self.holds.values() if h["kind"] == "oos" and h["name"] in pts)}
 
     # ---- database health, retention, backups, import and export (superadmin)
-    def database(self, method, what, name, body, ident):
+    def database(self, method, what, name, body, ident, query):
         if method == "GET" and what is None:
             return 200, self.maint.status(len(self.pending), self.lost)
         if (method, what) == ("PUT", "settings"):
@@ -816,12 +828,15 @@ class App:
             self.store.audit(ident["name"], "database.purge", f"{r['deleted']} rows")
             return 200, r
         if (method, what) == ("POST", "backup"):
-            try:
-                r = self.maint.backup()
-            except NotImplementedError as e:
-                raise ApiError(501, str(e))
-            self.store.audit(ident["name"], "database.backup", r["name"])
-            return 200, r
+            if query.get("wait") == "1":  # scripts and old callers keep the synchronous answer
+                try:
+                    r = self.maint.backup()
+                except NotImplementedError as e:
+                    raise ApiError(501, str(e))
+                self.store.audit(ident["name"], "database.backup", r["name"])
+                return 200, r
+            jid = self.jobs.submit("backup", lambda: self._backup(ident["name"]), ident["name"])
+            return 202, {"job": jid, "state": "running", "message": f"the backup is running; ask GET /api/jobs/{jid}"}
         if (method, what) == ("GET", "backups") and name:
             p = self.maint.backup_file(name)
             if p is None:
@@ -829,6 +844,12 @@ class App:
             self.store.audit(ident["name"], "database.download", name)
             return 200, Raw(p.read_bytes(), "application/octet-stream", name)
         raise ApiError(404, "not found")
+
+    def _backup(self, who):
+        """The backup job, run off the request thread and audited when it finishes."""
+        r = self.maint.backup()
+        self.store.audit(who, "database.backup", r["name"])
+        return r
 
     def import_config(self, query, doc, ident):
         validators = {"source": lambda n, b, v: validate_source(n, b), "point": lambda n, b, v: validate_point(n, b, v),
