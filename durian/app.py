@@ -45,9 +45,11 @@ SYSTEM = "(system)"  # events about DurianDB itself rather than a point, visible
 PENDING_MAX = 200_000
 EVENT_PENDING_MAX = 5_000  # alarms waiting for a database that failed: a storm during an outage must not exhaust memory
 CONFIRM_SECONDS = 30
+CONFIRM_MAX = 1_000  # pending second-step writes; a script looping the confirm endpoint must not grow the map
 TICK_ALARM_AFTER = 3  # consecutive failed polls before a (system) alarm is raised: one blip is not news
 INTERNAL_ALARM_AFTER = 10  # more unhandled errors than this on one route inside the window is a programming fault
 INTERNAL_ALARM_SECONDS = 600  # the window: ten minutes
+INTERNAL_ROUTES_MAX = 100  # routes whose error times are remembered; beyond this the oldest live route is forgotten
 
 
 
@@ -75,8 +77,9 @@ class App:
         self.jobs = Jobs()  # slow work runs off the request thread; GET /api/jobs/<id> reports it
         self.engine, self.outputs, self.open_events = None, None, []
         self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
-        self.escalated = set()  # (handler, event id) already escalated
+        self.escalated = set()  # (handler, event id) already escalated; pruned when the event closes
         self.confirms = {}  # token -> ((user, point, value), expiry) for writes waiting for their second step
+        self.confirms_lost = 0  # live tokens evicted past CONFIRM_MAX; the caller is asked for a new one
         self.windows = []  # maintenance windows, see windows.py
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
         self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
@@ -85,6 +88,7 @@ class App:
         self.tick_event = None  # id of the (system) alarm that says the loop is failing
         self.internal_errors, self.last_internal_error = 0, None  # unhandled exceptions since start, and the latest
         self.internal_seen, self.internal_events = {}, {}  # route -> recent error times; route -> its one (system) alarm
+        self.internal_routes_lost = 0  # live route histories forgotten past INTERNAL_ROUTES_MAX
         self.reload()
 
     # ---- runtime
@@ -153,6 +157,14 @@ class App:
         self.last_internal_error = {"route": route, "message": message, "ts": now}
         times = self.internal_seen.get(route, []) + [now]
         self.internal_seen[route] = times = [t for t in times if t > now - INTERNAL_ALARM_SECONDS]
+        if len(self.internal_seen) > INTERNAL_ROUTES_MAX:  # a flood of distinct failing routes must not grow this for ever
+            stale = [r for r, ts in self.internal_seen.items() if r != route and (not ts or ts[-1] < now - INTERNAL_ALARM_SECONDS)]
+            for r in stale:  # an expired route goes first, even while the map is fuller than its cap
+                del self.internal_seen[r]
+            excess = len(self.internal_seen) - INTERNAL_ROUTES_MAX
+            for r in [r for r in self.internal_seen if r != route][:max(0, excess)]:  # then the oldest live one, never this route
+                del self.internal_seen[r]
+                self.internal_routes_lost += 1
         if len(times) > INTERNAL_ALARM_AFTER:
             self._route_alarm(route, f"{route} keeps returning internal errors: {len(times)} in ten minutes")
 
@@ -172,10 +184,18 @@ class App:
         with self.engine_lock:
             ts = ts or time.time()
             self.engine.tick(ts)
-            self.pending.extend((p.name, t, v, q) for s in self.engine.sources for p in s.points.values() for t, v, q in p.take_unsaved())
+            engine_lost, self.engine.events_lost = self.engine.events_lost, 0
+            for s in self.engine.sources:
+                for p in s.points.values():
+                    self.pending.extend((p.name, t, v, q) for t, v, q in p.take_unsaved())
+                    self.lost += p.unsaved_lost
+                    p.unsaved_lost = 0
             self._flush_history(ts)
             new, self.engine.events = self.unstored + self.engine.events, []
-            self.unstored, stored = [], False
+            self.unstored = []
+            stored = False
+            if engine_lost:  # the engine had to drop alarms: say so once, in the journal, not silently
+                new.append(Event(SYSTEM, Level.URGENT, f"{engine_lost} alarm(s) were dropped: more than {self.engine.EVENT_MAX} were raised in one tick", ts))
             for i, ev in enumerate(new):
                 try:
                     pts = self.points()
@@ -261,7 +281,10 @@ class App:
 
     def confirm_token(self, ident, point, v):
         now = time.time()
-        self.confirms = {k: x for k, x in self.confirms.items() if x[1] > now}  # drop expired
+        self.confirms = {k: x for k, x in self.confirms.items() if x[1] > now}  # drop expired first: they may never be asked for again
+        while len(self.confirms) >= CONFIRM_MAX:  # a script looping this endpoint must not grow the map
+            del self.confirms[next(iter(self.confirms))]  # the oldest live request expires; the caller is given this new token
+            self.confirms_lost += 1
         tok = secrets.token_urlsafe(12)
         self.confirms[tok] = ((ident["name"], point, v), now + CONFIRM_SECONDS)
         return tok
@@ -976,6 +999,8 @@ class App:
         """Call once a minute. An alarm still active and unacknowledged `escalate_after` minutes after it was raised is mailed to a
         handler's escalate_to list, once. Held (shelved, suppressed) alarms are not announced, so they do not escalate."""
         now = now or time.time()
+        open_ids = {ev.id for ev in self.open_events if ev.id is not None}
+        self.escalated = {k for k in self.escalated if k[1] in open_ids}  # a closed alarm needs no memory of being escalated
         for h in self.store.list("handler"):
             if h.get("type") != "email" or not h.get("enabled", True) or "escalate_after" not in h:
                 continue
@@ -1195,8 +1220,16 @@ class App:
         if method == "DELETE":
             if kind == "source" and any(p.get("source") == name for p in self.store.list("point")):
                 raise ApiError(409, "delete or move this source's points first")
-            if not self.store.delete(kind, name):
+            existed = self.store.delete(kind, name)
+            if not existed:
                 self._404()
+            if kind == "point":  # runtime and stored state keyed by the point name must not outlive the point
+                self.store.delete("alarmhold", name)
+                self.store.delete("override", name)
+                for n in self.store.list("note"):
+                    if str(n.get("name", "")).startswith(name + "/"):
+                        self.store.delete("note", n["name"])
+                self.pending = [r for r in self.pending if r[0] != name]
             self.store.audit(ident["name"], "config.delete", f"{kind}/{name}")
             self.load_windows() if kind == "maintenance" else self.reload()
             return 200, {"deleted": name}

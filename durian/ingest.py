@@ -71,11 +71,13 @@ def parse_payload(body, query):
 
 
 class HttpInSource(Source):
+    MAX_PENDING = 10_000  # ponytail: one cap for the whole source; a per-point share if one sender floods the rest
+
     def __init__(self, name, auto_create=False, factory=None, max_age_days=7):
         super().__init__(name)
         self.auto_create, self.factory, self.max_age = auto_create, factory, max_age_days * 86400
         self.dropped = 0  # refused values, shown on the source health table
-        self._q, self._high, self._lock = [], {}, threading.Lock()
+        self._q, self._high, self._pending, self._lock = [], {}, set(), threading.Lock()
 
     def submit(self, candidates, now=None):
         """Validate candidates from any thread. Returns (accepted count, [{point, reason}]). Points are created later, on the engine thread."""
@@ -88,9 +90,14 @@ class HttpInSource(Source):
                 if not (isinstance(point, str) and NAME.match(point)):
                     no("point must be a name of 1 to 64 letters, digits, dot, dash or underscore")
                     continue
-                if point not in self.points and not self.auto_create:
-                    no("unknown point (add it under Config, or turn on auto_create for this source)")
-                    continue
+                if point not in self.points:
+                    if not self.auto_create:
+                        no("unknown point (add it under Config, or turn on auto_create for this source)")
+                        continue
+                    if len(self.points) + len(self._pending) >= self.AUTO_POINTS_MAX:  # an endless supply of new names must not grow the source
+                        no(f"this source has reached its limit of {self.AUTO_POINTS_MAX} points")
+                        continue
+                    self._pending.add(point)
                 if getattr(self.points.get(point), "text", False):  # an alphanumeric point takes a short printable string
                     if not (isinstance(value, str) and 1 <= len(value) <= 255 and value.isprintable()):
                         no("value must be printable text of 1 to 255 characters")
@@ -124,6 +131,9 @@ class HttpInSource(Source):
                 elif t <= self._high.get(point, 0):
                     no("older than the newest value already received for this point")
                 else:
+                    if len(self._q) >= self.MAX_PENDING:  # the engine has not drained it: refuse now rather than grow for ever
+                        no("too many values are waiting for the engine; try again")
+                        continue
                     self._high[point] = t
                     self._q.append((point, value if isinstance(value, str) else float(value), t, q))
                     accepted += 1
@@ -131,8 +141,14 @@ class HttpInSource(Source):
 
     def poll(self, ts):
         with self._lock:
-            out, self._q = self._q, []
-        for name, *_ in out:
-            if name not in self.points and self.factory:  # created here, on the engine's own thread
-                self.add(self.factory(name))
-        return out
+            out, self._q, self._pending = self._q, [], set()
+        kept = []
+        for item in out:
+            name = item[0]
+            if name not in self.points:
+                if self.factory is None or len(self.points) >= self.AUTO_POINTS_MAX:  # guard: a queued name must not outgrow the cap
+                    self.dropped += 1
+                    continue
+                self.add(self.factory(name))  # created here, on the engine's own thread
+            kept.append(item)
+        return kept

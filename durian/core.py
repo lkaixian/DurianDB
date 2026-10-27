@@ -394,6 +394,8 @@ class Point:
     detectors: list = field(default_factory=list)
     cache: deque = field(default_factory=lambda: deque(maxlen=100))  # recent (ts, value), bounded
     unsaved: list = field(default_factory=list)  # logged (ts, value, quality) waiting for the store
+    unsaved_lost: int = 0  # samples dropped past UNSAVED_MAX, added to the app's lost-samples count
+    UNSAVED_MAX: int = 10_000  # ponytail: one per-point cap; a per-source share if one source starves the rest
     last: object = None
     last_ts: Optional[float] = None  # when the source says the value was taken
     last_recv: Optional[float] = None  # when we received it
@@ -405,8 +407,16 @@ class Point:
     interval_mode: str = "instant"  # instant, avg, min or max
     _logged: object = None
     _logged_q: int = Quality.GOOD
-    _period: list = field(default_factory=list)  # values received in the current interval
+    _period: list = field(default_factory=lambda: [0, 0.0, math.inf, -math.inf])  # count, sum, min, max of the current interval: constant size
     _period_start: Optional[float] = None
+
+    def _queue_sample(self, sample):
+        """Keep the newest UNSAVED_MAX samples: a source that floods one tick, or ticks that keep failing, must not grow this."""
+        self.unsaved.append(sample)
+        if len(self.unsaved) > self.UNSAVED_MAX:
+            drop = len(self.unsaved) - self.UNSAVED_MAX
+            del self.unsaved[:drop]
+            self.unsaved_lost += drop
 
     def update(self, value, ts, on_event: Callable[[Event], None], quality=Quality.GOOD, recv=None):
         """`ts` is the source's time for the value, `recv` ours (defaults to ts). A BAD update only marks the point."""
@@ -415,22 +425,23 @@ class Point:
                 value = self.last
             if self.logging != Logging.NEVER and value is not None and (self.logging == Logging.ALL or self._logged_q != quality):
                 self._logged_q = quality
-                self.unsaved.append((ts, value, int(quality)))
+                self._queue_sample((ts, value, int(quality)))
             self.quality = quality
             return
         log, logged = self.logging == Logging.ALL or (
             self.logging == Logging.ON_CHANGE and (self._logged is None or self._logged_q == Quality.BAD or (value != self._logged if self.text else abs(value - self._logged) > self.tolerance))), value
         if self.logging == Logging.INTERVAL:
-            self._period.append(value)
+            p = self._period
+            p[0], p[1], p[2], p[3] = p[0] + 1, p[1] + value, min(p[2], value), max(p[3], value)
             if self._period_start is None:
                 self._period_start = ts
             if ts - self._period_start >= self.interval:  # the period is over: one sample, stamped with its end
-                logged = {"instant": value, "avg": sum(self._period) / len(self._period), "min": min(self._period), "max": max(self._period)}[self.interval_mode]
-                log, self._period, self._period_start = True, [], ts
+                logged = {"instant": value, "avg": p[1] / p[0], "min": p[2], "max": p[3]}[self.interval_mode]
+                log, self._period, self._period_start = True, [0, 0.0, math.inf, -math.inf], ts
         if log:
             self._logged, self._logged_q = logged, Quality.GOOD
             self.cache.append((ts, logged))
-            self.unsaved.append((ts, logged, int(quality)))
+            self._queue_sample((ts, logged, int(quality)))
         self.last, self.last_ts, self.last_recv, self.quality = value, ts, ts if recv is None else recv, quality
         for d in self.detectors if self.in_service else ():
             ev = d.check(self, value, ts)
@@ -445,6 +456,7 @@ class Point:
 @dataclass
 class Source:
     """A data source owns its points; subclasses implement poll()."""
+    AUTO_POINTS_MAX = 10_000  # ponytail: one cap per source for points auto-created from a topic or pushed name; a configurable limit if a real site needs more
     name: str
     points: dict = field(default_factory=dict)
     error: Optional[str] = None  # last poll failure, None when healthy
@@ -469,13 +481,20 @@ class Source:
 
 
 class Engine:
+    EVENT_MAX = 5_000  # ponytail: one cap for the whole tick; a per-source cap if one noisy source must not starve the others
+
     def __init__(self):
         self.sources, self.events, self.publishers = [], [], []
+        self.events_lost = 0  # alarms dropped past EVENT_MAX in one tick; the app announces the count
         self.down = {}  # source name -> its open source-down Event
         self.slow = {}  # source name -> its open poll-overrun Event
 
     def _event(self, ev: Event):
         self.events.append(ev)
+        if len(self.events) > self.EVENT_MAX:  # the app drains this every tick; a tick that raises must not let it grow for ever
+            drop = len(self.events) - self.EVENT_MAX
+            del self.events[:drop]
+            self.events_lost += drop
 
     def _overrun(self, s, ts):
         """A poll that takes longer than its period means readings are older than configured: say so until polls fit again."""
