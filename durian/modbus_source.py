@@ -74,6 +74,9 @@ class ModbusSource(Source):
 
     # ---- polling
     def _loop(self):
+        # ponytail: one GIL yield keeps the first poll after the build that created this source; a build slow
+        # enough to be preempted past it can still race, so start sources from a post-reload hook if that shows.
+        time.sleep(0)
         while not self._stop.is_set():
             started = time.monotonic()
             if time.time() >= self.next_try:
@@ -89,13 +92,17 @@ class ModbusSource(Source):
     def cycle(self):
         """One full read of every point. Public so tests can drive it without the thread."""
         values, rejected, online = {}, [], {}
+        self.poll_no += 1
         try:
             with self.client.lock:
                 if self._stop.is_set():  # stop() won the race for the lock; do not reopen the link
                     return
                 for unit, rng, batches in self._plan:
-                    online.setdefault(unit, False)
                     for start, count, members in batches:
+                        members = [m for m in members if self.due(self.points[m[0]])]
+                        if not members:  # every point in this batch is between scan slots: no request at all
+                            continue
+                        online.setdefault(unit, False)
                         try:
                             raw = self._read(unit, rng, start, count)
                         except ModbusException as e:  # the device said no: only these points are affected
@@ -121,7 +128,10 @@ class ModbusSource(Source):
             self.error = f"{len(rejected)} point(s) rejected: " + "; ".join(rejected[:3]) if rejected else None
         now = time.time()
         out = {n: (v, now, Quality.GOOD) for n, v in values.items()}
-        out.update({n: (None, now, Quality.BAD) for n, p in self.points.items() if "modbus" in p.meta and n not in values})
+        # A skipped poll is not a failed read: leave the point out entirely, so it keeps its value, quality
+        # and received time instead of being aged towards BAD.
+        out.update({n: (None, now, Quality.BAD) for n, p in self.points.items()
+                    if "modbus" in p.meta and n not in values and self.due(p)})
         if self.cfg["monitor"]:
             out.update({self._monitor_name(u): (1.0 if ok else 0.0, now, Quality.GOOD) for u, ok in online.items()})
         with self._lock:

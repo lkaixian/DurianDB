@@ -489,6 +489,9 @@ def validate_point(name, b, store):
     gap = b.get("min_write_gap")
     if "min_write_gap" in b and not (isinstance(gap, int) and not isinstance(gap, bool) and 0 <= gap <= 3600):
         add("min_write_gap", "must be a whole number of seconds from 0 to 3600")
+    scan = b.get("scan", 1)
+    if not (isinstance(scan, int) and not isinstance(scan, bool) and 1 <= scan <= 16):
+        add("scan", "must be a whole number from 1 to 16")
     if not b.get("settable") and any(k in b for k in ("set_min", "set_max", "max_step", "confirm", "require_reason", "min_write_gap")):
         add("settable", "set limits and confirmation only apply to a settable point")
     fo = b.get("folder")
@@ -612,7 +615,7 @@ def make_point(name, b, source_name):
               "states", "folder"):
         if b.get(k):
             p.meta[k] = b[k]
-    for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason", "min_write_gap"):  # zero is a real value here
+    for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason", "min_write_gap", "scan"):  # zero is a real value here
         if k in b:
             p.meta[k] = b[k]
     return p

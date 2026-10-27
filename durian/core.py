@@ -506,11 +506,19 @@ class Source:
     period: Optional[float] = None  # seconds between polls, for sources that poll
     poll_ms: Optional[float] = None  # how long the last poll took
     overruns: int = 0  # polls that took longer than the period
+    poll_no: int = 0  # cycles run since this source was built; the first is poll 1
     _down_since: Optional[float] = None
 
     def add(self, point: Point) -> Point:
         self.points[point.name] = point
         return point
+
+    def due(self, point: Point) -> bool:
+        """Whether this poll is one of the point's scan slots: poll 1, then 1+n, 1+2n for a scan of n.
+
+        A source starts at poll 1 when it is built, so a reload gives every point a fresh value and the
+        phase needs nothing carried across the reload."""
+        return (self.poll_no - 1) % point.meta.get("scan", 1) == 0
 
     def poll(self, ts):  # returns {point name: value}
         raise NotImplementedError
