@@ -21,7 +21,7 @@ from .config import (build_engine, resolve, roles_ok, validate_maintenance, vali
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
-from .forecast import baseline as ewma_baseline, forecast as forecast_series
+from .forecast import baseline as ewma_baseline, drift as baseline_drift, forecast as forecast_series
 from .ingest import HttpInSource, parse_payload
 from .jobs import Jobs
 from .oidc import OIDC, OIDCError, local_identity, validate_sso
@@ -449,6 +449,30 @@ class App:
             return 200, {"point": point, "window": window, "baseline": None, "note": str(e)}
         return 200, {"point": point, "window": window, "baseline": base}
 
+    def drift_view(self, ident, point, q):
+        """GET /api/points/<name>/drift?hours=24&compare=24: has this point's own baseline moved since an earlier window?
+
+        `hours` is the length of the recent window. `compare` is how many hours before now the earlier window
+        ends, and that window has the same length, so the default two windows sit side by side. History comes
+        from the same bucketed read the forecast uses; thin history is an answer with a note, never an error.
+        """
+        p, _s = self.visible_points(ident).get(point, (None, None))
+        if p is None:
+            raise ApiError(404, "unknown point")
+        hours = self._int_param(q, "hours", 24, 1, 168)
+        compare = self._int_param(q, "compare", 24, 1, 8760)
+        if compare < hours:
+            raise ApiError(422, "validation failed", [{"property": "compare", "message":
+                f"compare ({compare}) must be at least hours ({hours}), so the earlier window ends before the recent one starts"}])
+        if p.text:
+            raise ApiError(400, "a text point has no numeric baseline")
+        now = time.time()
+        history = self.store.series(point, now - (hours + compare) * 3600, 60, "avg")
+        split = now - hours * 3600
+        result = baseline_drift([(r["ts"], r["value"]) for r in history if r["ts"] >= split],
+                                [(r["ts"], r["value"]) for r in history if r["ts"] < split])
+        return 200, {"point": point, "unit": p.meta.get("unit", ""), "hours": hours, "compare": compare, **result}
+
     # ---- auth
     def login(self, body):
         body = body if isinstance(body, dict) else {}
@@ -623,6 +647,8 @@ class App:
             return self.forecast_view(ident, b, query)
         if (method, a, c) == ("GET", "points", "baseline") and b:
             return self.baseline_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "drift") and b:
+            return self.drift_view(ident, b, query)
         if (method, a, c) == ("GET", "points", None) and b:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:

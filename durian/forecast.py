@@ -1,10 +1,15 @@
-"""Baselines, robust anomaly scores and a short-horizon forecast over history already in the store.
+"""Baselines, robust anomaly scores, a short-horizon forecast and baseline drift over history already in the store.
 
 Stdlib only. Nothing here keeps a model: every answer is derived from the (ts, value) pairs handed in, so a
 restart loses no state and a point needs no trained file. The ANOMALY detector in core.py judges a live deque;
-score() is the same statistic over stored history, with median/MAD instead of mean/sd.
+score() is the same statistic over stored history, with median/MAD instead of mean/sd. drift() compares two
+windows so an operator learns that the baseline itself moved, not only that one reading was unusual; it needs
+at least 5 samples in each window and answers "unknown" with a note below that.
 """
 import math
+
+DRIFT_MIN_SAMPLES = 5  # below this the MAD-based spread is too thin to judge a change between windows
+DRIFT_Z_LIMIT = 3.0  # the same absolute-z verdict the ANOMALY detector uses
 
 
 def ewma(values, alpha):
@@ -127,3 +132,73 @@ def score(pairs, value):
     if mad == 0:
         return None
     return {"z": abs(value - median) / (1.4826 * mad), "baseline": median, "samples": n}
+
+
+def _median(values):
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def _window_values(pairs):
+    """The finite values of one window, or None when a value is not a finite number."""
+    vals = []
+    for _ts, value in pairs:
+        if not (isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)):
+            return None
+        vals.append(float(value))
+    return vals
+
+
+def drift(samples_now, samples_before):
+    """Compare the baseline of two windows: {"now", "before", "difference", "z", "scale", "verdict", "direction", "note"}.
+
+    Each baseline is the median of its window and the difference is now - before. The scale is the pooled
+    robust sigma, 1.4826 * median absolute deviation, and the z is
+        |difference| / (scale * sqrt(1/n_now + 1/n_before))
+    the usual two-sample standard error with a robust spread in place of the standard deviation. The verdict is
+    "drifting" at 3 sigma or more, with the direction, and "steady" otherwise. Fewer than DRIFT_MIN_SAMPLES in
+    either window, or a value that is not finite, gives "unknown" and a note rather than a confident answer. A
+    zero pooled spread never divides: equal flat windows are steady at z 0, different flat windows drift with
+    no measurable z and a note saying so.
+    """
+    now_vals, before_vals = _window_values(samples_now), _window_values(samples_before)
+    n_now, n_before = len(now_vals or ()), len(before_vals or ())
+    result = {"now": {"median": None, "samples": n_now}, "before": {"median": None, "samples": n_before},
+              "difference": None, "z": None, "scale": None, "verdict": "unknown", "direction": None, "note": None}
+    if now_vals is None or before_vals is None:
+        result["note"] = "history holds a value that is not a finite number, so there is no drift check"
+        return result
+    if now_vals:
+        result["now"]["median"] = _median(now_vals)
+    if before_vals:
+        result["before"]["median"] = _median(before_vals)
+    if n_now < DRIFT_MIN_SAMPLES or n_before < DRIFT_MIN_SAMPLES:
+        result["note"] = (f"a drift check needs at least {DRIFT_MIN_SAMPLES} samples in each window; "
+                          f"the recent window has {n_now} and the earlier window has {n_before}")
+        return result
+
+    difference = result["now"]["median"] - result["before"]["median"]
+    sigma_now = 1.4826 * _median([abs(v - result["now"]["median"]) for v in now_vals])
+    sigma_before = 1.4826 * _median([abs(v - result["before"]["median"]) for v in before_vals])
+    scale = math.sqrt((sigma_now ** 2 * (n_now - 1) + sigma_before ** 2 * (n_before - 1)) / (n_now + n_before - 2))
+    result["difference"] = difference
+    result["scale"] = scale
+    if scale == 0:
+        if difference == 0:
+            result["z"] = 0.0
+            result["verdict"] = "steady"
+        else:
+            result["verdict"] = "drifting"
+            result["direction"] = "up" if difference > 0 else "down"
+            result["note"] = "both windows are flat, so the step has no measurable spread and z is not defined"
+        return result
+
+    z = abs(difference) / (scale * math.sqrt(1 / n_now + 1 / n_before))
+    result["z"] = z
+    if z >= DRIFT_Z_LIMIT:
+        result["verdict"] = "drifting"
+        result["direction"] = "up" if difference > 0 else "down"
+    else:
+        result["verdict"] = "steady"
+    return result
