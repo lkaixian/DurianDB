@@ -17,4 +17,4 @@ tools/cert.key
 # build output and local agent settings
 rust/target/
 .claude/
-graphify-out/cache/
+graphify-out/

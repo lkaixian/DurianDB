@@ -28,12 +28,8 @@ was written: `requirements.txt` exists.
 
 ## 2. Documented claims that are not true
 
-| # | Claim | Reality | Severity |
-|---|---|---|---|
-| D3 | `docs/research/11` lists SMOOTHNESS/CUSUM as "Not built" and HTTP sender/Slack publishers as "Not built" | All are built | medium |
-| D4 | `docs/research/09` lists the drag-and-drop designer as "Not built" | It is built (`web/dashboards.js`) | medium |
-| D5 | `docs/research/10` presents its gap table as current | Many rows are done since 2026-10-20 | medium |
-| D8 | `graphify-out/` (148 generated files) is tracked in git | Generated output in VCS: noise in every diff that regenerates it | low |
+No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes now describe what is built, and
+`graphify-out/` is untracked and ignored.
 
 ## 3. Architecture
 
