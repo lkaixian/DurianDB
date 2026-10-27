@@ -58,6 +58,11 @@ const SOURCE_GROUPS = {
     F("bacnet.address", "Address", "text", {hint: "host:port of the device, for example 10.0.0.5:47808. The port defaults to 47808."}),
     F("bacnet.device", "Device instance", "int", {hint: "The instance number the device answers with, such as 1001."}),
     F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
+  opcua: () => [{title: "OPC UA server", fields: [
+    F("opcua.address", "Address", "text", {hint: "host:port of the server, for example 10.0.0.5:14360."}),
+    F("opcua.path", "Endpoint path", "text", {optional: true, hint: "Optional path of the endpoint URL, for example plant."}),
+    F("opcua.security_policy", "Security policy", "select", {optional: true, options: opts("None"), hint: "Only SecurityPolicy None is implemented; the connection is not encrypted."}),
+    F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
   http_json: () => [{title: "HTTP JSON document", fields: [
     F("url", "URL", "text", {hint: "http or https. Redirects are never followed."}),
     F("period", "Fetch every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number"),
@@ -103,6 +108,8 @@ const POINT_PARTS = {
     fields: () => [F("bacnet.object_type", "Object type", "select", {options: opts(["analogInput", "analogInput"], ["analogOutput", "analogOutput"], ["analogValue", "analogValue"], ["binaryInput", "binaryInput"], ["binaryOutput", "binaryOutput"], ["binaryValue", "binaryValue"], ["multiStateValue", "multiStateValue"])}),
       F("bacnet.instance", "Object instance", "int", {hint: "The object's instance number, such as 1."}),
       F("bacnet.property", "Property", "select", {options: opts(["presentValue", "presentValue"], ["statusFlags", "statusFlags"], ["units", "units"], ["objectName", "objectName"])})]},
+  opcua: {start: () => ({opcua: {node: "ns=2;i=85"}}), keys: ["opcua"],
+    fields: () => [F("opcua.node", "Node id", "text", {hint: "The node's id in string form, such as ns=2;i=85 or ns=2;s=Temperature."})]},
   http_json: {start: () => ({http: {path: ""}}), keys: ["http", "scale"],
     fields: () => [F("http.path", "Path in the JSON", "text", {hint: "For example sensors.temp or items[0].value."}),
       F("scale.multiplier", "Multiplier", "number", {optional: true}), F("scale.additive", "Add", "number", {optional: true})]},
