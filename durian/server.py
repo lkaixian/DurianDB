@@ -171,6 +171,17 @@ def run_maintenance():
             log.exception("maintenance failed")
 
 
+def make_server(host, port, cert=None, key=None):
+    """The console server, bound and listening. With a certificate its socket speaks TLS 1.2 or newer only."""
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    if cert:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(cert, key)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    return httpd
+
+
 def main():
     global app, TLS
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -193,15 +204,9 @@ def main():
     threading.Thread(target=run_ticks, args=(float(os.environ.get("DURIAN_TICK", 2)),), daemon=True).start()
     threading.Thread(target=run_maintenance, daemon=True).start()
     port = int(os.environ.get("DURIAN_PORT", 8765))
-    httpd = ThreadingHTTPServer((host, port), Handler)
-    scheme = "http"
-    if cert:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        ctx.load_cert_chain(cert, key)
-        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
-        scheme = "https"
-    elif host not in ("127.0.0.1", "::1", "localhost"):
+    httpd = make_server(host, port, cert, key)
+    scheme = "https" if cert else "http"
+    if not cert and host not in ("127.0.0.1", "::1", "localhost"):
         raise SystemExit(f"Refusing to serve plain HTTP on {host}: set DURIAN_TLS_CERT and DURIAN_TLS_KEY, or use 127.0.0.1.")
     print(f"DurianDB on {scheme}://{host}:{port}")
     httpd.serve_forever()

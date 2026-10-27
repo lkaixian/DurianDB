@@ -34,8 +34,8 @@ settings: `DURIAN_DB`, `DURIAN_PORT`, `DURIAN_HOST`, `DURIAN_TLS_CERT` and `DURI
 
 `requirements.txt` lists the third-party packages. The core server is Python standard library plus
 `paho-mqtt` (version 2 or newer) for the MQTT source and publisher. `pymysql` and `pyserial` are only needed
-for MySQL/MariaDB and serial Modbus, and `cryptography` only for the lab tools. CI runs the suite on Python
-3.12 and 3.13.
+for MySQL/MariaDB and serial Modbus, and `cryptography` for the lab tools and the TLS handshake test. CI runs
+the suite on Python 3.12 and 3.13.
 
 The console is served on `127.0.0.1` only. To reach it from another machine, give it a certificate:
 `python tools/make_cert.py plant-pc.local` then start with `DURIAN_HOST=0.0.0.0 DURIAN_TLS_CERT=tools/cert.pem

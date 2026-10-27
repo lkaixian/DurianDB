@@ -58,7 +58,6 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 |---|---|---|---|
 | U1 | Modbus TCP/RTU/ASCII | Simulator, and RTU only over a `socket://` URL — never a real COM port or device | medium |
 | U3 | Email, Slack, escalation delivery | A fake SMTP server; Slack only validates config | medium |
-| U4 | HTTPS serving | `tests/test_tls.py` checks the cookie flag and the refusal paths, not a real handshake | low |
 | U5 | MariaDB / MySQL | Opt-in, absent from CI | medium |
 | U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | Manual, headless Edge on port 9222 | medium |
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
