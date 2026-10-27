@@ -29,21 +29,21 @@ await ev(`(()=>{const f=document.querySelector('#login');f.username.value='admin
 await go("#config/source/_new");
 console.log("TEMPLATES:", await ev(`[...document.querySelectorAll('#tpl option')].map(o=>o.textContent).join(' | ')`));
 await ev(`(()=>{const s=document.querySelector('#tpl');s.value='Modbus TCP';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-await ev(`(()=>{const f=document.querySelector('#ed');const b=JSON.parse(f.body.value);b.link.port=1502;b.period=1;b.timeout=0.3;f.name.value='plc';f.body.value=JSON.stringify(b);f.requestSubmit()})()`); await sleep(2000);
+await ev(`(()=>{const f=document.querySelector('#ed'),a=document.querySelector('#adv');const b=JSON.parse(a.value);b.link.port=1502;b.period=1;b.timeout=0.3;f.name.value='plc';a.value=JSON.stringify(b);a.dispatchEvent(new Event('input',{bubbles:true}));f.requestSubmit()})()`); await sleep(2000);
 console.log("SOURCE SAVED:", await ev(`location.hash`), "|", await ev(`document.querySelector('#ed-msg').innerText||'(no message)'`));
 
 // 2. a bad point first (shows the Modbus validation), then good ones
 await go("#config/point/_new");
 await ev(`(()=>{const s=document.querySelector('#tpl');s.value='Modbus holding register (uint16)';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-await ev(`(()=>{const f=document.querySelector('#ed');const b=JSON.parse(f.body.value);b.modbus.type='uint128';b.modbus.unit=0;f.name.value='bad';f.body.value=JSON.stringify(b);f.requestSubmit()})()`); await sleep(1200);
+await ev(`(()=>{const f=document.querySelector('#ed'),a=document.querySelector('#adv');const b=JSON.parse(a.value);b.modbus.type='uint128';b.modbus.unit=0;f.name.value='bad';a.value=JSON.stringify(b);a.dispatchEvent(new Event('input',{bubbles:true}));f.requestSubmit()})()`); await sleep(1200);
 console.log("VALIDATION:", (await ev(`document.querySelector('#ed-msg').innerText`)).replace(/\n/g, " / "));
 await shot("m1-validation");
 for (const [name, patch] of [["setpoint", {}], ["second", {"modbus.address": 1}], ["scaled", {"modbus.address": 2, "modbus.multiplier": 0.5, "settable": false}]]) {
   await go("#config/point/_new", 1500);
   await ev(`(()=>{const s=document.querySelector('#tpl');s.value='Modbus holding register (uint16)';s.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-  await ev(`(()=>{const f=document.querySelector('#ed');const b=JSON.parse(f.body.value);const p=${JSON.stringify(patch)};for(const [k,v] of Object.entries(p)){const parts=k.split('.');let o=b;while(parts.length>1)o=o[parts.shift()];o[parts[0]]=v}f.name.value=${JSON.stringify(name)};f.body.value=JSON.stringify(b);f.requestSubmit()})()`); await sleep(1500);
+  await ev(`(()=>{const f=document.querySelector('#ed'),a=document.querySelector('#adv');const b=JSON.parse(a.value);const p=${JSON.stringify(patch)};for(const [k,v] of Object.entries(p)){const parts=k.split('.');let o=b;while(parts.length>1)o=o[parts.shift()];o[parts[0]]=v}f.name.value=${JSON.stringify(name)};a.value=JSON.stringify(b);a.dispatchEvent(new Event('input',{bubbles:true}));f.requestSubmit()})()`); await sleep(1500);
 }
-await go("#config/source", 3000); console.log("SOURCE HEALTH:", (await ev(`document.querySelector('#health').innerText`)).replace(/\s+/g, " ")); await shot("m2-health");
+await go("#config/source", 3000); console.log("SOURCE HEALTH:", (await ev(`[...document.querySelectorAll('table.dense tbody tr')].map(r=>r.innerText.replace(/\\s+/g,' ')).join(' / ')`))); await shot("m2-health");
 
 // 3. values arrive on the overview, then write through the UI
 await go("#overview", 4000);

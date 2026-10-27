@@ -32,3 +32,4 @@ const rs = await ev(`document.querySelector('#rs-msg').textContent`); if (!/Pass
 await fill("#login", {username: "bob", password: "bob-new-password-9"}); await sleep(2000);
 if (!(await ev(`location.hash`)).includes("overview")) problems.push("bob could not sign in with the new password");
 await shot("after"); console.log(problems.length ? problems : "no problems"); ws.close();
+process.exit(problems.length ? 1 : 0);

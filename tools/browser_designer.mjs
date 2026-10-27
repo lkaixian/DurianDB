@@ -65,3 +65,4 @@ const [rx, ry] = await centre(".hit"); await mouse("mousePressed", rx, ry); awai
 await ev(`document.querySelector('#pp [data-act=rm]').click()`); await sleep(500);
 if (await count() !== n0 - 3) problems.push("panel Remove did not remove");
 console.log(problems.length ? problems : "no problems"); ws.close();
+process.exit(problems.length ? 1 : 0);

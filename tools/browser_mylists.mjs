@@ -32,3 +32,4 @@ await ev(`document.querySelector('#f-del').click()`); await sleep(2000);
 console.log("after delete:", await ev(`[...document.querySelectorAll('#f-wl option')].map(o=>o.textContent).join()`));
 console.log("problems:", JSON.stringify(problems));
 ws.close();
+process.exit(problems.length ? 1 : 0);
