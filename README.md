@@ -1,13 +1,18 @@
 # DurianDB
 
-| Check | Status |
+[![CI](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml)
+
+The badge covers the whole workflow, which runs these jobs on every push to `main`:
+
+| Job | What it proves |
 |---|---|
-| Whole workflow (`ci.yml`, `main`) | [![CI](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml) |
-| tests, Python 3.12 / Ubuntu | [![python 3.12 ubuntu](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci.yml?branch=main&job=tests%20on%203.12%20%2F%20ubuntu-latest&label=python%203.12%20ubuntu)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml) |
-| tests, Python 3.12 / Windows | [![python 3.12 windows](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci.yml?branch=main&job=tests%20on%203.12%20%2F%20windows-latest&label=python%203.12%20windows)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml) |
-| tests, Python 3.13 / Ubuntu | [![python 3.13 ubuntu](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci.yml?branch=main&job=tests%20on%203.13%20%2F%20ubuntu-latest&label=python%203.13%20ubuntu)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml) |
-| tests, Python 3.13 / Windows | [![python 3.13 windows](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci.yml?branch=main&job=tests%20on%203.13%20%2F%20windows-latest&label=python%203.13%20windows)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml) |
-| real-time core (experimental) | [![rust core](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci.yml?branch=main&job=real-time%20core%20%28experimental%29&label=rust%20core)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml) |
+| `tests on 3.12 / ubuntu-latest` | the suite on the oldest Python CI supports, on Linux |
+| `tests on 3.12 / windows-latest` | the same on Windows, where paths and line endings differ |
+| `tests on 3.13 / ubuntu-latest` | the newest Python CI supports, on Linux |
+| `tests on 3.13 / windows-latest` | the same on Windows |
+| `real-time core (experimental)` | the Rust detector crate's tests and clippy |
+
+GitHub shows badges per workflow, not per job; the link above opens the job list with each job's own result.
 
 DurianDB is an original, clean-room educational reference for a SCADA / IoT data-acquisition platform, written in
 Python. It studies how such a platform fits together from public documentation and the black-box behaviour of
@@ -20,7 +25,7 @@ control points, forwards events, and serves a browser console with dashboards yo
 
 ```sh
 python -m durian.server      # http://127.0.0.1:8765
-python tests/run_all.py      # 47 suites, all passing
+python tests/run_all.py      # 53 suites, all passing
 ```
 
 The first run prints a generated `admin` password once; `DURIAN_ADMIN_PASSWORD` chooses it instead. Other
@@ -78,4 +83,4 @@ the network in clear.
   `extra_notes.md` holds limits and operational notes that are not defects.
 - `docs/12-error-handling.md` records how each failure reaches an operator, and the rule for a new one.
 - `PROGRESS.md` records what is built, what is verified and how. `docs/00-clean-room-policy.md` comes first;
-  the research notes are `docs/research/01` to `10`, with open questions in `docs/research/99`.
+  the research notes are `docs/research/01` to `12`, with open questions in `docs/research/99`.
