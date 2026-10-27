@@ -58,6 +58,10 @@ const SOURCE_GROUPS = {
     F("bacnet.address", "Address", "text", {hint: "host:port of the device, for example 10.0.0.5:47808. The port defaults to 47808."}),
     F("bacnet.device", "Device instance", "int", {hint: "The instance number the device answers with, such as 1001."}),
     F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
+  dnp3: () => [{title: "DNP3 outstation", fields: [
+    F("dnp3.address", "Address", "text", {hint: "host:port of the outstation, for example 10.0.0.5:20000. The port is the outstation's TCP port, commonly 20000."}),
+    F("dnp3.outstation", "Outstation link address", "int", {hint: "The link address the outstation answers on, 0 to 65535."}),
+    F("period", "Poll every (seconds)", "number", {hint: "0.2 to 86400."}), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
   http_json: () => [{title: "HTTP JSON document", fields: [
     F("url", "URL", "text", {hint: "http or https. Redirects are never followed."}),
     F("period", "Fetch every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number"),
@@ -103,6 +107,9 @@ const POINT_PARTS = {
     fields: () => [F("bacnet.object_type", "Object type", "select", {options: opts(["analogInput", "analogInput"], ["analogOutput", "analogOutput"], ["analogValue", "analogValue"], ["binaryInput", "binaryInput"], ["binaryOutput", "binaryOutput"], ["binaryValue", "binaryValue"], ["multiStateValue", "multiStateValue"])}),
       F("bacnet.instance", "Object instance", "int", {hint: "The object's instance number, such as 1."}),
       F("bacnet.property", "Property", "select", {options: opts(["presentValue", "presentValue"], ["statusFlags", "statusFlags"], ["units", "units"], ["objectName", "objectName"])})]},
+  dnp3: {start: () => ({dnp3: {group: 30, index: 0}}), keys: ["dnp3"],
+    fields: () => [F("dnp3.group", "Group", "select", {numeric: true, options: opts(1, 10, 20, 30, 40)}),
+      F("dnp3.index", "Object index", "int", {hint: "The object's index in that group, 0 to 65535."})]},
   http_json: {start: () => ({http: {path: ""}}), keys: ["http", "scale"],
     fields: () => [F("http.path", "Path in the JSON", "text", {hint: "For example sensors.temp or items[0].value."}),
       F("scale.multiplier", "Multiplier", "number", {optional: true}), F("scale.additive", "Add", "number", {optional: true})]},
@@ -118,6 +125,8 @@ const POINT_PARTS = {
 function pointGroups(body, sources) {
   const type = (sources.find(s => s.name === body.source) || {}).type, part = POINT_PARTS[type];
   const settable = !!body.settable;
+  // The server rejects settable on these source types, so do not offer it (durian/config.py).
+  const readOnly = ["http_json", "sql", "http_in", "calc", "snmp", "dnp3", "bacnet"].includes(type);
   return [
     {title: "Identity", fields: [
       F("source", "Data source", "select", {options: sources.length ? opts(...sources.map(s => [s.name, `${s.name} (${s.type})`])) : [["", "Create a source first"]]}),
@@ -138,8 +147,8 @@ function pointGroups(body, sources) {
       F("retention_days", "Keep history for (days)", "int", {optional: true, hint: "Empty = the database default. 0 = forever."})]},
     {title: "Access and control", fields: [
       F("read_roles", "Who can read it", "roles", {hint: ROLE_HINT}),
-      F("settable", "Operators can set this point", "check"),
-      ...(settable ? [F("set_roles", "Who can set it", "roles", {hint: "Empty = administrators only."}),
+      ...(readOnly ? [] : [F("settable", "Operators can set this point", "check")]),
+      ...(!readOnly && settable ? [F("set_roles", "Who can set it", "roles", {hint: "Empty = administrators only."}),
         F("set_min", "Lowest value accepted", "number", {optional: true, hint: "Empty = the engineering range."}), F("set_max", "Highest value accepted", "number", {optional: true}),
         F("max_step", "Largest change per write", "number", {optional: true}), F("confirm", "Ask for confirmation before each write", "check"),
         F("require_reason", "Ask for a reason with each write", "check", {hint: "The reason is stored in the audit log with the old and new value."})] : [])]},
