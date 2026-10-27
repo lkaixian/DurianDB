@@ -26,7 +26,7 @@ control points, forwards events, and serves a browser console with dashboards yo
 
 ```sh
 python -m durian.server      # http://127.0.0.1:8765
-python tests/run_all.py      # 53 suites, all passing
+python tests/run_all.py      # 62 suites, all passing
 ```
 
 To run the suite on the MySQL/MariaDB backend, start a throwaway MariaDB and point the two test URLs at it
@@ -63,8 +63,9 @@ the network in clear.
 ## What it can do
 
 - **Sources.** Virtual generator, MQTT over TLS, Sparkplug B over MQTT, Modbus over TCP, RTU and ASCII, SNMP
-  v2c, HTTP JSON, read-only SQL, and HTTP ingest push. Calculated points use a small checked expression
-  language, not `eval`.
+  v2c (GET and a bounded GETNEXT walk), DNP3 over TCP, BACnet/IP, HTTP JSON, read-only SQL, and HTTP ingest
+  push. The device protocols are read-only: nothing writes to a PLC. Calculated points use a small checked
+  expression language, not `eval`.
 - **History and quality.** SQLite by default, or MySQL/MariaDB. Time-series history, rollups, interval logging,
   `good`/`uncertain`/`bad` quality, CSV export and import, retention with scheduled purge, and backups.
 - **Alarms.** High/low limits, rate of change, no update, no change, change, state, range, smoothness, CUSUM,

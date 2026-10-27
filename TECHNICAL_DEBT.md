@@ -26,6 +26,10 @@ swept, `test_auth_state.py`), A7 and A8 (backups and source tests run on a worke
 buffers (`test_bounded_state.py`), and D1, D2, D6, D7 with the README rewrite. E1 was already true when it
 was written: `requirements.txt` exists.
 
+In the same pass, A2–A5 and A10: the unknown-point 404, the `AuthError` translation, the role check and the
+JSON-body rule each became one function every route calls (`test_envelope.py`, `test_permissions.py`), and
+`web/app.js` was split into one script per page. A9's security half moved into the store (`test_shared_state.py`).
+
 ## 2. Documented claims that are not true
 
 No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes now describe what is built, and
@@ -35,13 +39,9 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 
 | # | Debt | Where | Severity | Cost |
 |---|---|---|---|---|
-| A2 | "unknown point" 404 written inline 7 times while a `_404()` helper exists | `durian/app.py` | low | Two ways to say the same thing |
-| A3 | `AuthError` → `ApiError` conversion repeated in 4 places, then to HTTP in a 5th | `durian/app.py`, `durian/server.py` | low | A new auth exception must be handled in each |
-| A4 | Two permission idioms: `can()` and inline `"superadmin" in ident["roles"]` (7 sites) | `durian/auth.py`, `durian/app.py` | medium | Role logic drifts between routes |
-| A5 | `if not isinstance(body, dict)` guard repeated 6 times (and missed in one place, C7) | `durian/app.py` | low | The one that was missed proved the pattern is fragile |
-| A9 | All state is in-process: sessions, lockout counters, reset codes, TOTP replay guard, confirm tokens, escalation set | `durian/auth.py`, `durian/app.py` | high | Two server processes would double-tick, double-purge and double-escalate, and accept a replayed TOTP code. This is why "no HA" is in the known limits |
-| A10 | `web/app.js` is 901 lines in one file | `web/app.js` | low | One page's change risks another's |
+| A9 | What is left of the in-process state: the escalation set, password-reset codes, pending TOTP setup secrets, OIDC pending sign-ins, and the engine's own tick and purge. Sign-ins, lockout, the TOTP replay guard and confirm tokens now live in the store | `durian/auth.py`, `durian/core.py` | medium | Two processes still double-tick and double-escalate; the security decisions are shared, the scheduling is not |
 | A12 | SQLite and MySQL diverge through hand-written branches, including `cast(ts/? as int)` vs `floor(ts/?)` | `durian/store.py` | medium | The MySQL path is the least tested code in the repo |
+| A13 | A DNP3 source has no console form, so it is configurable through the JSON view or the API only | `web/forms.js` | low | An operator cannot add one without writing JSON |
 
 ## 4. Dependencies and environment
 
@@ -61,6 +61,8 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
 | U8 | SNMP source | An in-process fake agent answers crafted datagrams; never a real device | low |
 | U9 | Sparkplug B source | Decoded payloads are fed directly; never a real broker or a real edge node | medium |
+| U10 | DNP3 source | An in-process fake outstation on a socket; never a real outstation | medium |
+| U11 | BACnet/IP source | An in-process fake device on a UDP socket; never a real device | medium |
 
 ## 6. Deliberate, not debt
 
@@ -70,7 +72,8 @@ These are choices, recorded so nobody "fixes" them by accident:
 - One value per point per MQTT poll (the latest), not every message (`durian/mqtt_source.py:92`).
 - Pulled values carry the tick time, not the read time.
 - No process or script event handlers: they would run arbitrary code on the server.
-- No OPC UA, BACnet or DNP3 drivers; SNMP is v2c GET and a bounded GETNEXT walk, deliberately (no v3, no traps, no table model).
+- No OPC UA driver. SNMP is v2c GET and a bounded GETNEXT walk (no v3, no traps, no table model); DNP3 is a
+  read-only master over TCP; BACnet/IP is read-only. None of the three writes to a device.
 - The Sparkplug B source is read-only: no command topics, no STATE topic and no rebirth request, so a point cannot be written over it.
 - Plain HTTP on localhost; anything else needs a certificate.
 - Reset codes and TOTP pending secrets live in memory, so a restart voids them.

@@ -13,13 +13,13 @@ python -m durian.server     # console on http://127.0.0.1:8765
 
 | Measure | Value |
 |---|---|
-| Commits on `main` | 145, at the time of writing |
-| Python modules in `durian/` | 34, 7,882 lines |
-| Test suites in `tests/` | 57, 5,954 lines, all passing |
-| Console | 2,163 lines of JS/CSS/HTML in `web/` |
-| Data source types | 8: virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c, HTTP JSON, SQL, HTTP ingest |
+| Commits on `main` | 170, at the time of writing |
+| Python modules in `durian/` | 36, 9,791 lines |
+| Test suites in `tests/` | 62, 7,272 lines, all passing |
+| Console | 1,964 lines of JS/CSS/HTML in `web/` |
+| Data source types | 11: virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c, DNP3, BACnet/IP, HTTP JSON, SQL, HTTP ingest, calculated |
 | Alarm detectors | 12, with on/off delay, deadband and ISA-18.2 states |
-| Open debt entries | 22 (see `TECHNICAL_DEBT.md`) |
+| Open debt entries | 14 (see `TECHNICAL_DEBT.md`) |
 
 Built and covered by tests: authentication (scrypt, sessions, roles, lockout, TOTP, reset, disable, scoped
 machine tokens), safe control (limits, step, two-step confirm, audit), alarms and shelving, maintenance
@@ -50,16 +50,28 @@ All eleven are now closed, each with a test that fails if it reopens:
 One architecture item is also closed: the engine and the database no longer share one lock, so a slow tick
 does not stall the console (`test_engine_lock.py`).
 
+### The fourth pass, in one paragraph
+
+Two more SCADA drivers, both read-only and stdlib-only, tested against in-process fake peers: DNP3 over TCP
+(`durian/dnp3_source.py`) and BACnet/IP (`durian/bacnet_source.py`), alongside a GETNEXT walk in the SNMP
+source. Sign-in state left process memory — sessions, lockout counters, the TOTP replay guard and write
+confirmations now live in migration 9, so two server processes agree and a second process cannot accept a
+code the first already accepted (`test_shared_state.py`). The repeated rules in the API got one home each and
+`web/app.js` became one file per page. The MySQL path runs in CI on MariaDB 11.4, which immediately found a
+real defect: a read inside `atomic()` committed the transaction and left a failed import behind. And the TLS
+floor is proven by a real handshake rather than asserted.
+
 ## 2. What we need to do
 
 Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these is a feature.
 
 | Item | Why it matters | Size |
 |---|---|---|
-| A9: all state in-process (sessions, lockout, TOTP replay guard, confirm tokens, escalation, SSO state) | blocks any second server process; this is the "no HA" limit | large |
-| U1–U9: untested paths | real COM ports, a real MQTT broker, a real SNMP device, a real Sparkplug edge node, MariaDB in CI, the browser checks | medium each |
-| E2–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested; the intermittent Windows 3.12 failure is fixed, but the version gap remains | small |
-| A1/A10: one 1,000-line `App` and an 854-line `app.js` | every new route widens the same function | medium |
+| A9 (remaining): the escalation set, reset codes, pending TOTP secrets and the engine's own tick stay per process | two processes still double-tick and double-escalate; scheduling, not security | medium |
+| U1, U3, U6, U10, U11: untested paths | a real COM port, real email/Slack delivery, the browser checks, a real DNP3 outstation, a real BACnet device | medium each |
+| A12: the SQLite and MySQL paths diverge through hand-written branches | MySQL now runs in CI, but the two dialects still differ by hand | medium |
+| E4–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested | small |
+| A13: a DNP3 source has no console form | an operator can only add one through JSON | small |
 
 ## 3. What we plan to do
 
@@ -68,15 +80,19 @@ run of commits, pushed as it lands.
 
 | Item | Next concrete step | Why in this order |
 |---|---|---|
-| Architecture: A9 shared state | move sessions, lockout and confirms into the store so two processes could share them | the largest remaining blocker to HA; needs its own design pass |
-| Extensive input: OPC UA, BACnet, DNP3 | one driver at a time behind the existing `Source` interface, each with a simulator to test against, the way SNMP was built | SNMP was done without a dependency; each of these is a larger protocol and a larger simulator |
+| Extensive input: OPC UA | the next driver behind the same `Source` interface, with a fake server in its test; read-only, stdlib only | the one protocol an operator will ask for that is still missing |
+| A9 (remaining) | move the escalation set and the tick lease into the store, so a second process neither double-ticks nor double-escalates | the last piece of "two processes cannot disagree" |
 | Hardening continues | finish the open defects in §2 as they are found, each with its test | the failure model says a new failure gets a test before it gets a fix |
-| A1/A10 refactor | split the dispatcher into a route table and split `web/app.js` by page | it is the cost every later route and page pays; no user-visible change |
+| Console forms | a DNP3 form, then the out-of-service and off-delay controls noted in the roadmap | a driver an operator cannot configure is half a driver |
 | Rust real-time core | the crate stays an experiment until the Python detector layer stops being fast enough | not wired into the server; keep it zero-dependency and tested in CI |
 
-Done in this pass, so no longer planned: the Sparkplug B source (`durian/sparkplug_source.py`), the forecast
-band on the point's own trend page, retrieval of scheduled export bundles, tests for the offline admin reset,
-and percent-decoded route names so a slash-named point can be opened.
+Done in this pass, so no longer planned: the DNP3 source (`durian/dnp3_source.py`), the BACnet/IP source
+(`durian/bacnet_source.py`), the SNMP GETNEXT walk, sign-in state in the store, one home per API rule, the
+`web/app.js` split by page, MariaDB in CI, and a real TLS handshake test.
+
+Done in the previous pass: the Sparkplug B source (`durian/sparkplug_source.py`), the forecast band on the
+point's own trend page, retrieval of scheduled export bundles, tests for the offline admin reset, and
+percent-decoded route names so a slash-named point can be opened.
 
 ## 4. How work lands
 
