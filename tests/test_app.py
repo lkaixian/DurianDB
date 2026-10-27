@@ -121,7 +121,7 @@ assert call(viewer, "GET", "/api/series", point="hot", rollup="median")[0] == 40
 assert call(viewer, "GET", "/api/series", point="hot", window="abc")[0] == 400
 assert call(viewer, "GET", "/api/series", point="hot", window="3600", bucket="10")[0] == 200
 assert call(admin, "GET", "/api/nothing")[0] == 404 and call(admin, "GET", "/etc/passwd")[0] == 404
-assert call(viewer, "GET", "/api/nothing")[0] == 403  # unknown names fall in the admin-only area
+assert call(viewer, "GET", "/api/nothing")[0] == 404  # an unknown name is not a hint that an admin area exists
 
 # password change needs the old one
 assert call(viewer, "POST", "/api/password", {"old": "wrong", "new": "another-password-1"})[0] == 403
