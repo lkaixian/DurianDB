@@ -133,6 +133,17 @@ class Maintenance:
         files = [p for p in self.export_dir.iterdir() if EXPORT_NAME.match(p.name)]
         return [{"name": p.name, "bytes": p.stat().st_size, "ts": p.stat().st_mtime} for p in sorted(files, reverse=True)]
 
+    def export_file(self, name):
+        """A stored bundle by name, or None when this folder does not hold one.
+
+        The name must match the scheduler's fixed pattern, and the resolved path must stay inside export_dir, so a
+        caller-supplied name can never reach another file.
+        """
+        if not EXPORT_NAME.match(name or ""):
+            return None
+        p = (self.export_dir / name).resolve()
+        return p if p.parent == self.export_dir.resolve() and p.is_file() else None
+
     def export_bundle(self, now=None):
         """Build one bundle and prune older ones. Called by the worker, so the schedule never blocks purge or backup."""
         from . import export  # local import: export reads KINDS from this module

@@ -66,6 +66,8 @@ SSO_PUT = ("PUT", "auth", "sso", None)
 SSO_DELETE = ("DELETE", "auth", "sso", None)
 TOKENS = (W, "tokens", W, None)
 DATABASE = (W, "database", W, W)
+EXPORTS = ("GET", "database", "exports", None)
+EXPORT_FILE = ("GET", "database", "exports", N)
 EXPORT_CONFIG = ("GET", "export", None, W)
 IMPORT_CONFIG = ("POST", "import", None, W)
 IMPORT_HISTORY = ("POST", "import", "history", W)
@@ -279,6 +281,9 @@ ROWS = [
     R(DATABASE, "GET", "/api/database", anon=401, viewer=403, ops=403, admin=200),
     R(DATABASE, "PUT", "/api/database/settings", {"retention_days": 365},
       anon=401, viewer=403, ops=403, admin=200),
+    R(EXPORTS, "GET", "/api/database/exports", anon=401, viewer=403, ops=403, admin=200),
+    R(EXPORT_FILE, "GET", "/api/database/exports/durian-export-19700101-000000.zip",
+      anon=401, viewer=403, ops=403, admin=404),
     R(EXPORT_CONFIG, "GET", "/api/export", anon=401, viewer=403, ops=403, admin=200),
     R(IMPORT_CONFIG, "POST", "/api/import", {"format": "durian-config", "version": 1, "objects": {}},
       anon=401, viewer=403, ops=403, admin=200),
@@ -353,6 +358,8 @@ assert READ["scope"] == "read" and WRITE["scope"] == "write" and INGEST_TOKEN["s
 ADMIN_ROUTES = [
     ("GET", "/api/users", None, {}), ("GET", "/api/config/point", None, {}),
     ("GET", "/api/audit", None, {}), ("GET", "/api/database", None, {}),
+    ("GET", "/api/database/exports", None, {}),
+    ("GET", "/api/database/exports/durian-export-19700101-000000.zip", None, {}),
     ("GET", "/api/export", None, {}), ("GET", "/api/export/points", None, {}),
     ("GET", "/api/export/bundle", None, {}), ("GET", "/api/export/manifest", None, {}),
     ("GET", "/api/tokens", None, {}), ("GET", "/api/outputs", None, {}),
