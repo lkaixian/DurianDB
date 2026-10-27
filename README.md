@@ -10,6 +10,7 @@ The badge covers the whole workflow, which runs these jobs on every push to `mai
 | `tests on 3.12 / windows-latest` | the same on Windows, where paths and line endings differ |
 | `tests on 3.13 / ubuntu-latest` | the newest Python CI supports, on Linux |
 | `tests on 3.13 / windows-latest` | the same on Windows |
+| `tests on MariaDB` | the suite on the MySQL/MariaDB backend, against a MariaDB 11.4 service container |
 | `real-time core (experimental)` | the Rust detector crate's tests and clippy |
 
 GitHub shows badges per workflow, not per job; the link above opens the job list with each job's own result.
@@ -28,6 +29,22 @@ python -m durian.server      # http://127.0.0.1:8765
 python tests/run_all.py      # 53 suites, all passing
 ```
 
+To run the suite on the MySQL/MariaDB backend, start a throwaway MariaDB and point the two test URLs at it
+(the suite drops every table in that database first, so never use a real one):
+
+```sh
+docker run -d --name durian-test-mariadb \
+  -e MARIADB_DATABASE=durian_test -e MARIADB_USER=durian -e MARIADB_PASSWORD=durian \
+  -e MARIADB_ROOT_PASSWORD=durian-root -p 127.0.0.1:3307:3306 mariadb:11.4
+DURIAN_TEST_STORE_URL=mysql://durian:durian@127.0.0.1:3307/durian_test \
+DURIAN_TEST_MYSQL_URL=mysql://durian:durian@127.0.0.1:3307/durian_test \
+  python tests/run_all.py
+docker rm -f durian-test-mariadb
+```
+
+Change `3307` if that port is taken. This check was run against MariaDB 11.4 on 2026-10-27 and passed; the
+same URLs, with the container's port mapped to `3306`, run in CI.
+
 The first run prints a generated `admin` password once; `DURIAN_ADMIN_PASSWORD` chooses it instead. Other
 settings: `DURIAN_DB`, `DURIAN_PORT`, `DURIAN_HOST`, `DURIAN_TLS_CERT` and `DURIAN_TLS_KEY`, `DURIAN_TICK`
 (seconds between polls) and `DURIAN_MQTT_CREDS`.
@@ -35,7 +52,7 @@ settings: `DURIAN_DB`, `DURIAN_PORT`, `DURIAN_HOST`, `DURIAN_TLS_CERT` and `DURI
 `requirements.txt` lists the third-party packages. The core server is Python standard library plus
 `paho-mqtt` (version 2 or newer) for the MQTT source and publisher. `pymysql` and `pyserial` are only needed
 for MySQL/MariaDB and serial Modbus, and `cryptography` for the lab tools and the TLS handshake test. CI runs
-the suite on Python 3.12 and 3.13.
+the suite on Python 3.12 and 3.13, and runs the MySQL/MariaDB path once on MariaDB 11.4.
 
 The console is served on `127.0.0.1` only. To reach it from another machine, give it a certificate:
 `python tools/make_cert.py plant-pc.local` then start with `DURIAN_HOST=0.0.0.0 DURIAN_TLS_CERT=tools/cert.pem

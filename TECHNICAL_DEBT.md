@@ -47,7 +47,6 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 
 | # | Debt | Severity | Cost |
 |---|---|---|---|
-| E3 | `pymysql` is a hidden runtime dependency for MySQL: unlisted, not in CI | medium | The MySQL path cannot fail in CI, only in production |
 | E4 | `pyserial` is an optional lazy import, not installed in CI | low | Serial Modbus tests cannot run there |
 | E5 | CI tests Python 3.12 and 3.13; local development is 3.14 | low | The version actually used most is untested |
 | E6 | `cryptography` is needed by `tools/make_cert.py`, `tools/mqtt_lab.py` and `tests/test_tls.py`; CI installs it, a local run without it fails that suite | low | The TLS suite cannot run on a bare install |
@@ -58,7 +57,6 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 |---|---|---|---|
 | U1 | Modbus TCP/RTU/ASCII | Simulator, and RTU only over a `socket://` URL — never a real COM port or device | medium |
 | U3 | Email, Slack, escalation delivery | A fake SMTP server; Slack only validates config | medium |
-| U5 | MariaDB / MySQL | Opt-in, absent from CI | medium |
 | U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | Manual, headless Edge on port 9222 | medium |
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
 | U8 | SNMP source | An in-process fake agent answers crafted datagrams; never a real device | low |

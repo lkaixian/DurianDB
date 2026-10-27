@@ -58,7 +58,8 @@ class Store:
             try:
                 cur.execute(self._x(sql), args)
             except Exception:
-                self.db.rollback()
+                if not self._tx:  # inside atomic() the enclosing block decides when to roll back
+                    self.db.rollback()
                 raise
             return cur
         return self.db.execute(sql, args)
@@ -73,8 +74,8 @@ class Store:
             cur = self._exec(sql, args)
             cols = [c[0] for c in cur.description or []]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-            if self.kind == "mysql":
-                self.db.commit()  # end the read snapshot so later reads see new rows
+            if self.kind == "mysql" and not self._tx:
+                self.db.commit()  # end the read snapshot so later reads see new rows; an enclosing atomic() owns its transaction
             return rows
 
     def run(self, sql, args=()):
@@ -109,7 +110,8 @@ class Store:
                 try:
                     cur.executemany(self._x(sql), rows)
                 except Exception:
-                    self.db.rollback()
+                    if not self._tx:  # inside atomic() the enclosing block decides when to roll back
+                        self.db.rollback()
                     raise
             else:
                 self.db.executemany(sql, rows)
