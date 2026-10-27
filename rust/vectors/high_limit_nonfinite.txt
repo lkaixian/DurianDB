@@ -1,0 +1,11 @@
+kind HIGH_LIMIT
+config limit=10.0 deadband=0.0
+delays 0.0 0.0
+samples
+C 0.0 11.0
+C 1.0 nan
+C 2.0 11.0
+expected
+RAISED
+ACTIVE
+ACTIVE

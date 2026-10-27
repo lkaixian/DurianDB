@@ -1,0 +1,13 @@
+kind NO_UPDATE
+config seconds=60.0
+delays 0.0 0.0
+samples
+T 10.0 10.0
+T 100.0 10.0
+C 101.0 1.0
+T 150.0 101.0
+expected
+NORMAL
+RAISED
+CLEARED
+NORMAL

@@ -37,27 +37,28 @@
 <section><h2>Landed this pass</h2>
 <table>
 <tr><th>Commit</th><th>What</th><th>Debt closed</th><th>Gate evidence</th></tr>
+<tr><td><code>eab2c19</code></td><td>F5 probe tooling: <code>tools/hw_probe.py</code> — per-driver probes; an absent endpoint is an honest, named skip</td><td>—</td><td>no config: exit 0, 7 skips, 0 failed</td></tr>
+<tr><td><code>d3bc9b1</code></td><td>Email recipient groups and <code>{placeholder}</code> subject/body templates; the mail path hardened to the review findings</td><td>—</td><td><code>tests/test_email_groups.py</code> PASS; run_all green</td></tr>
+<tr><td><code>52ca0b6</code></td><td>Browser CI job green for the first time: report a signal-killed Chrome, <code>--no-sandbox</code> for ubuntu-24.04 AppArmor</td><td class="ok">U6</td><td>12-check browser suite green; <code>CI / browser</code> badge green</td></tr>
 <tr><td><code>bc1eb5d</code></td><td>2FA screen + report-handler form driven in a real browser (new <code>tools/browser_account.mjs</code>)</td><td class="ok">U7</td><td>account check PASS 9.6s, re-run by orchestrator</td></tr>
 <tr><td><code>b409d90</code></td><td>Python 3.14 added to CI matrix; stale dep claims deleted; A9 closed as deliberate</td><td class="ok">E4, E5, E6, A9</td><td>66/66 suites on 3.14.4, exit 0</td></tr>
 <tr><td><code>053e87e</code></td><td>All 12 browser checks now exit 1 on an error they did not provoke; designer steps rewritten against current markup</td><td class="ok">U6</td><td>4/4 PASS; injected console.error proven to turn a check red</td></tr>
 <tr><td><code>b9b016b</code></td><td>One workflow file per CI job, one badge each in the README</td><td class="ok">—</td><td>tests + MariaDB + rust green independently</td></tr>
 </table>
-<p class="foot">Open debt now: <strong>8</strong> → U1, U3, U8–U12 (hardware), plus the tracker rows below. Was 13.</p></section>
+<p class="foot">Open debt now: <strong>7</strong> → U1, U3, U8–U12 (hardware), with probe tooling landed (<code>tools/hw_probe.py</code>). Was 13.</p></section>
 
 <section><h2>In flight</h2>
 <table>
 <tr><th>Item</th><th>Executor owns</th><th>Fix / feature</th><th>Gate before commit</th></tr>
-<tr><td class="run">CI browser job red since introduction</td><td><code>tools/browser_ci.mjs</code></td><td>Report a signal-killed Chrome instead of a silent 30s timeout, then <code>--no-sandbox</code> + <code>--disable-dev-shm-usage</code> (ubuntu-24.04 AppArmor kills the zygote; job never passed in CI)</td><td>full 12-check suite green on Windows/Edge; then push and watch the <code>CI / browser</code> badge go green</td></tr>
-<tr><td class="run">F1 — email recipient groups + subject/body templates (Mango parity, doc 11 §Email)</td><td><code>durian/outputs.py</code>, <code>web/forms.js</code>, new <code>tests/test_email_groups.py</code></td><td>generic config kind <code>emailgroup</code>; handler <code>groups</code> ∪ <code>to</code>, dedup; placeholders {point} {value} {level} {time} {message} {source}; unknown placeholder stays literal</td><td>RED recorded before code; run_all 67/67; <code>node --check web/forms.js</code></td></tr>
+<tr><td class="ok">Rust/Python detector parity — landed as this commit</td><td><code>tools/rust_parity_vectors.py</code>, <code>rust/src/lib.rs</code>, <code>durian/core.py</code>, <code>rust/tests/parity.rs</code>, <code>tests/test_detector_nonfinite.py</code></td><td>Replayed real <code>durian/core.py</code> output through <code>rust/src/lib.rs</code>: a non-finite sample now holds every value-driven detector (Python), and a non-advancing rate sample resets the on-delay (Rust)</td><td>RED recorded; cargo test 33 lib + parity PASS; clippy <code>-D warnings</code> clean; run_all green; vectors regenerated; hw_probe 0/7/0</td></tr>
+<tr><td class="run">F2 — query-based and hierarchy watch lists</td><td>new <code>tests/test_watchlists_query.py</code> first (executor a23dcc-style: RED only, no <code>durian/</code> edits)</td><td>Resolve <code>tags.area == plant</code> or <code>folder: "plant/boiler"</code> to live points at read time; no membership table</td><td>RED recorded before code; then code and run_all green</td></tr>
 </table></section>
 
 <section><h2>Planned — Mango parity and the SCADA baseline gaps</h2>
 <table>
 <tr><th>#</th><th>Feature (source of the claim)</th><th>First test</th><th>Then code</th></tr>
-<tr><td>F2</td><td>Query-based and hierarchy watch lists — Mango doc 11 line 14 names three kinds; DurianDB ships only static</td><td>test: a watchlist with <code>query: "tags.area == plant"</code> or <code>folder: "plant/boiler"</code> resolves live points through the existing folder/tag fields</td><td>resolve at read time, no membership table</td></tr>
 <tr><td>F3</td><td>Scan classes — baseline doc 10 row 2 gap; points all tick at the source period</td><td>test: two points, one FAST one SLOW, tick counts differ over simulated time</td><td>per-point <code>scan</code> multiplier on the polled path</td></tr>
 <tr><td>F4</td><td>Time-based write rate limit — baseline doc 10 row 7 gap</td><td>test: setting twice inside the window rejects the second write with a sentence, audit records the refusal</td><td>one timestamp per point in the engine, checked where confirm tokens are checked</td></tr>
-<tr><td>F5</td><td>Hardware wave — U1, U3, U8–U12: point one driver at a real device (lab MQTT 18883, a real Modbus slave, real SMTP relay if present)</td><td>a probe test per driver that SKIPS with a named reason when its endpoint is absent — the skip is the honest red</td><td>only what a probe failure demands</td></tr>
 <tr><td>—</td><td>Declined on purpose, not debt: image points, scripted meta points, process/script handlers, gRPC publisher, Excel templates (new dep — CSV covers it), OPC UA server, store-and-forward at the edge, backfill</td><td colspan="2">each decline carries the doc-10/11 reason; revisit only when a real requirement shows up</td></tr>
 </table></section>
 

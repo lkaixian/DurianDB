@@ -1,0 +1,23 @@
+kind RATE_OF_CHANGE
+config per_second=2.0
+delays 5.0 0.0
+samples
+C 0.0 10.0
+C 3.0 20.0
+C 3.0 25.0
+C 8.0 40.0
+C 13.0 80.0
+C 18.0 120.0
+C 18.0 130.0
+C 19.0 130.0
+C 20.0 130.0
+expected
+NORMAL
+NORMAL
+NORMAL
+NORMAL
+RAISED
+ACTIVE
+ACTIVE
+ACTIVE
+CLEARED

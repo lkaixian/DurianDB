@@ -492,7 +492,14 @@ impl Detector {
         if matches!(self.kind, Kind::RateOfChange { .. }) {
             if let Some((_, t)) = self.prev {
                 if ts <= t {
-                    return None;  // same instant, no interval: neither a rise nor a return to normal
+                    // Same instant or backdated: no interval, so no rate. Python's RateOfChange returns
+                    // None here, and `_Latch.check` then resets the on-delay clock; an active alarm is
+                    // echoed as its own message and therefore holds. Match that: a non-advancing sample
+                    // restarts the on-delay instead of leaving the earlier `since` in place.
+                    if self.raised_at.is_some() {
+                        return None;
+                    }
+                    return self.apply(ts, None);
                 }
             }
             let prev = self.prev.replace((value, ts));
@@ -646,6 +653,18 @@ mod tests {
         assert_eq!(d.check(1.0, 1.0), None, "1/s");
         assert!(matches!(d.check(2.0, 5.0), Some(Transition::Raised(_))), "4/s");
         assert_eq!(d.check(2.0, 9.0), None, "a zero interval cannot poison the rate");
+    }
+
+    #[test]
+    fn a_backdated_rate_sample_restarts_the_on_delay() {
+        // Python's _Latch.check treats a no-interval sample as "condition false", which resets `since`.
+        // Leaving `since` from (3, 20) would make (8, 40) look like five seconds of a held condition.
+        let mut d = Detector::with_delays(Kind::RateOfChange { per_second: 2.0 }, Level::Warning, 5.0, 0.0);
+        assert_eq!(d.check(0.0, 10.0), None);
+        assert_eq!(d.check(3.0, 20.0), None, "fast, but the on-delay has only just started");
+        assert_eq!(d.check(3.0, 25.0), None, "no interval: the on-delay clock restarts");
+        assert_eq!(d.check(8.0, 40.0), None, "only 0s have held since the restart");
+        assert!(!d.is_active());
     }
 
     #[test]

@@ -1,0 +1,13 @@
+kind NO_CHANGE
+config seconds=5.0 tolerance=0.1
+delays 0.0 0.0
+samples
+C 0.0 1.0
+T 4.0 4.0
+T 6.0 6.0
+C 7.0 2.0
+expected
+NORMAL
+NORMAL
+RAISED
+CLEARED
