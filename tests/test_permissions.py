@@ -1,9 +1,10 @@
 """Every route the dispatcher serves, and who may call it. Run: python tests/test_permissions.py
 
-The route list is parsed from App.handle itself, so a newly added branch fails this test until it has a
-permission opinion here. Four caller shapes are checked for every route: anonymous, a plain user, a custom
-role (ops) that the point's read_roles does not include, and a superadmin. Machine-token scopes are checked
-separately: a scoped token must never reach an administrative route.
+The route list is parsed from App.handle and from every handler method named in App.DATA_ROUTES and
+App.ADMIN_ROUTES, so a newly added branch fails this test until it has a permission opinion here, whichever
+table or handler it was added to. Four caller shapes are checked for every route: anonymous, a plain user, a
+custom role (ops) that the point's read_roles does not include, and a superadmin. Machine-token scopes are
+checked separately: a scoped token must never reach an administrative route.
 
 Some routes are public on purpose and the table says so: GET /api/me is what the console asks before sign-in,
 and GET /api/health is the unauthenticated liveness probe tools/nodered_check.py waits on. List endpoints do
@@ -83,7 +84,7 @@ def _const(node):
 
 
 def _shape(test):
-    """(methods, a, b, c) for one top-level `if` of App.handle."""
+    """(methods, a, b, c) for one top-level `if` of a dispatcher function."""
     got = {}
 
     def walk(n):
@@ -125,10 +126,18 @@ def _is_route_test(test):
     return False
 
 
-def dispatcher_shapes():
-    """Every top-level branch of App.handle that names a method or an `a` value."""
-    fn = ast.parse(textwrap.dedent(inspect.getsource(App.handle))).body[0]
+def _shapes_in(source):
+    """Every top-level branch of one dispatcher function that names a method or an `a` value."""
+    fn = ast.parse(textwrap.dedent(source)).body[0]
     return {_shape(node.test) for node in fn.body if isinstance(node, ast.If) and _is_route_test(node.test)}
+
+
+def dispatcher_shapes():
+    """Every route shape App.handle itself or a handler it dispatches to serves."""
+    shapes = _shapes_in(inspect.getsource(App.handle))
+    for name in set(App.DATA_ROUTES.values()) | set(App.ADMIN_ROUTES.values()):
+        shapes |= _shapes_in(inspect.getsource(getattr(App, name)))
+    return shapes
 
 
 def R(shape, method, path, body=None, *, anon, viewer, ops, admin, query=None, anon_empty=False):
