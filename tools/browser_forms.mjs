@@ -28,6 +28,7 @@ await send("Network.enable"); await send("Network.setCacheDisabled", {cacheDisab
 await ev(`(()=>{const f=document.querySelector('#login');f.username.value='admin';f.password.value=${JSON.stringify(process.env.DURIAN_ADMIN_PASSWORD)};f.requestSubmit()})()`); await sleep(2500);
 
 const putPoint = n => ev(`fetch('/api/config/point/${n}',{method:'PUT',headers:{'Content-Type':'application/json','X-Requested-With':'durian'},body:JSON.stringify({source:'demo',generator:{kind:'constant',value:1}})}).then(r=>r.status)`);
+const putCfg = (path, b) => ev(`fetch('/api/config/${path}',{method:'PUT',headers:{'Content-Type':'application/json','X-Requested-With':'durian'},body:JSON.stringify(${JSON.stringify(b)})}).then(r=>r.status)`);
 for (const n of ["list-a", "list-b", "list-c"]) await putPoint(n);   // enough rows for the filter box to appear
 // 0. the lists are dense tables with a filter; a row opens its editor
 await go("#config/point");
@@ -98,6 +99,25 @@ await ev(`(()=>{const s=document.querySelector('#tpl');s.value='Modbus TCP';s.di
 await set("link.port", 1); await set("timeout", 0.5); await set("retries", 0);
 await ev(`document.querySelector('#test').click()`); await sleep(2500);
 console.log("test result:", await ev(`document.querySelector('#test-out').textContent`));
+// 10. a shared watch list holds a read-time query, and /api/points resolves it (durian/app.py query_match)
+for (const [n, f] of [["zone-fan", "plant/boiler"], ["zone-pump", "plant/line"]]) await putCfg(`point/${n}`, {source: "demo", folder: f, generator: {kind: "constant", value: 1}});
+await sleep(1000);
+await go("#config/watchlist/_new");
+console.log("watchlist query fields:", await ev(`[...document.querySelectorAll('#fe-fields [data-path^="query."]')].map(e=>e.dataset.path).join()`));
+await ev(`document.querySelector('#ed').name.value='plant-boiler'`);
+await set("tags", "");   // the template's area:boiler tag would also match; the folder query alone is what we test
+const folderField = await set("query.folder", "plant/boiler");
+console.log("watchlist query field:", folderField);
+if (folderField !== "ok") { console.log("FAIL: the watch list form has no folder query field"); process.exit(1); }
+await shot("6-watchlist");
+await save();
+console.log("watchlist saved:", (await msg())?.replace(/\n/g, " "), "| hash:", await ev(`location.hash`));
+const wlCfg = await ev(`fetch('/api/config/watchlist/plant-boiler').then(r=>r.json())`);
+console.log("stored query:", JSON.stringify(wlCfg?.query));
+const resolved = await ev(`fetch('/api/points?watchlist=plant-boiler').then(r=>r.json()).then(x=>x.map(p=>p.name).join())`);
+console.log("points by watch list:", resolved);
+if (JSON.stringify(wlCfg?.query) !== JSON.stringify({folder: "plant/boiler"})) { console.log("FAIL: the saved watch list did not keep its query"); process.exit(1); }
+if (!String(resolved).includes("zone-fan") || String(resolved).includes("zone-pump")) { console.log("FAIL: the watch list query did not resolve the folder subtree at read time"); process.exit(1); }
 // mobile
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");

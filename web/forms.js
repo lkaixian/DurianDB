@@ -231,7 +231,12 @@ const GROUPS = {
     F("name_like", "Name pattern", "text", {optional: true, hint: "For example boiler-*. A query list: points matching every filled-in part are included."}),
     F("text_like", "Description contains", "text", {optional: true}),
     F("points", "Points to include", "list", {hint: "Point names, comma separated."}),
-    F("read_roles", "Who can read it", "roles", {hint: ROLE_HINT})]}],
+    F("read_roles", "Who can read it", "roles", {hint: ROLE_HINT})]},
+    {title: "Query, resolved each time the list is read", fields: [
+    F("query.folder", "Folder and its subfolders", "text", {optional: true, hint: "For example plant/boiler. A point created there later is included; a point moved out drops."}),
+    F("query.tags", "Query tags", "tags", {optional: true, hint: "key:value pairs. A point must have every one of them."}),
+    F("query.source", "From source", "text", {optional: true, hint: "Source name. Empty = any source."}),
+    F("query.name_like", "Name contains", "text", {optional: true, hint: "Part of the point name. Empty = any name."})]}],
   emailgroup: () => [{title: "Email group", fields: [
     F("addresses", "Addresses", "list", {hint: "Email addresses, comma separated. Email handlers that name this group send to all of them, once each."})]}],
 };
@@ -337,6 +342,10 @@ function tidy(kind, body) {
   if (kind === "maintenance") {
     for (const k of ["points", "tags", "sources"]) if (body.scope && (body.scope[k] === undefined || (Array.isArray(body.scope[k]) ? !body.scope[k].length : !Object.keys(body.scope[k]).length))) delete body.scope[k];
   }  // drop what an empty optional control leaves behind
+  if (kind === "watchlist" && body.query) {  // a blank query field is not part of the rule, like an empty optional field
+    for (const k of Object.keys(body.query)) if (body.query[k] == null || (typeof body.query[k] === "object" && !Object.keys(body.query[k]).length)) delete body.query[k];
+    if (!Object.keys(body.query).length) delete body.query;
+  }
   if (kind === "point") {
     if (!body.suppress_when?.point) delete body.suppress_when;
     else if (!body.suppress_when.op || body.suppress_when.value === undefined) { body.suppress_when.op ||= ">"; body.suppress_when.value ??= 0; }

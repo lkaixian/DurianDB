@@ -22,6 +22,7 @@ function viewOverview() {
   $("#f-save")?.addEventListener("click", async () => {
     const name = prompt("Name for this watch list (letters, digits, dot, dash, underscore):");
     if (!name) return;
+    // A personal save is a static snapshot on purpose; a query personal list is API-only today (PUT /api/mylists with {"query": {...}}).
     try { await api("PUT", `/api/mylists/${encodeURIComponent(name.trim())}`, {points: lastPts.map(p => p.name)}); $("#f-out").textContent = "saved"; await lists(name.trim()); ptSig = ""; refreshOverview().catch(showErr); }
     catch (e) { $("#f-out").textContent = e.message; }
   });
