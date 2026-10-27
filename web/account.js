@@ -43,9 +43,10 @@ function viewLogin() {
 function viewAbout() {
   main.innerHTML = `<section aria-labelledby="ab-h"><h2 id="ab-h">About DurianDB</h2>
     <p class="note">Plant monitoring and alarm console.</p>
-    <dl class="kv"><dt>Version</dt><dd class="num">${esc(me.version)}</dd>
-    <dt>Build</dt><dd class="num">${esc(me.build)}</dd>
-    <dt>Source</dt><dd><a href="${esc(me.repo)}" rel="noopener noreferrer">${esc(me.repo)}</a></dd></dl></section>`;
+    ${me.version ? "" : `<p class="note">This server is running an older build that does not report its version. Restart it.</p>`}
+    <dl class="kv"><dt>Version</dt><dd class="num">${esc(me.version || "unknown")}</dd>
+    <dt>Build</dt><dd class="num">${esc(me.build || "unknown")}</dd>
+    <dt>Source</dt><dd>${me.repo ? `<a href="${esc(me.repo)}" rel="noopener noreferrer">${esc(me.repo)}</a>` : "unknown"}</dd></dl></section>`;
 }
 
 function viewAccount() {

@@ -1,5 +1,5 @@
 """Product identity, shown in the console's About page and at the foot of the sidebar."""
 
 VERSION = "0.0.1"
-BUILD = "2026.10.27"  # bump with every release; the About page shows it next to the version
+BUILD = "20261027-PYTHON-ALPHA"  # date, runtime, channel; bump with every release
 REPO = "https://github.com/lkaixian/DurianDB"

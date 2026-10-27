@@ -48,7 +48,7 @@ function nav(view) {
   document.querySelector(".shell").classList.toggle("solo", !me.name);  // before sign-in there is nothing to navigate to
   const cur = v => v === view || (view === "point" && v === "overview") || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : "";
   $("#nav").innerHTML = groups.map(([g, items]) => `<p class="ng">${esc(g)}</p>${items.map(([v, l]) => `<a href="#${v}" ${cur(v)}>${esc(l)}</a>`).join("")}`).join("");
-  if (me.name) $("#nav").insertAdjacentHTML("beforeend", `<a class="navver" href="#about" title="About DurianDB">v${esc(me.version)}</a>`);  // pinned to the foot of the sidebar
+  if (me.name) $("#nav").insertAdjacentHTML("beforeend", `<a class="navver" href="#about" title="About DurianDB">v${esc(me.version || "?")}</a>`);  // pinned to the foot of the sidebar; a server too old to report a version shows "?" not a bare "v"
 }
 // The header shows how many alarms still wait for someone, whatever page is open. Text and colour together.
 // Optional audible alert: a short beep when the number of unacknowledged alarms goes up. Off until someone turns it on (browsers need a click first).
