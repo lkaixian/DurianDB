@@ -22,6 +22,8 @@ from .config import NAME, load_creds
 from .core import SOURCE, Level, Quality, sentence, state_label
 from .mqtt_source import tls_client
 from .polled import NoRedirect
+from .sparkplug_codec import Metric
+from .sparkplug_publisher import DOUBLE, STRING, SparkplugPublisher
 
 log = logging.getLogger("durian.outputs")
 
@@ -29,7 +31,7 @@ opener = urllib.request.build_opener(NoRedirect)
 ADDRESS = re.compile(r"^[^@\s<>,;]{1,64}@[^@\s<>,;]{1,255}$")
 HANDLER_TYPES = ("webhook", "email", "setpoint", "report", "slack")
 SECURITY = ("none", "starttls", "ssl")
-PUBLISHER_TYPES = ("mqtt", "http")
+PUBLISHER_TYPES = ("mqtt", "http", "sparkplug")
 DELIVERY_TIMEOUT = 5
 
 
@@ -65,6 +67,11 @@ def _reason(ex, timeout=DELIVERY_TIMEOUT):
 
 def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _sparkplug_id(v):
+    """A Sparkplug id is one topic level: text that cannot split the topic or add a wildcard."""
+    return isinstance(v, str) and 1 <= len(v) <= 64 and not any(c in v for c in "/+#")
 
 
 def validate_emailgroup(name, b):
@@ -176,6 +183,17 @@ def validate_publisher(name, b, store):
                     other = s.get("prefix", "durian/")
                     if pre.startswith(other) or other.startswith(pre):
                         add("prefix", f"overlaps the prefix of source '{s['name']}'")
+    elif kind == "sparkplug":
+        try:
+            load_creds(b.get("creds", ""))
+        except (OSError, ValueError, TypeError) as ex:
+            log.warning("publisher credentials file %s rejected: %s", b.get("creds"), ex)
+            add("creds", f"cannot use credentials file: {sentence(ex) or 'it could not be read'}")
+        for key in ("group", "node"):
+            if not _sparkplug_id(b.get(key)):
+                add(key, "must be 1 to 64 letters, digits or underscores, without '/', '+' or '#'")
+        if b.get("device") is not None and not _sparkplug_id(b["device"]):
+            add("device", "must be 1 to 64 letters, digits or underscores, without '/', '+' or '#', or left out")
     pts = b.get("points")
     if not (isinstance(pts, list) and pts and all(isinstance(p, str) for p in pts)):
         add("points", "list the point names to publish, or ['*'] for all")
@@ -210,11 +228,14 @@ class Outputs:
                                      "headers": {"Authorization": "Bearer " + tok} if tok else {}})
                 continue
             try:
-                cl = tls_client(load_creds(p["creds"]))
                 c = load_creds(p["creds"])
+                cl = tls_client(c)
+                # The target is the topic prefix for plain MQTT, or the Sparkplug publisher that owns this client.
+                target = (SparkplugPublisher(p["group"], p["node"], p.get("device"), client=cl)
+                          if p.get("type") == "sparkplug" else p["prefix"])
                 cl.connect_async(c["host"], c["port"])
                 cl.loop_start()
-                self.publishers.append((cl, p["prefix"], set(p["points"])))
+                self.publishers.append((cl, target, set(p["points"])))
             except Exception as ex:
                 log.warning("publisher %s not started: %s: %s", p["name"], type(ex).__name__, ex)
                 self._note(p["name"], "publisher", f"the publisher could not start: {sentence(ex) or 'check the broker address and credentials'}")
@@ -230,9 +251,20 @@ class Outputs:
                 if last is None or last[0] != value or now - last[1] >= s["resend"]:
                     s["sent"][point.name] = (value, now)
                     self._put(("webhook", s["url"], {"point": point.name, "value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}, s["headers"]), s["name"])
-        for cl, prefix, names in self.publishers:
-            if "*" in names or point.name in names:
-                cl.publish(prefix + point.name, json.dumps({"value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}), qos=1)
+        for cl, target, names in self.publishers:
+            if "*" not in names and point.name not in names:
+                continue
+            if isinstance(target, SparkplugPublisher):
+                # The source rebuilds the point as <node>/<device>/<metric>, so strip exactly that prefix
+                # and a point named <node>/<device>/temp round-trips under its own name.
+                prefix = f"{target.node}/{target.device}/" if target.device else f"{target.node}/"
+                name = point.name[len(prefix):] if point.name.startswith(prefix) else point.name
+                if isinstance(value, str):
+                    target.data([Metric(name=name, datatype=STRING, value=value, timestamp=int(ts * 1000))])
+                elif _num(value):
+                    target.data([Metric(name=name, datatype=DOUBLE, value=float(value), timestamp=int(ts * 1000))])
+                continue
+            cl.publish(target + point.name, json.dumps({"value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}), qos=1)
 
     def _in_scope(self, h, ev):
         sc = h.get("scope")
