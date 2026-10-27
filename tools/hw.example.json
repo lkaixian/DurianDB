@@ -1,0 +1,49 @@
+{
+  "com": {
+    "port": "COM7",
+    "baudrate": 9600,
+    "parity": "N",
+    "stopbits": 1,
+    "unit": 1,
+    "address": 0,
+    "count": 2,
+    "timeout": 1.0
+  },
+  "smtp": {
+    "host": "mail.example.com",
+    "port": 587,
+    "security": "starttls",
+    "creds": "lab/smtp-creds.json"
+  },
+  "snmp": {
+    "host": "192.168.1.50",
+    "port": 161,
+    "community": "public",
+    "oids": ["1.3.6.1.2.1.1.1.0", "1.3.6.1.2.1.1.5.0"],
+    "timeout": 2.0
+  },
+  "sparkplug": {
+    "creds": "lab/mqtt/creds.json",
+    "group": "Plant",
+    "seconds": 5
+  },
+  "dnp3": {
+    "address": "192.168.1.60:20000",
+    "outstation": 1,
+    "timeout": 2.0
+  },
+  "bacnet": {
+    "address": "192.168.1.61:47808",
+    "device": 1234,
+    "object_type": "analogInput",
+    "instance": 1,
+    "property": "presentValue",
+    "timeout": 2.0
+  },
+  "opcua": {
+    "address": "192.168.1.62:4840",
+    "path": "",
+    "node": "i=2258",
+    "timeout": 2.0
+  }
+}
