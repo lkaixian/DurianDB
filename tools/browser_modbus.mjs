@@ -10,11 +10,15 @@ const targets = await (await fetch("http://127.0.0.1:9222/json/list")).json();
 const ws = new WebSocket(targets.find(t => t.type === "page").webSocketDebuggerUrl);
 await new Promise(r => ws.addEventListener("open", r));
 let id = 0; const pending = new Map(); const problems = [];
+// The icon probe is the only 4xx this check provokes, and the server has no favicon.
+const expected = ["/favicon.ico"];
+const want = s => expected.some(x => s.includes(x));
 ws.addEventListener("message", e => {
   const m = JSON.parse(e.data);
   if (m.id && pending.has(m.id)) { pending.get(m.id)(m.result ?? m.error); pending.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") problems.push("EXC " + (m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text));
-  if (m.method === "Log.entryAdded" && m.params.entry.level === "error") problems.push("LOG " + m.params.entry.text + " " + (m.params.entry.url ?? ""));
+  if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") problems.push("CONSOLE " + m.params.args.map(a => a.value ?? a.description).join(" "));
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error") { const s = m.params.entry.text + " " + (m.params.entry.url ?? ""); if (!want(s)) problems.push("LOG " + s); }
 });
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({id: i, method, params})); });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -51,4 +55,4 @@ console.log("VALUES:", await ev(`[...document.querySelectorAll('.pt')].map(p=>p.
 await ev(`(()=>{const f=document.querySelector('form[data-set="setpoint"]');f.value.value='77';f.querySelector('button').click()})()`); await sleep(3500);
 console.log("AFTER SET:", await ev(`document.querySelector('form[data-set="setpoint"] output')?.textContent`), "|", await ev(`document.querySelector('[data-pt="setpoint"] .val').textContent`));
 console.log("PROBLEMS:", JSON.stringify(problems));
-ws.close(); process.exit(0);
+ws.close(); process.exit(problems.length ? 1 : 0);

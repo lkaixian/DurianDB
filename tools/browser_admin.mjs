@@ -11,11 +11,15 @@ const targets = await (await fetch("http://127.0.0.1:9222/json/list")).json();
 const ws = new WebSocket(targets.find(t => t.type === "page").webSocketDebuggerUrl);
 await new Promise(r => ws.addEventListener("open", r));
 let id = 0; const pending = new Map(); const problems = [];
+// The empty token source and the bad import file are this check's own 4xx tests; the icon probe is the browser's.
+const expected = ["/favicon.ico", "/api/tokens", "/api/import?mode=merge"];
+const want = s => expected.some(x => s.includes(x));
 ws.addEventListener("message", e => {
   const m = JSON.parse(e.data);
   if (m.id && pending.has(m.id)) { pending.get(m.id)(m.result ?? m.error); pending.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") problems.push("EXC " + (m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text));
-  if (m.method === "Log.entryAdded" && m.params.entry.level === "error") problems.push("LOG " + m.params.entry.text + " " + (m.params.entry.url ?? ""));
+  if (m.method === "Runtime.consoleAPICalled" && m.params.type === "error") problems.push("CONSOLE " + m.params.args.map(a => a.value ?? a.description).join(" "));
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error") { const s = m.params.entry.text + " " + (m.params.entry.url ?? ""); if (!want(s)) problems.push("LOG " + s); }
 });
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({id: i, method, params})); });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -76,4 +80,4 @@ await shot("t3-import-errors");
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 844, deviceScaleFactor: 2, mobile: true});
 for (const v of ["#tokens", "#database"]) { await go(v, 2500); console.log("MOBILE", v, "overflow:", await ev(`document.documentElement.scrollWidth > innerWidth`)); }
 console.log("PROBLEMS:", JSON.stringify(problems));
-ws.close(); process.exit(0);
+ws.close(); process.exit(problems.length ? 1 : 0);

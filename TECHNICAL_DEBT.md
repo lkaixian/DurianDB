@@ -72,13 +72,18 @@ for a declared dependency). E5: the CI matrix now includes 3.14, and the full su
 |---|---|---|---|
 | U1 | Modbus TCP/RTU/ASCII | Simulator, and RTU only over a `socket://` URL — never a real COM port or device | medium |
 | U3 | Email, Slack, escalation delivery | A fake SMTP server, and a local HTTP receiver for Slack, the webhook and the HTTP sender; never a real external server | medium |
-| U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | CI runs all 11 headlessly through `tools/browser_ci.mjs`, with a throwaway database and browser profile per check. Seven fail the job on an exception or console error; `modbus`, `admin`, `check` and `dashboard` only prove they ran, because their intentional 4xx requests are logged as errors, and `browser_dashboard`'s designer steps still use stale selectors | medium |
-| U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
 | U8 | SNMP source | An in-process fake agent answers crafted datagrams; never a real device | low |
 | U9 | Sparkplug B source | Decoded payloads are fed directly; never a real broker or a real edge node | medium |
 | U10 | DNP3 source | An in-process fake outstation on a socket; never a real outstation | medium |
 | U11 | BACnet/IP source | An in-process fake device on a UDP socket; never a real device | medium |
 | U12 | OPC UA source | An in-process fake server; never a real server, and only SecurityPolicy None is implemented | medium |
+
+U6 and U7 were closed on 2026-10-28: the twelve browser checks all run in CI, every one of them now
+exits 1 on a problem it did not provoke (each of the four that used to only prove it ran lists its
+own intentional 4xx requests and fails on anything else; `browser_dashboard`'s designer steps were
+rewritten against the current `#pv`/`#df` markup), and `browser_account.mjs` drives the 2FA screen
+and the report-handler form end to end, wrong code and refused save included. The injection proof
+ran against every repaired file before it landed.
 
 ## 6. Deliberate, not debt
 
