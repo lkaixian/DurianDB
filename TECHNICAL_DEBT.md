@@ -69,7 +69,6 @@ was written: `requirements.txt` exists.
 | U5 | MariaDB / MySQL | Opt-in, absent from CI | medium |
 | U6 | Every browser check (`tools/browser_*.mjs`, 12 scripts) | Manual, headless Edge on port 9222 | medium |
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
-| U8 | `durian/reset.py` (the offline admin reset CLI) | No test file | low |
 
 ## 6. Deliberate, not debt
 
