@@ -4,7 +4,8 @@ import os
 
 from durian.store import Store
 
-TABLES = ("history", "events", "users", "audit", "objects", "settings", "schema_version", "sessions", "api_tokens", "roles")
+TABLES = ("history", "events", "users", "audit", "objects", "settings", "schema_version", "sessions", "api_tokens",
+          "auth_failures", "auth_last_step", "confirm_tokens", "roles")
 
 
 def new_store():

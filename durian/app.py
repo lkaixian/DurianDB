@@ -75,7 +75,7 @@ class App:
         self.engine, self.outputs, self.open_events = None, None, []
         self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
         self.escalated = set()  # (handler, event id) already escalated; pruned when the event closes
-        self.confirms = {}  # token -> ((user, point, value), expiry) for writes waiting for their second step
+        self.confirms = {}  # fallback only: confirm tokens live in the store, so any process can spend one exactly once
         self.confirms_lost = 0  # live tokens evicted past CONFIRM_MAX; the caller is asked for a new one
         self.windows = []  # maintenance windows, see windows.py
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
@@ -278,17 +278,30 @@ class App:
 
     def confirm_token(self, ident, point, v):
         now = time.time()
+        tok = secrets.token_urlsafe(12)
+        try:
+            self.confirms_lost += self.store.add_confirm(tok, json.dumps([ident["name"], point, v]), now + CONFIRM_SECONDS, CONFIRM_MAX)
+            self.confirms.pop(tok, None)
+            return tok
+        except Exception as ex:  # the store is down: keep this process's old map, and say so once
+            self.auth.degraded(ex)
         self.confirms = {k: x for k, x in self.confirms.items() if x[1] > now}  # drop expired first: they may never be asked for again
         while len(self.confirms) >= CONFIRM_MAX:  # a script looping this endpoint must not grow the map
             del self.confirms[next(iter(self.confirms))]  # the oldest live request expires; the caller is given this new token
             self.confirms_lost += 1
-        tok = secrets.token_urlsafe(12)
         self.confirms[tok] = ((ident["name"], point, v), now + CONFIRM_SECONDS)
         return tok
 
     def confirmed(self, ident, point, v, tok):
         """True once, for the same user, point and value that asked for the token, while it is fresh."""
-        got = self.confirms.pop(tok, None) if isinstance(tok, str) else None
+        if not isinstance(tok, str):
+            return False
+        try:
+            got = self.store.take_confirm(tok)  # the delete picks the winner, so a token is spent once across processes
+            return bool(got and got[1] > time.time() and tuple(json.loads(got[0])) == (ident["name"], point, v))
+        except Exception as ex:
+            self.auth.degraded(ex)
+        got = self.confirms.pop(tok, None)
         return bool(got and got[1] > time.time() and got[0] == (ident["name"], point, v))
 
     def load_windows(self):

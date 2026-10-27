@@ -61,7 +61,7 @@ assert any(a["detail"] == "sp: 5.0 -> 6" or a["detail"] == "sp: 5 -> 6" for a in
 
 # an expired token is refused
 s, r = call(admin, "POST", "/api/points/sp/set", {"value": 7})
-app.confirms[r["confirm"]] = (app.confirms[r["confirm"]][0], time.time() - 1)
+app.store.run("update confirm_tokens set expires=? where token=?", (time.time() - 1, r["confirm"]))
 assert call(admin, "POST", "/api/points/sp/set", {"value": 7, "confirm": r["confirm"]})[0] == 202
 
 # releasing needs neither limits nor confirmation

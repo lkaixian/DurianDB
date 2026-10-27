@@ -291,6 +291,111 @@ class Store:
     def set_hash(self, name, pw_hash):
         return self.run("update users set hash=? where name=?", (pw_hash, name)).rowcount
 
+    # ---- shared sign-in state: sessions, lockouts, the TOTP replay guard and write confirmations. Kept here so a
+    # second server process sees the same session, lockout, spent code and confirm token instead of its own copy.
+    def add_session(self, token, name, expires):
+        self.run("insert into sessions(token, name, expires) values (?,?,?)", (token, name, expires))
+
+    def session(self, token):
+        r = self.q("select name, expires from sessions where token=?", (token,))
+        return r[0] if r else None
+
+    def delete_session(self, token):
+        return self.run("delete from sessions where token=?", (token,)).rowcount
+
+    def sessions_for(self, name):
+        return [r["token"] for r in self.q("select token from sessions where name=?", (name,))]
+
+    def purge_sessions(self, now):
+        return self.run("delete from sessions where expires <= ?", (now,)).rowcount
+
+    def failure(self, name):
+        r = self.q("select attempts, locked_until from auth_failures where name=?", (name,))
+        return r[0] if r else None
+
+    def failure_count(self):
+        return self.q("select count(*) as n from auth_failures")[0]["n"]
+
+    def set_failure(self, name, attempts, locked_until):
+        now = time.time()
+        if self.kind == "mysql":
+            self.run("insert into auth_failures(name, attempts, locked_until, seen) values (?,?,?,?) "
+                     "on duplicate key update attempts=values(attempts), locked_until=values(locked_until), seen=values(seen)",
+                     (name, attempts, locked_until, now))
+        else:
+            self.run("insert into auth_failures(name, attempts, locked_until, seen) values (?,?,?,?) "
+                     "on conflict(name) do update set attempts=excluded.attempts, locked_until=excluded.locked_until, "
+                     "seen=excluded.seen", (name, attempts, locked_until, now))
+
+    def delete_failure(self, name):
+        return self.run("delete from auth_failures where name=?", (name,)).rowcount
+
+    def purge_failures(self, now):
+        return self.run("delete from auth_failures where locked_until > 0 and locked_until <= ?", (now,)).rowcount
+
+    def prune_failures(self, limit, now=None):
+        """Keep lockouts bounded: names with no account and expired lockouts go first, then the oldest unlocked
+        entry, never one that is locked out now. Returns how many rows went."""
+        now = now or time.time()
+        with self.lock:
+            rows = self.q("select name, locked_until from auth_failures order by id")
+            known = {u["name"] for u in self.users()}
+            drop = [r["name"] for r in rows
+                    if (r["name"][6:] if r["name"].startswith("reset:") else r["name"]) not in known
+                    or (r["locked_until"] and r["locked_until"] <= now)]
+            left = [r for r in rows if r["name"] not in set(drop)]
+            excess = len(left) - limit
+            for r in left:
+                if excess <= 0:
+                    break
+                if (r["locked_until"] or 0) <= now:
+                    drop.append(r["name"])
+                    excess -= 1
+            for i in range(0, len(drop), 500):
+                batch = drop[i:i + 500]
+                self.run(f"delete from auth_failures where name in ({', '.join('?' * len(batch))})", batch)
+            return len(drop)
+
+    def claim_step(self, name, step):
+        """Record `step` as spent, atomically. True only for the call that moved the guard forward, so two
+        processes cannot both accept the same TOTP code."""
+        if self.kind == "mysql":
+            cur = self.run("insert into auth_last_step(name, last_step) values (?,?) "
+                           "on duplicate key update last_step=if(last_step < values(last_step), values(last_step), last_step)",
+                           (name, step))
+        else:
+            cur = self.run("insert into auth_last_step(name, last_step) values (?,?) "
+                           "on conflict(name) do update set last_step=excluded.last_step where excluded.last_step > auth_last_step.last_step",
+                           (name, step))
+        return cur.rowcount > 0
+
+    def add_confirm(self, token, body, expires, keep):
+        """Store a one-use confirmation, dropping expired rows and the oldest live one past `keep`. Returns how
+        many live tokens were evicted."""
+        now = time.time()
+        with self.lock:
+            self.run("delete from confirm_tokens where expires <= ?", (now,))
+            dropped = 0
+            while self.q("select count(*) as n from confirm_tokens")[0]["n"] >= keep:
+                old = self.q("select token from confirm_tokens order by id limit 1")
+                if not old or not self.run("delete from confirm_tokens where token=?", (old[0]["token"],)).rowcount:
+                    break
+                dropped += 1
+            self.run("insert into confirm_tokens(token, body, expires) values (?,?,?)", (token, body, expires))
+            return dropped
+
+    def take_confirm(self, token):
+        """Remove a confirmation and return (body, expires). The delete decides the winner, so the token is spent
+        once even when two processes ask at the same moment."""
+        with self.lock:
+            r = self.q("select body, expires from confirm_tokens where token=?", (token,))
+            if not r or not self.run("delete from confirm_tokens where token=?", (token,)).rowcount:
+                return None
+            return r[0]["body"], r[0]["expires"]
+
+    def purge_confirms(self, now):
+        return self.run("delete from confirm_tokens where expires <= ?", (now,)).rowcount
+
     # ---- machine tokens
     def add_token(self, name, token_hash, owner, scope, source, expires):
         self.run("insert into api_tokens(name, token_hash, owner, scope, source, created, expires) values (?,?,?,?,?,?,?)",

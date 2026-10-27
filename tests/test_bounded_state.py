@@ -1,6 +1,7 @@
 """Every runtime buffer has a cap, a count of what it dropped, and drops an expired entry before a live one.
 Run: python tests/test_bounded_state.py"""
 import sys
+import json
 import time
 import types
 from pathlib import Path
@@ -65,12 +66,15 @@ assert [r["value"] for r in app2.store.recent("p", 20)] == [7.0, 8.0, 9.0, 10.0,
 A.CONFIRM_MAX = 3
 app3 = App(new_store())
 ident = {"name": "op", "roles": {"user"}}
-app3.confirms["expired"] = (("op", "p", 0), time.time() - 5)
+app3.store.run("insert into confirm_tokens(token, body, expires) values (?,?,?)",
+               ("expired", json.dumps(["op", "p", 0]), time.time() - 5))
 toks = [app3.confirm_token(ident, "p", i) for i in range(3)]
-assert "expired" not in app3.confirms and len(app3.confirms) == 3, app3.confirms
+rows = app3.store.q("select token from confirm_tokens")
+assert "expired" not in {r["token"] for r in rows} and len(rows) == 3, rows
 tok3 = app3.confirm_token(ident, "p", 99)
-assert len(app3.confirms) == 3 and toks[0] not in app3.confirms and tok3 in app3.confirms
-assert all(t in app3.confirms for t in toks[1:]), "a live token is never dropped before an expired one"
+rows = {r["token"] for r in app3.store.q("select token from confirm_tokens")}
+assert len(rows) == 3 and toks[0] not in rows and tok3 in rows, rows
+assert all(t in rows for t in toks[1:]), "a live token is never dropped before an expired one"
 assert app3.confirms_lost == 1, app3.confirms_lost
 
 
