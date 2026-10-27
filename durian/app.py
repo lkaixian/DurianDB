@@ -503,6 +503,44 @@ class App:
         return token
 
     # ---- API
+    # A route area maps to one small handler instead of widening a single if-chain. A handler returns the
+    # (status, payload) tuple or raises ApiError exactly as its branch did, and returns None when the shape is
+    # not one of its own, so the next stage (the administration guard and table) can try.
+    DATA_ROUTES = {
+        "ingest": "_api_ingest",
+        "value": "_api_value",
+        "me": "_api_identity",
+        "health": "_api_identity",
+        "auth": "_api_auth_public",
+        "jobs": "_api_jobs",
+        "points": "_api_points",
+        "notes": "_api_notes",
+        "reports": "_api_reports",
+        "series": "_api_series",
+        "export": "_api_export_public",
+        "import": "_api_import_points",
+        "events": "_api_events",
+        "test": "_api_test_source",
+        "alarms": "_api_alarms",
+        "sources": "_api_sources",
+        "watchlists": "_api_watchlists",
+        "mylists": "_api_mylists",
+        "dashboards": "_api_dashboards",
+        "mfa": "_api_mfa",
+        "password": "_api_password",
+    }
+    ADMIN_ROUTES = {
+        "auth": "_api_admin_auth",
+        "config": "_api_admin_config",
+        "users": "_api_admin_users",
+        "outputs": "_api_admin_outputs",
+        "audit": "_api_admin_outputs",
+        "tokens": "_api_admin_tokens",
+        "database": "_api_admin_database",
+        "export": "_api_admin_export",
+        "import": "_api_admin_export",
+    }
+
     def handle(self, method, path, query, body, ident):
         m = ROUTE.match(path)
         if not m:
@@ -513,7 +551,6 @@ class App:
         if body is not None and not isinstance(body, (dict, str)):  # a JSON body is an object; imports arrive as text
             raise ApiError(400, "body must be a JSON object")
         admin = "superadmin" in ident["roles"]
-        user = "user" in ident["roles"]
 
         def need(ok):
             if not ok:
@@ -522,8 +559,30 @@ class App:
         scope = ident.get("scope")  # set only for machine tokens: they get the data plane, never administration
         if scope and not self._scope_allows(scope, ident, method, a, b, c):
             raise ApiError(403, f"this {scope} token does not allow that")
+        route = self.DATA_ROUTES.get(a)
+        if route is not None:
+            result = getattr(self, route)(method, a, b, c, query, body, ident, need)
+            if result is not None:
+                return result
+
+        # everything below is administration. A name that is not an administration area is an unknown route,
+        # and it is a 404 for everyone: answering 403 only to a signed-in caller would confirm the route exists.
+        if a not in ADMIN_AREAS:
+            raise ApiError(404, "not found")
+        need(admin)
+        route = self.ADMIN_ROUTES.get(a)
+        if route is not None:
+            result = getattr(self, route)(method, a, b, c, query, body, ident)
+            if result is not None:
+                return result
+        raise ApiError(404, "not found")
+
+    # ---- data-plane route handlers, each the exact branches it replaced
+    def _api_ingest(self, method, a, b, c, query, body, ident, need):
         if a == "ingest" and b:
             return self.ingest(method, b, query, body, ident)
+
+    def _api_value(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("GET", "value") and b and c is None:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:
@@ -531,10 +590,10 @@ class App:
             tags, unit, display_unit, display_value = self.resolve_point(p, s)
             return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "quality": Quality(p.quality).name.lower(), "unit": unit,
                          "tags": tags, "source": s.name, "display_unit": display_unit, "display_value": display_value}
+
+    def _api_identity(self, method, a, b, c, query, body, ident, need):
         if (method, a, b, c) == ("GET", "me", None, None):
             return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp"))}
-        if (method, a, b, c) == ("GET", "auth", "sso", None):  # the sign-in page asks this before anyone is signed in
-            return 200, self.sso_public()
         if (method, a, b, c) == ("GET", "health", None, None):
             # The data plane's own state. A stalled loop is the one failure a console cannot otherwise see.
             faults = self.outputs.faults() if self.outputs else []
@@ -543,6 +602,12 @@ class App:
                          "unstored_events": len(self.unstored), "events_lost": self.events_lost, "failed_deliveries": self.outputs.failed if self.outputs else 0,
                          "internal_errors": self.internal_errors, "last_internal_error": self.last_internal_error,
                          "faults": faults}
+
+    def _api_auth_public(self, method, a, b, c, query, body, ident, need):
+        if (method, a, b, c) == ("GET", "auth", "sso", None):  # the sign-in page asks this before anyone is signed in
+            return 200, self.sso_public()
+
+    def _api_jobs(self, method, a, b, c, query, body, ident, need):
         if (method, a, c) == ("GET", "jobs", None) and b:
             rec = self.jobs.get(int(b) if b.isdigit() else -1)
             if rec is None:
@@ -550,6 +615,8 @@ class App:
             if "superadmin" not in ident["roles"] and rec.get("owner") != ident["name"]:
                 raise ApiError(403, "not allowed")
             return 200, {k: rec.get(k) for k in ("id", "name", "state", "result", "error", "started", "finished")}
+
+    def _api_points(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("GET", "points") and b is None:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
         if (method, a, c) == ("GET", "points", "forecast") and b:
@@ -563,21 +630,6 @@ class App:
             return 200, {**self.point_view(p, s), "source_type": s.meta.get("type"), "source_down": s.down_reason,
                          "detectors": p.meta.get("detector_cfg", []), "hold": self.holds.get(b),
                          "maintenance": [{"name": m["name"], "mode": m["mode"]} for m in self.windows if windows.active(m, time.time()) and windows.covers(m, b, self.resolve_point(p, s)[0], s.name)]}
-        if a == "notes" and b and c is None and method in ("GET", "POST"):
-            p0, _s = self.visible_points(ident).get(b, (None, None))
-            if p0 is None:
-                raise ApiError(404, "unknown point")
-            if method == "GET":
-                return 200, notes.for_point(self.store, b)
-            need(user)
-            errs = notes.validate(body)
-            if errs:
-                raise ApiError(422, "validation failed", errs)
-            n = notes.add(self.store, b, body["text"], ident["name"])
-            self.store.audit(ident["name"], "note.add", b)
-            return 201, n
-        if (method, a, b) == ("GET", "reports", "summary"):
-            return self.report_summary(ident, query)
         if (method, a, c) == ("POST", "points", "set"):
             p, s = self.points().get(b, (None, None))
             if p is None or not can(ident["roles"], p.meta.get("read_roles", ["user"])):
@@ -601,16 +653,38 @@ class App:
             if p.meta.get("confirm") and v is not None and not self.confirmed(ident, p.name, v, (body or {}).get("confirm")):
                 return 202, {"confirm": self.confirm_token(ident, p.name, v), "expires_in": CONFIRM_SECONDS,
                              "message": f"Repeat the request with this confirm token to set {p.name} to {v}"}
+            scope = ident.get("scope")
             self.perform_write(p, s, v, ident["name"], (f" via token {ident['token']}" if scope else "") + (f" reason: {reason}" if reason else ""))
             return 200, {"ok": True}
+
+    def _api_notes(self, method, a, b, c, query, body, ident, need):
+        if a == "notes" and b and c is None and method in ("GET", "POST"):
+            p0, _s = self.visible_points(ident).get(b, (None, None))
+            if p0 is None:
+                raise ApiError(404, "unknown point")
+            if method == "GET":
+                return 200, notes.for_point(self.store, b)
+            need("user" in ident["roles"])
+            errs = notes.validate(body)
+            if errs:
+                raise ApiError(422, "validation failed", errs)
+            n = notes.add(self.store, b, body["text"], ident["name"])
+            self.store.audit(ident["name"], "note.add", b)
+            return 201, n
+
+    def _api_reports(self, method, a, b, c, query, body, ident, need):
+        if (method, a, b) == ("GET", "reports", "summary"):
+            return self.report_summary(ident, query)
+
+    def _api_series(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("GET", "series"):
             return 200, self.series(ident, query)
+
+    def _api_export_public(self, method, a, b, c, query, body, ident, need):
+        admin = "superadmin" in ident["roles"]
         if (method, a, b) == ("GET", "export", "points"):
             need(admin)
             return 200, Raw(pointcsv.export(self.store.list("point")), "text/csv; charset=utf-8", "points.csv")
-        if (method, a, b) == ("POST", "import", "points"):
-            need(admin)
-            return self.import_points(query, body, ident)
         if (method, a, b) == ("GET", "export", "history"):
             return self.history_csv(ident, query)
         # The bundle carries config.json, the same administrator-only configuration export as GET /api/export,
@@ -621,6 +695,14 @@ class App:
         if (method, a, b) == ("GET", "export", "manifest"):
             need(admin)
             return self.export_manifest(query)
+
+    def _api_import_points(self, method, a, b, c, query, body, ident, need):
+        if (method, a, b) == ("POST", "import", "points"):
+            need("superadmin" in ident["roles"])
+            return self.import_points(query, body, ident)
+
+    def _api_events(self, method, a, b, c, query, body, ident, need):
+        user = "user" in ident["roles"]
         if (method, a, b, c) == ("GET", "events", "search", None):
             return self.event_journal(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
@@ -630,14 +712,6 @@ class App:
             for e in rows:
                 e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
             return 200, rows
-        if (method, a, b) == ("POST", "test", "source"):
-            need(admin)
-            if query.get("wait") == "1":  # scripts and old callers keep the synchronous answer
-                return 200, test_source(body)
-            jid = self.jobs.submit("test source", lambda: test_source(body), ident["name"])
-            return 202, {"job": jid, "state": "running", "message": f"the source test is running; ask GET /api/jobs/{jid}"}
-        if a == "alarms":
-            return self.alarm_holds(method, b, c, body, ident, query)
         if (method, a, b, c) == ("POST", "events", "ack-many", None):
             need(user)
             ids = (body or {}).get("ids")
@@ -657,16 +731,38 @@ class App:
             n = self.store.ack_event(int(b), ident["name"], time.time())
             self.store.audit(ident["name"], "ack", f"event {b}")
             return (200 if n else 409), {"acked": n}
+
+    def _api_test_source(self, method, a, b, c, query, body, ident, need):
+        if (method, a, b) == ("POST", "test", "source"):
+            need("superadmin" in ident["roles"])
+            if query.get("wait") == "1":  # scripts and old callers keep the synchronous answer
+                return 200, test_source(body)
+            jid = self.jobs.submit("test source", lambda: test_source(body), ident["name"])
+            return 202, {"job": jid, "state": "running", "message": f"the source test is running; ask GET /api/jobs/{jid}"}
+
+    def _api_alarms(self, method, a, b, c, query, body, ident, need):
+        if a == "alarms":
+            return self.alarm_holds(method, b, c, body, ident, query)
+
+    def _api_sources(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("GET", "sources") and b is None:
             return 200, [self.source_view(s) for s in self.engine.sources
                          if can(ident["roles"], s.meta.get("read_roles", ["user"]))]
+
+    def _api_watchlists(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("GET", "watchlists") and b is None:
             return 200, [{**w, "mine": w.get("owner") == ident["name"]} for w in self.store.list("watchlist") if self.watch_visible(ident, w)]
+
+    def _api_mylists(self, method, a, b, c, query, body, ident, need):
         if a == "mylists" and b and c is None and method in ("PUT", "DELETE"):
-            need(user)
+            need("user" in ident["roles"])
             return self.my_list(method, b, body, ident)
+
+    def _api_dashboards(self, method, a, b, c, query, body, ident, need):
         if a == "dashboards" and c is None:
             return self.dashboards(method, b, body, ident)
+
+    def _api_mfa(self, method, a, b, c, query, body, ident, need):
         if a == "mfa" and method == "POST" and b in ("setup", "enable", "disable") and c is None:  # a second sign-in factor (TOTP) for your own account
             need(ident["name"])
             body = body or {}
@@ -686,6 +782,8 @@ class App:
                 return 200, {"ok": True}
             except AuthError as ex:
                 raise ApiError(ex.status, str(ex))
+
+    def _api_password(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("POST", "password") and b is None:
             need(ident["name"])
             body = body or {}
@@ -695,11 +793,8 @@ class App:
             self.set_password(ident["name"], body.get("new"))
             return 200, {"ok": True}
 
-        # everything below is administration. A name that is not an administration area is an unknown route,
-        # and it is a 404 for everyone: answering 403 only to a signed-in caller would confirm the route exists.
-        if a not in ADMIN_AREAS:
-            raise ApiError(404, "not found")
-        need(admin)
+    # ---- administration route handlers, served only after the guard and `need(admin)` above
+    def _api_admin_auth(self, method, a, b, c, query, body, ident):
         if (method, a, b, c) == ("PUT", "auth", "sso", None):
             if not isinstance(body, dict):
                 raise ApiError(400, "body must be a JSON object")
@@ -713,8 +808,12 @@ class App:
             self.store.set_setting("sso", None)
             self.store.audit(ident["name"], "sso.remove")
             return 200, {"configured": False}
+
+    def _api_admin_config(self, method, a, b, c, query, body, ident):
         if a == "config" and b in KINDS:
             return self.config(method, b, c, body, ident)
+
+    def _api_admin_users(self, method, a, b, c, query, body, ident):
         if (method, a, c) == ("POST", "users", "reset") and b:  # a one-time code for a user who cannot sign in
             if not self.store.user(b):
                 self._404()
@@ -722,6 +821,8 @@ class App:
             return 200, {"code": self.auth.issue_reset(b), "expires_in": 3600}
         if a == "users":
             return self.users(method, b, body, ident)
+
+    def _api_admin_outputs(self, method, a, b, c, query, body, ident):
         if (method, a, b) == ("GET", "outputs", None):
             # Every handler and publisher with how its deliveries are going: a dead route must not be invisible.
             st = self.outputs.status if self.outputs else {}
@@ -735,14 +836,20 @@ class App:
             return 200, {"failed_deliveries": self.outputs.failed if self.outputs else 0, "targets": rows}
         if (method, a) == ("GET", "audit"):
             return 200, self.store.audit_log()
+
+    def _api_admin_tokens(self, method, a, b, c, query, body, ident):
         if a == "tokens" and c is None:
             return self.tokens(method, b, body, ident)
+
+    def _api_admin_database(self, method, a, b, c, query, body, ident):
         if (method, a, b, c) == ("GET", "database", "exports", None):
             return 200, self.maint.exports()
         if (method, a, b) == ("GET", "database", "exports") and c:
             return self.export_retrieve(c, ident)
         if a == "database":
             return self.database(method, b, c, body, ident, query)
+
+    def _api_admin_export(self, method, a, b, c, query, body, ident):
         if (method, a) == ("GET", "export") and b is None:
             doc = json.dumps(self.maint.export_config(), indent=2).encode()
             return 200, Raw(doc, "application/json", "durian-config-" + dt.date.today().isoformat() + ".json")
@@ -750,7 +857,6 @@ class App:
             return self.import_config(query, body, ident)
         if (method, a, b) == ("POST", "import", "history"):
             return self.import_history(query, body, ident)
-        raise ApiError(404, "not found")
 
     # ---- machine access: scoped tokens, and values pushed in over HTTP
     READ_AREAS = {"me", "health", "points", "value", "series", "events", "sources", "dashboards", "watchlists", "reports"}

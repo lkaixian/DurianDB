@@ -35,7 +35,6 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 
 | # | Debt | Where | Severity | Cost |
 |---|---|---|---|---|
-| A1 | `App` is a 1,288-line class with one `handle()` if-chain over `(method, a, b, c)` | `durian/app.py` | medium | Every new route widens the same function; no route table |
 | A2 | "unknown point" 404 written inline 7 times while a `_404()` helper exists | `durian/app.py` | low | Two ways to say the same thing |
 | A3 | `AuthError` → `ApiError` conversion repeated in 4 places, then to HTTP in a 5th | `durian/app.py`, `durian/server.py` | low | A new auth exception must be handled in each |
 | A4 | Two permission idioms: `can()` and inline `"superadmin" in ident["roles"]` (7 sites) | `durian/auth.py`, `durian/app.py` | medium | Role logic drifts between routes |
