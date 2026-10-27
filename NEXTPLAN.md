@@ -6,26 +6,27 @@ This file is the plan that reads the three together.
 
 ```
 python tests/run_all.py     # all suites, SQLite in memory
-python -m durian.server     # console on http://localhost:8080
+python -m durian.server     # console on http://127.0.0.1:8765
 ```
 
 ## 1. What we have done
 
 | Measure | Value |
 |---|---|
-| Commits on `main` | 127, at the time of writing |
-| Python modules in `durian/` | 32, 7,125 lines |
-| Test suites in `tests/` | 53, 5,292 lines, all passing |
-| Console | 2,106 lines of JS/CSS/HTML in `web/` |
-| Data source types | 6: virtual, MQTT over TLS, Modbus (TCP/RTU/ASCII), HTTP JSON, SQL, HTTP ingest |
+| Commits on `main` | 145, at the time of writing |
+| Python modules in `durian/` | 34, 7,882 lines |
+| Test suites in `tests/` | 57, 5,954 lines, all passing |
+| Console | 2,163 lines of JS/CSS/HTML in `web/` |
+| Data source types | 8: virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c, HTTP JSON, SQL, HTTP ingest |
 | Alarm detectors | 12, with on/off delay, deadband and ISA-18.2 states |
-| Open debt entries | 25 (see `TECHNICAL_DEBT.md`) |
+| Open debt entries | 22 (see `TECHNICAL_DEBT.md`) |
 
 Built and covered by tests: authentication (scrypt, sessions, roles, lockout, TOTP, reset, disable, scoped
 machine tokens), safe control (limits, step, two-step confirm, audit), alarms and shelving, maintenance
 windows, calculated points, reports and scheduled email, dashboards and the designer, mimics, history with
 rollups, retention and backups, SQLite and MySQL storage, TLS serving, and CI on four Python jobs plus the
-Rust crate.
+Rust crate. The second pass added Sparkplug B and SNMP sources, retrieval of scheduled export bundles, the
+forecast on a point's own trend page, and a fix so a point name holding a slash can be opened over HTTP.
 
 ### The failure work of 2026-10-27, gap by gap
 
@@ -56,9 +57,8 @@ Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these i
 | Item | Why it matters | Size |
 |---|---|---|
 | A9: all state in-process (sessions, lockout, TOTP replay guard, confirm tokens, escalation, SSO state) | blocks any second server process; this is the "no HA" limit | large |
-| U1–U8: untested paths | real COM ports, a real broker, MariaDB in CI, the browser checks, the reset CLI | medium each |
-| D3–D5, D8: documented claims that are not true, and `graphify-out/` in git | research notes drift from the tree; generated files in every diff | small each |
-| E2–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested; one Windows 3.12 job is red intermittently, cause not yet known | small |
+| U1–U9: untested paths | real COM ports, a real MQTT broker, a real SNMP device, a real Sparkplug edge node, MariaDB in CI, the browser checks | medium each |
+| E2–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested; the intermittent Windows 3.12 failure is fixed, but the version gap remains | small |
 | A1/A10: one 1,000-line `App` and an 854-line `app.js` | every new route widens the same function | medium |
 
 ## 3. What we plan to do
@@ -68,13 +68,15 @@ run of commits, pushed as it lands.
 
 | Item | Next concrete step | Why in this order |
 |---|---|---|
-| Sparkplug B source | wire `durian/sparkplug_codec.py` into a `Source` over the existing MQTT client: birth/death, sequence gaps as sentences, one point per node/device/metric | the hard part (the codec) is done and tested; this is the driver around it |
-| Forecasting, on the chart | draw the forecast band on the point's own trend page, not only on a dashboard widget | the endpoint and widget exist; this is the same data in the place an operator looks first |
-| Data extraction: scheduled bundles | an HTTP download for bundles the scheduler wrote, beside the one built on request | packaging is done; this is retrieval |
 | Architecture: A9 shared state | move sessions, lockout and confirms into the store so two processes could share them | the largest remaining blocker to HA; needs its own design pass |
-| Extensive input: OPC UA, BACnet, DNP3, SNMP | one driver at a time behind the existing `Source` interface, each with a simulator to test against | each is a new dependency and a new simulator |
+| Extensive input: OPC UA, BACnet, DNP3 | one driver at a time behind the existing `Source` interface, each with a simulator to test against, the way SNMP was built | SNMP was done without a dependency; each of these is a larger protocol and a larger simulator |
 | Hardening continues | finish the open defects in §2 as they are found, each with its test | the failure model says a new failure gets a test before it gets a fix |
+| A1/A10 refactor | split the dispatcher into a route table and split `web/app.js` by page | it is the cost every later route and page pays; no user-visible change |
 | Rust real-time core | the crate stays an experiment until the Python detector layer stops being fast enough | not wired into the server; keep it zero-dependency and tested in CI |
+
+Done in this pass, so no longer planned: the Sparkplug B source (`durian/sparkplug_source.py`), the forecast
+band on the point's own trend page, retrieval of scheduled export bundles, tests for the offline admin reset,
+and percent-decoded route names so a slash-named point can be opened.
 
 ## 4. How work lands
 

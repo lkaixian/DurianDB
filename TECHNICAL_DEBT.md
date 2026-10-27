@@ -35,13 +35,13 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 
 | # | Debt | Where | Severity | Cost |
 |---|---|---|---|---|
-| A1 | `App` is a 1025-line class with one `handle()` if-chain over `(method, a, b, c)` | `durian/app.py` | medium | Every new route widens the same function; no route table |
+| A1 | `App` is a 1,288-line class with one `handle()` if-chain over `(method, a, b, c)` | `durian/app.py` | medium | Every new route widens the same function; no route table |
 | A2 | "unknown point" 404 written inline 7 times while a `_404()` helper exists | `durian/app.py` | low | Two ways to say the same thing |
 | A3 | `AuthError` → `ApiError` conversion repeated in 4 places, then to HTTP in a 5th | `durian/app.py`, `durian/server.py` | low | A new auth exception must be handled in each |
 | A4 | Two permission idioms: `can()` and inline `"superadmin" in ident["roles"]` (7 sites) | `durian/auth.py`, `durian/app.py` | medium | Role logic drifts between routes |
 | A5 | `if not isinstance(body, dict)` guard repeated 6 times (and missed in one place, C7) | `durian/app.py` | low | The one that was missed proved the pattern is fragile |
 | A9 | All state is in-process: sessions, lockout counters, reset codes, TOTP replay guard, confirm tokens, escalation set | `durian/auth.py`, `durian/app.py` | high | Two server processes would double-tick, double-purge and double-escalate, and accept a replayed TOTP code. This is why "no HA" is in the known limits |
-| A10 | `web/app.js` is 854 lines in one file | `web/app.js` | low | One page's change risks another's |
+| A10 | `web/app.js` is 901 lines in one file | `web/app.js` | low | One page's change risks another's |
 | A12 | SQLite and MySQL diverge through hand-written branches, including `cast(ts/? as int)` vs `floor(ts/?)` | `durian/store.py` | medium | The MySQL path is the least tested code in the repo |
 
 ## 4. Dependencies and environment
@@ -63,8 +63,10 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 | U3 | Email, Slack, escalation delivery | A fake SMTP server; Slack only validates config | medium |
 | U4 | HTTPS serving | `tests/test_tls.py` checks the cookie flag and the refusal paths, not a real handshake | low |
 | U5 | MariaDB / MySQL | Opt-in, absent from CI | medium |
-| U6 | Every browser check (`tools/browser_*.mjs`, 12 scripts) | Manual, headless Edge on port 9222 | medium |
+| U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | Manual, headless Edge on port 9222 | medium |
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
+| U8 | SNMP source | An in-process fake agent answers crafted datagrams; never a real device | low |
+| U9 | Sparkplug B source | Decoded payloads are fed directly; never a real broker or a real edge node | medium |
 
 ## 6. Deliberate, not debt
 
@@ -74,7 +76,8 @@ These are choices, recorded so nobody "fixes" them by accident:
 - One value per point per MQTT poll (the latest), not every message (`durian/mqtt_source.py:92`).
 - Pulled values carry the tick time, not the read time.
 - No process or script event handlers: they would run arbitrary code on the server.
-- No OPC UA, BACnet, DNP3 or SNMP drivers.
+- No OPC UA, BACnet or DNP3 drivers; SNMP is v2c GET only, deliberately (no walk, no v3, no traps).
+- The Sparkplug B source is read-only: no command topics, no STATE topic and no rebirth request, so a point cannot be written over it.
 - Plain HTTP on localhost; anything else needs a certificate.
 - Reset codes and TOTP pending secrets live in memory, so a restart voids them.
 

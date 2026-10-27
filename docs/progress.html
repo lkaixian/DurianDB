@@ -260,10 +260,10 @@
   </header>
 
   <div class="figures">
-    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">7,125</div><div class="n">lines, 32 modules</div></div>
-    <div class="fig"><div class="k">Tests</div><div class="v">5,292</div><div class="n">lines, 53 suites, all passing</div></div>
-    <div class="fig"><div class="k">Commits</div><div class="v">127</div><div class="n">across 9 calendar days</div></div>
-    <div class="fig"><div class="k">Open debt</div><div class="v">48</div><div class="n">entries, 14 high severity</div></div>
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">7,882</div><div class="n">lines, 34 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">5,954</div><div class="n">lines, 57 suites, all passing</div></div>
+    <div class="fig"><div class="k">Commits</div><div class="v">145</div><div class="n">across 9 calendar days</div></div>
+    <div class="fig"><div class="k">Open debt</div><div class="v">22</div><div class="n">entries, 1 high severity</div></div>
   </div>
 
   <section>
@@ -271,7 +271,7 @@
     <div class="charts">
       <div class="card">
         <h3>Code in the tree</h3>
-        <div class="summary">Server 7,125 lines · tests 5,292 lines</div>
+        <div class="summary">Server 7,882 lines · tests 5,954 lines</div>
         <div class="legend">
           <span><i class="swatch"></i>server</span>
           <span><i class="swatch dashed"></i>tests</span>
@@ -280,7 +280,7 @@
       </div>
       <div class="card">
         <h3>Test suites</h3>
-        <div class="summary">53 suites · one process each, <code>run_all.py</code></div>
+        <div class="summary">57 suites · one process each, <code>run_all.py</code></div>
         <div class="chart-wrap" id="wrap-suites"></div>
       </div>
     </div>
@@ -315,21 +315,21 @@
           <tr><th>Area</th><th>Built</th><th>Verified by</th></tr>
         </thead>
         <tbody>
-          <tr><td class="name">Data in</td><td class="name">Virtual, MQTT over TLS, Modbus TCP/RTU/ASCII, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens</td><td class="name"><code>test_modbus*</code>, <code>test_pull_sources</code>, <code>test_ingest</code></td></tr>
+          <tr><td class="name">Data in</td><td class="name">Virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus TCP/RTU/ASCII, SNMP v2c, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens</td><td class="name"><code>test_modbus*</code>, <code>test_pull_sources</code>, <code>test_ingest</code>, <code>test_sparkplug_source</code>, <code>test_snmp_source</code></td></tr>
           <tr><td class="name">Data model</td><td class="name">Numeric and text points, engineering range, units, decimals, binary and multistate labels, folders, tags, descriptions</td><td class="name"><code>test_app</code>, <code>test_text_points</code></td></tr>
           <tr><td class="name">Quality and time</td><td class="name">GOOD / UNCERTAIN / BAD per value, source timestamps, future-clock and stale rules, out-of-order drop</td><td class="name"><code>test_quality</code></td></tr>
           <tr><td class="name">Alarms</td><td class="name">12 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all</td><td class="name"><code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
           <tr><td class="name">Control</td><td class="name">Permissioned writes, engineering limits, max step, two-step confirm, reason required, audit with old and new value</td><td class="name"><code>test_safe_control</code></td></tr>
           <tr><td class="name">Outbound</td><td class="name">Webhook, email, Slack, escalation, set-point handler, scheduled reports, MQTT publisher, HTTP sender</td><td class="name"><code>test_handlers</code>, <code>test_http_sender</code></td></tr>
-          <tr><td class="name">HMI</td><td class="name">Overview, point page with trend and logbook, history comparison, dashboards with 9 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>; 11 browser scripts</td></tr>
+          <tr><td class="name">HMI</td><td class="name">Overview, point page with trend, forecast and logbook, history comparison, dashboards with 10 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>, <code>test_prediction_widget</code>; 11 browser scripts</td></tr>
           <tr><td class="name">Accounts</td><td class="name">scrypt passwords, sessions, role inheritance, lockout, TOTP second factor, reset by one-time code, account disable, offline admin reset, scoped machine tokens</td><td class="name"><code>test_auth</code>, <code>test_mfa</code>, <code>test_disabled</code>, <code>test_reset</code></td></tr>
           <tr><td class="name">Storage</td><td class="name">SQLite or MySQL/MariaDB, versioned migrations, eight rollups, retention, backups, buffered writes with a system alarm</td><td class="name"><code>test_store</code>, <code>test_series</code>, <code>test_maintenance</code></td></tr>
           <tr><td class="name">Transport</td><td class="name">TLS 1.2+ with HSTS and Secure cookies when a certificate is given; plain HTTP refuses any non-local address</td><td class="name"><code>test_tls</code></td></tr>
-          <tr><td class="name">Data out</td><td class="name">History CSV, reports, one-click and scheduled export bundles (history, events, config, manifest) in one ZIP</td><td class="name"><code>test_export</code>, <code>test_reports</code></td></tr>
+          <tr><td class="name">Data out</td><td class="name">History CSV, reports, one-click and scheduled export bundles (history, events, config, manifest) in one ZIP, and retrieval of the bundles the scheduler wrote</td><td class="name"><code>test_export</code>, <code>test_export_retrieve</code>, <code>test_reports</code></td></tr>
           <tr><td class="name">AI/ML</td><td class="name">EWMA baseline, robust-z score, short-horizon forecast with a 95% band, and a prediction dashboard widget that says when no honest forecast exists</td><td class="name"><code>test_forecast</code>, <code>test_prediction_widget</code>, <code>test_anomaly</code></td></tr>
           <tr><td class="name">Modelling</td><td class="name">Engineering units with an optional display unit and conversion, tags inherited from folder and source</td><td class="name"><code>test_units</code></td></tr>
           <tr><td class="name">Federation</td><td class="name">SSO sign-in through OpenID Connect: authorization code with PKCE, RS256 from the provider JWKS, same sessions and roles</td><td class="name"><code>test_oidc</code></td></tr>
-          <tr><td class="name">Safety net</td><td class="name">A permission matrix over every dispatcher branch, background jobs for backups and source tests, bounded in-memory state</td><td class="name"><code>test_permissions</code>, <code>test_jobs</code>, <code>test_bounded_state</code></td></tr>
+          <tr><td class="name">Safety net</td><td class="name">A permission matrix over every dispatcher branch, background jobs for backups and source tests, bounded in-memory state, percent-decoded route names</td><td class="name"><code>test_permissions</code>, <code>test_jobs</code>, <code>test_bounded_state</code>, <code>test_route_names</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -414,11 +414,11 @@
 
   var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27"];
   var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"];
-  var COMMITS = [34, 94, 94, 94, 94, 94, 94, 94, 127];
-  var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 32];
-  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 53];
-  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 7125];
-  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 5292];
+  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 145];
+  var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 34];
+  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 57];
+  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 7882];
+  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 5954];
 
   var NS = "http://www.w3.org/2000/svg";
   var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
@@ -523,12 +523,12 @@
   }
 
   build("wrap-code", [
-    { name: "Server lines", short: "7,125", values: SERVER },
-    { name: "Test lines", short: "5,292", values: TESTS, dashed: true }
+    { name: "Server lines", short: "7,882", values: SERVER },
+    { name: "Test lines", short: "5,954", values: TESTS, dashed: true }
   ], { label: "Lines of code in durian and tests, 19 to 27 October" });
 
   build("wrap-suites", [
-    { name: "Test suites", short: "53", values: SUITES }
+    { name: "Test suites", short: "57", values: SUITES }
   ], { label: "Number of test suites, 19 to 27 October" });
 
   // daily table

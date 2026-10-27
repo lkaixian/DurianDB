@@ -10,29 +10,29 @@ Numbers below were measured from the tree on 2026-10-27, not estimated.
 
 | Measure | Value |
 |---|---|
-| Commits | 127 at the time of writing; every fix and feature is its own commit |
-| Python modules in `durian/` | 32 |
-| Lines of Python in `durian/` | 7,125 |
-| Test suites in `tests/` | 53 (`python tests/run_all.py`, all passing) |
-| Lines of test code | 5,292 |
-| Console: JS, CSS, HTML in `web/` | 2,106 lines across 6 files |
+| Commits | 145 at the time of writing; every fix and feature is its own commit |
+| Python modules in `durian/` | 34 |
+| Lines of Python in `durian/` | 7,882 |
+| Test suites in `tests/` | 57 (`python tests/run_all.py`, all passing) |
+| Lines of test code | 5,954 |
+| Console: JS, CSS, HTML in `web/` | 2,163 lines across 6 files |
 | Browser checks in `tools/` | 11 scripts (manual, not in CI) |
-| Data source types | 6 — virtual, MQTT over TLS, Modbus (TCP/RTU/ASCII), HTTP JSON, SQL (SQLite), HTTP ingest push |
+| Data source types | 8 — virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c, HTTP JSON, SQL (SQLite), HTTP ingest push |
 | Alarm detectors | 12 — HIGH_LIMIT, LOW_LIMIT, RATE_OF_CHANGE, NO_UPDATE, NO_CHANGE, CHANGE, STATE, RANGE, SMOOTHNESS, CUSUM, ANOMALY, TEXT |
 | Event handlers and publishers | webhook, email, Slack, set-point, scheduled report; MQTT publisher, HTTP sender |
-| Open debt entries | 25 (0 correctness, 4 untrue claims, 8 architecture, 5 dependencies, 8 untested paths) |
+| Open debt entries | 22 (0 correctness, 0 untrue claims, 8 architecture, 5 dependencies, 9 untested paths) |
 | Research notes | 13 in `docs/research/` plus the clean-room policy and the failure model |
 
 ## History by day
 
 Every point is the state of the tree at the last commit of that UTC day, recomputed from git.
 
-| Date | Commits | Modules | Test suites | `durian/` lines | Test lines | What landed |
+| Date | Commits (cumulative) | Modules | Test suites | `durian/` lines | Test lines | What landed |
 |---|---|---|---|---|---|---|
-| 2026-10-19 | 34 | 9 | 4 | 1,241 | 274 | clean-room policy, research on the vendor's public behaviour, core model, HTTP shell, SQLite history, first console, MQTT over TLS source, Modbus client and simulator |
-| 2026-10-20 | 60 | 24 | 27 | 5,048 | 2,702 | authentication and roles, dashboards and the designer, quality and source timestamps, ISA-18.2 alarm states, shelving and suppression, KPIs, safe control, calculated points, reports, mimics, Modbus/HTTP/SQL drivers, ingest and machine tokens, MySQL backend, maintenance |
+| 2026-10-19 | 19 | 9 | 4 | 1,241 | 274 | clean-room policy, research on the vendor's public behaviour, core model, HTTP shell, SQLite history, first console, MQTT over TLS source, Modbus client and simulator |
+| 2026-10-20 | 79 | 24 | 27 | 5,048 | 2,702 | authentication and roles, dashboards and the designer, quality and source timestamps, ISA-18.2 alarm states, shelving and suppression, KPIs, safe control, calculated points, reports, mimics, Modbus/HTTP/SQL drivers, ingest and machine tokens, MySQL backend, maintenance |
 | 2026-10-21 to 10-26 | 0 | 24 | 27 | 5,048 | 2,702 | no work; the tree was unchanged |
-| 2026-10-27 | 48 | 32 | 53 | 7,125 | 5,292 | HTTPS and binding beyond localhost, account disable, operator notes, CI workflow, failure model, debt register, rate-of-change defect fix, dependencies in CI, progress tracker and history page, every gap in the failure model closed with a test, engine lock split, MQTT source-down reason, Modbus finiteness, Rust and Python ANOMALY detectors, unit conversion and tag inheritance, forecast and baseline endpoints, a prediction dashboard widget, export bundles, background jobs, SSO sign-in, a permission matrix, bounded in-memory state, the Sparkplug B codec, README rewrite with CI badges |
+| 2026-10-27 | 145 | 34 | 57 | 7,882 | 5,954 | HTTPS and binding beyond localhost, account disable, operator notes, CI workflow, failure model, debt register, rate-of-change defect fix, dependencies in CI, progress tracker and history page, every gap in the failure model closed with a test, engine lock split, MQTT source-down reason, Modbus finiteness, Rust and Python ANOMALY detectors, unit conversion and tag inheritance, forecast and baseline endpoints, a prediction dashboard widget, export bundles, background jobs, SSO sign-in, a permission matrix, bounded in-memory state, the Sparkplug B codec, README rewrite with CI badges, a Sparkplug B source, an SNMP v2c source, retrieval of scheduled export bundles, the forecast on a point's own trend page, tests for the offline admin reset, percent-decoded route names, and corrections to the research notes |
 
 ## Built and verified
 
@@ -41,7 +41,7 @@ Every point is the state of the tree at the last commit of that UTC day, recompu
 
 | Area | What is built | Where |
 |---|---|---|
-| Data in | Virtual, MQTT TLS, Modbus TCP/RTU/ASCII, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens | `tests/test_modbus*.py`, `test_pull_sources.py`, `test_ingest.py` |
+| Data in | Virtual, MQTT TLS, Sparkplug B (births, deaths, aliases, sequence gaps), Modbus TCP/RTU/ASCII, SNMP v2c GET, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens | `tests/test_modbus*.py`, `test_pull_sources.py`, `test_ingest.py`, `test_sparkplug_source.py`, `test_snmp_source.py` |
 | Data model | Numeric and text points, engineering range, units, decimals, binary/multistate labels, folders, tags, descriptions | `tests/test_app.py`, `test_text_points.py` |
 | Quality and time | GOOD / UNCERTAIN / BAD per value, source timestamps, future-clock and stale rules, out-of-order drop | `tests/test_quality.py` |
 | Alarms | 12 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all | `tests/test_core.py`, `test_holds.py`, `test_maintenance.py`, `test_journal.py` |
@@ -50,8 +50,9 @@ Every point is the state of the tree at the last commit of that UTC day, recompu
 | Calculation | Safe expression language over other points; calc source | `tests/test_calc.py` |
 | Reports | Per-point summary with CSV, 31-day window, watch-list and tag narrowing; daily scheduled email | `tests/test_reports.py`, `test_handlers.py` |
 | Outbound | Webhook, email (STARTTLS/SSL), Slack, escalation, set-point handler, MQTT publisher, HTTP sender | `tests/test_handlers.py`, `test_http_sender.py` |
-| HMI | Overview, point page with trend and logbook, history with comparison, dashboards (9 widget types), drag-and-drop designer, mimic editor, kiosk and public views | `tests/test_dashboards.py`; browser scripts for the rest |
+| HMI | Overview, point page with trend, forecast and logbook, history with comparison, dashboards (10 widget types), drag-and-drop designer, mimic editor, kiosk and public views | `tests/test_dashboards.py`, `test_prediction_widget.py`; browser scripts for the rest |
 | Accounts | scrypt passwords, sessions, role inheritance, lockout, TOTP second factor, password reset by one-time code, account disable, offline admin reset, scoped machine tokens | `tests/test_auth.py`, `test_mfa.py`, `test_disabled.py`, `test_reset.py` |
+| Data out | History CSV, reports, one-click and scheduled export bundles, and retrieval of the bundles the scheduler wrote | `tests/test_export.py`, `test_export_retrieve.py`, `test_reports.py` |
 | Storage | SQLite or MySQL/MariaDB, versioned migrations, rollups (avg, min, max, last, count, first, sum, delta), retention, backups, buffered writes with a system alarm | `tests/test_store.py`, `test_series.py`, `test_maintenance.py` |
 | Transport security | TLS 1.2+ HTTPS with HSTS and `Secure` cookies when a certificate is given; refuses plain HTTP off localhost | `tests/test_tls.py` |
 | Integration | Node-RED flows, guide and end-to-end check; REST for values, sets, alarms | `tools/nodered_check.py` |
