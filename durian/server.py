@@ -132,9 +132,7 @@ class Handler(BaseHTTPRequestHandler):
                 ident = app.auth.identity(self.token())
             status, payload = app.handle(method, url.path, query, body, ident)
             self.send(status, payload)
-        except AuthError as ex:
-            self.send(ex.status, {"error": str(ex)})
-        except ApiError as ex:
+        except ApiError as ex:  # includes AuthError: a credential failure already speaks the same language
             self.send(ex.status, {"error": str(ex), **({"errors": ex.errors} if ex.errors else {})})
         except Exception as ex:
             log.exception("unhandled error")
