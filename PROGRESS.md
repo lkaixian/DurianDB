@@ -135,5 +135,5 @@ plus the work the owner asked for on 2026-10-27:
 | Data modelling | Calculated points, engineering ranges, unit conversion and tag inheritance done |
 | AI and machine learning | ANOMALY detector, EWMA baseline, robust-z score, short-horizon forecast and the prediction widget done; no learned model, by choice |
 | Extensive data input | 12 source types done, including DNP3, BACnet/IP and OPC UA (all read-only); the Sparkplug B codec and source are written and tested |
-| Rust real-time core | Experimental port of the detector layer plus the ANOMALY detector and bounded Summary statistics, 28 tests; not wired into the server |
+| Rust real-time core | Experimental port of the detector layer plus the ANOMALY detector and bounded Summary statistics, 32 tests; not wired into the server |
 | Progress tracking | this file, and `docs/progress.html` |
