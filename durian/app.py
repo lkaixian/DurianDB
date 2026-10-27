@@ -2,11 +2,9 @@
 
 The HTTP layer in server.py only translates requests into App.handle() calls.
 """
-import csv
 import datetime as dt
 import logging
 import fnmatch
-import io
 import json
 import math
 import re
@@ -20,6 +18,7 @@ from .auth import Auth, AuthError, can, check_password_strength, hash_password, 
 from . import export, notes, pointcsv, units, windows
 from .config import (build_engine, resolve, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
+from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, forecast as forecast_series
 from .ingest import HttpInSource, parse_payload
@@ -813,13 +812,11 @@ class App:
             e["level_name"], e["state"] = Level(e["level"]).name, alarm_state(e["acked_ts"], e["cleared_ts"])
         if q.get("format") != "csv":
             return 200, {"items": rows, "total": total, "offset": offset, "limit": limit}
-        out = io.StringIO()
-        w = csv.writer(out, lineterminator="\n")
-        iso = lambda t: "" if t is None else dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        w.writerow(["raised_utc", "point", "level", "message", "state", "held", "acknowledged_by", "acknowledged_utc", "returned_to_normal_utc"])
-        for e in rows:
-            w.writerow([iso(e["ts"]), e["point"], e["level_name"], e["message"], e["state"], e["held"] or "", e["acked_by"] or "", iso(e["acked_ts"]), iso(e["cleared_ts"])])
-        return 200, Raw(out.getvalue().encode(), "text/csv; charset=utf-8", "alarms.csv")
+        return 200, Raw(csv_bytes(
+            ["raised_utc", "point", "level", "message", "state", "held", "acknowledged_by", "acknowledged_utc", "returned_to_normal_utc"],
+            ([iso(e["ts"]), e["point"], e["level_name"], e["message"], e["state"], e["held"] or "", e["acked_by"] or "",
+              iso(e["acked_ts"]), iso(e["cleared_ts"])] for e in rows)),
+            "text/csv; charset=utf-8", "alarms.csv")
 
     def event_points(self, ident):
         """Names an identity may see alarms for: its points, the sources it may read, and DurianDB itself for a superadmin."""
@@ -1028,14 +1025,11 @@ class App:
         doc = {"from": start, "to": end, "items": items}
         if query.get("format") != "csv":
             return 200, doc
-        out = io.StringIO()
-        w = csv.writer(out, lineterminator="\n")
-        iso = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        w.writerow(["point", "unit", "description", "samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms", "from", "to"])
-        for i in items:
-            w.writerow([i["point"], i["unit"], i["description"], i["samples"], *(("" if i[k] is None else repr(float(i[k]))) for k in ("min", "max", "avg", "first", "last")),
-                        i["bad_samples"], i["alarms"], iso(start), iso(end)])
-        return 200, Raw(out.getvalue().encode(), "text/csv; charset=utf-8", "report.csv")
+        return 200, Raw(csv_bytes(
+            ["point", "unit", "description", "samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms", "from", "to"],
+            ([i["point"], i["unit"], i["description"], i["samples"], *(("" if i[k] is None else repr(float(i[k]))) for k in ("min", "max", "avg", "first", "last")),
+              i["bad_samples"], i["alarms"], iso(start), iso(end)] for i in items)),
+            "text/csv; charset=utf-8", "report.csv")
 
     def history_csv(self, ident, query):
         point = query.get("point")

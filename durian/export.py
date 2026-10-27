@@ -4,7 +4,6 @@ The same bundle can be written on a schedule by Maintenance, so it is built from
 truncates: a request that would make a bundle too large to hold in memory is refused with a sentence, because a
 silently shortened export is a lie.
 """
-import csv
 import datetime as dt
 import io
 import json
@@ -13,6 +12,7 @@ import time
 import zipfile
 
 from .core import Level, Quality, alarm_state
+from .csvfmt import csv_bytes, iso_millis
 from .maintenance import KINDS
 
 DURIAN_VERSION = "1.0"  # the product version a recipient of the bundle can quote; bump when the layout changes
@@ -25,10 +25,6 @@ MAX_EVENTS = 50_000
 
 class ExportError(ValueError):
     """The bundle cannot be made as asked. The message is a sentence the operator can act on."""
-
-
-def _iso(ts):
-    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _safe(name):
@@ -97,25 +93,20 @@ def build(store, *, days=7, points=None, now=None):
             rows = store.history_range(name, plan["start"], plan["end"], remaining + 1)
             if len(rows) > remaining:
                 raise ExportError(f"the bundle would hold more than {MAX_ROWS} samples; narrow the window or choose fewer points")
-            out = io.StringIO()
-            w = csv.writer(out, lineterminator="\n")
-            w.writerow(["timestamp_utc", "value", "quality"])
-            for r in rows:
-                value = r["svalue"] if r["svalue"] is not None else repr(float(r["value"]))
-                w.writerow([_iso(r["ts"]), value, Quality(r["quality"]).name.lower()])
-            z.writestr(plan["files"][name], out.getvalue().encode())
+            z.writestr(plan["files"][name], csv_bytes(
+                ["timestamp_utc", "value", "quality"],
+                ([iso_millis(r["ts"]), r["svalue"] if r["svalue"] is not None else repr(float(r["value"])), Quality(r["quality"]).name.lower()]
+                 for r in rows)))
             counts[name], total = len(rows), total + len(rows)
 
         events, event_total = store.events_search(None, 0, "all", plan["start"], plan["end"], None, MAX_EVENTS + 1, 0)
         if event_total > MAX_EVENTS:
             raise ExportError(f"the bundle would hold more than {MAX_EVENTS} alarms; narrow the window")
-        out = io.StringIO()
-        w = csv.writer(out, lineterminator="\n")
-        w.writerow(["time_utc", "point", "level", "message", "state", "cleared"])
-        for e in sorted(events, key=lambda r: (r["ts"], r["id"])):
-            w.writerow([_iso(e["ts"]), e["point"], Level(e["level"]).name, e["message"],
-                        alarm_state(e["acked_ts"], e["cleared_ts"]), "" if e["cleared_ts"] is None else _iso(e["cleared_ts"])])
-        z.writestr("events.csv", out.getvalue().encode())
+        z.writestr("events.csv", csv_bytes(
+            ["time_utc", "point", "level", "message", "state", "cleared"],
+            ([iso_millis(e["ts"]), e["point"], Level(e["level"]).name, e["message"],
+              alarm_state(e["acked_ts"], e["cleared_ts"]), "" if e["cleared_ts"] is None else iso_millis(e["cleared_ts"])]
+             for e in sorted(events, key=lambda r: (r["ts"], r["id"])))))
 
         objects = {k: store.list(k) for k in KINDS}
         config = {"format": "durian-config", "version": 1, "exported_at": plan["now"], "objects": objects}

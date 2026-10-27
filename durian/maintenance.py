@@ -13,6 +13,8 @@ import threading
 import time
 from pathlib import Path
 
+from .csvfmt import csv_bytes, iso_millis
+
 DEFAULTS = {"retention_days": 365, "purge_hour": 3, "backup_hour": -1, "backup_keep": 7,
             "export_hour": -1, "export_keep": 7}
 LIMITS = {"retention_days": (0, 36500), "purge_hour": (0, 23), "backup_hour": (-1, 23), "backup_keep": (1, 365),
@@ -258,12 +260,8 @@ class Maintenance:
         rows = self.store.history_range(point, start, end, CSV_MAX_ROWS + 1)
         if len(rows) > CSV_MAX_ROWS:
             return None
-        out = io.StringIO()
-        w = csv.writer(out, lineterminator="\n")
-        w.writerow(["timestamp_utc", "epoch_seconds", "value"])
-        for r in rows:
-            w.writerow([dt.datetime.fromtimestamp(r["ts"], dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z", f"{r['ts']:.3f}", r["svalue"] if r["svalue"] is not None else repr(float(r["value"]))])
-        return out.getvalue().encode()
+        return csv_bytes(["timestamp_utc", "epoch_seconds", "value"],
+                         ([iso_millis(r["ts"]), f"{r['ts']:.3f}", r["svalue"] if r["svalue"] is not None else repr(float(r["value"]))] for r in rows))
 
     def import_history(self, point, text, now=None):
         """CSV of epoch seconds or ISO-8601 timestamps and a value. Bad rows are skipped and counted."""
