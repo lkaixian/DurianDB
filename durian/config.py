@@ -15,11 +15,12 @@ from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
 from .modbus_source import DEFAULTS as MODBUS_KEYS, ModbusSource
 from .mqtt_source import MqttSource
+from .sparkplug_source import SparkplugSource
 from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
-SOURCE_TYPES = ("virtual", "mqtt", "modbus", "http_json", "sql", "http_in", "calc")
+SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "http_json", "sql", "http_in", "calc")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -229,6 +230,15 @@ def validate_source(name, b):
             add("cmd_prefix", "must not overlap prefix, or commands would come back in as data")
         if not isinstance(b.get("auto_create", True), bool):
             add("auto_create", "must be true or false")
+    if b.get("type") == "sparkplug":
+        try:
+            load_creds(b.get("creds", ""))
+        except (OSError, ValueError, TypeError):
+            add("creds", "cannot read the credentials file; give the path to a JSON file with host, port, ca, user and password")
+        if not (isinstance(b.get("group"), str) and NAME.match(b["group"])):
+            add("group", "give the Sparkplug group id: 1 to 64 letters, digits, dot, dash or underscore")
+        if not isinstance(b.get("auto_create", True), bool):
+            add("auto_create", "must be true or false")
     if b.get("type") == "modbus":
         _modbus_source_errors(b, add)
     elif b.get("type") == "http_json":
@@ -287,8 +297,8 @@ def validate_point(name, b, store):
         add("datatype", "must be number or text")
     text = text == "text"
     if text:
-        if src and src.get("type") not in ("virtual", "http_in", "mqtt"):
-            add("datatype", "text points are supported on virtual, http_in and mqtt sources")
+        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug"):
+            add("datatype", "text points are supported on virtual, http_in, mqtt and sparkplug sources")
         if b.get("logging") == "INTERVAL":
             add("logging", "a text point is logged on change or always, not at an interval")
     dets = b.get("detectors", [])
@@ -447,6 +457,11 @@ def build_engine(store):
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 src.start()  # only after every point is added: the read plan is built once from them
+            elif s["type"] == "sparkplug":
+                auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create", True) else None
+                src = SparkplugSource(s["name"], load_creds(s["creds"]), s.get("group", "Plant"), auto)
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
             else:
                 auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create", True) else None
                 src = MqttSource(s["name"], load_creds(s["creds"]), s.get("prefix", "durian/"),
