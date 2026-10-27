@@ -76,7 +76,7 @@ These are choices, recorded so nobody "fixes" them by accident:
 - One value per point per MQTT poll (the latest), not every message (`durian/mqtt_source.py:92`).
 - Pulled values carry the tick time, not the read time.
 - No process or script event handlers: they would run arbitrary code on the server.
-- No OPC UA, BACnet or DNP3 drivers; SNMP is v2c GET only, deliberately (no walk, no v3, no traps).
+- No OPC UA, BACnet or DNP3 drivers; SNMP is v2c GET and a bounded GETNEXT walk, deliberately (no v3, no traps, no table model).
 - The Sparkplug B source is read-only: no command topics, no STATE topic and no rebirth request, so a point cannot be written over it.
 - Plain HTTP on localhost; anything else needs a certificate.
 - Reset codes and TOTP pending secrets live in memory, so a restart voids them.

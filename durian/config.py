@@ -120,16 +120,21 @@ def _snmp_source_errors(b, add):
 def _snmp_point_errors(b, add):
     m = b.get("snmp")
     if not isinstance(m, dict):
-        add("snmp", "a point on an SNMP source needs an snmp section naming the OID to read")
+        add("snmp", "a point on an SNMP source needs an snmp section naming the OID or subtree to read")
         return
-    oid = m.get("address")
+    keys = [k for k in ("address", "walk") if k in m]
+    if len(keys) != 1:
+        add("snmp", "give either snmp.address for one OID or snmp.walk for a subtree, not both")
+        return
+    key = keys[0]
+    oid = m[key]
     if not isinstance(oid, str):
-        add("snmp.address", "must be the numeric OID to read, such as 1.3.6.1.2.1.1.5.0")
+        add(f"snmp.{key}", "must be the numeric OID to read, such as 1.3.6.1.2.1.1.5.0")
         return
     try:
         encode_oid(oid)
     except ValueError:
-        add("snmp.address", "must be a numeric OID such as 1.3.6.1.2.1.1.5.0")
+        add(f"snmp.{key}", "must be a numeric OID such as 1.3.6.1.2.1.1.5.0")
 
 
 class Virtual(Source):
