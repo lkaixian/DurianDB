@@ -109,6 +109,12 @@ reasons = {x["index"]: x["reason"] for x in r["rejected"]}
 assert s == 200 and r["accepted"] == 3 and set(reasons) == {2, 3, 4, 5, 6}, (r["accepted"], reasons)
 assert "unknown point" in reasons[2] and "number" in reasons[3] and "finite" in reasons[4] and "name of 1 to 64" in reasons[5]
 assert "future" in reasons[6]                                                                                           # an explicit old ts (index 7) is backfill: accepted, history only (tests/test_backfill.py:79)
+# a NaN timestamp is not a time: it compares false against every guard, so it must be refused by name. Both
+# spellings reach the same float, because json.loads accepts the bare NaN literal and parse_time floats "NaN".
+s, r = ing({"values": [{"point": "temp", "value": 1.0, "ts": float("nan")}, {"point": "temp", "value": 2.0, "ts": "NaN"}]})
+assert s == 422 and r["accepted"] == 0 and {x["index"] for x in r["rejected"]} == {0, 1}, (s, r)
+assert all("finite" in x["reason"] and "timestamp" in x["reason"] for x in r["rejected"]), r
+s, r = ing({"point": "level", "value": 6.5, "ts": None}); assert s == 200 and r["accepted"] == 1, (s, r)                # a null ts still means "now"
 s, r = ing({"temp": 23.0, "level": 8.0}); assert s == 200 and r["accepted"] == 2
 s, r = ing({"point": "temp", "value": 1, "ts": now - 30 * 86400}); assert s == 422 and "older than this source accepts" in r["rejected"][0]["reason"]
 s, r = ing({"point": "temp", "value": 99, "ts": 1}); assert s == 422                                                   # epoch-old is past the source's max age, refused

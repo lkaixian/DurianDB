@@ -125,7 +125,9 @@ class HttpInSource(Source):
                 except ValueError as e:
                     no(str(e))
                     continue
-                if t > now + FUTURE_SLACK:
+                if not math.isfinite(t):  # NaN compares false against every guard below, so it would be accepted and poison the high-water mark forever
+                    no("timestamp must be a finite number of epoch seconds")
+                elif t > now + FUTURE_SLACK:
                     no("timestamp is in the future, check the sender's clock")
                 elif t < now - self.max_age:
                     no("timestamp is older than this source accepts")
