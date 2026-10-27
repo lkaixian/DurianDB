@@ -116,6 +116,7 @@ ul.errors{margin:8px 0;padding-left:20px}
 .legend line{stroke:var(--ink);stroke-width:2}
 .widget svg .axis{stroke:var(--rule);stroke-width:1}
 .widget svg .line{fill:none;stroke:var(--ink);stroke-width:1.6}
+.widget svg .pred-band{fill:var(--ink);opacity:.12;stroke:none}
 .widget svg .lim{stroke:var(--accent);stroke-width:1;stroke-dasharray:4 3}
 form.inline{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 form.inline input{width:6em}

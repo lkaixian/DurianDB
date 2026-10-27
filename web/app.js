@@ -560,6 +560,54 @@ async function draw(pts) {
     <p class="note">${esc(title)}. Latest ${f(vals[vals.length - 1])}, range ${f(Math.min(...vals))} to ${f(Math.max(...vals))}${lims.length ? ", dashed lines are alarm limits" : ""}.</p>`;
 }
 
+// ---- prediction: stored history plus the server's short-horizon forecast, taken from the same answer the point page
+// uses (no model runs in the browser). The designer palette and the renderer registry live in dashboards.js.
+PALETTE.prediction = "Forecast";
+registerWidget("prediction", {
+  needs: [], size: {w: 6, h: 4}, template: {type: "prediction", title: "Forecast", point: "boiler-temp", hours: 6, bucket: 60, show_band: true},
+  async render(box, w) {
+    if (box._busy || (box._t && Date.now() - box._t < 5000)) return;  // history and forecast change slowly: refetch every 5 s at most
+    box._busy = true;
+    try {
+      const hours = w.hours || 6, bucket = w.bucket || 60;
+      let r;
+      try { r = await api("GET", `/api/points/${encodeURIComponent(w.point)}/forecast?hours=${hours}&bucket=${bucket}`); }
+      catch (e) {
+        box._t = Date.now();
+        box.innerHTML = `<h3 class="wt">${esc(w.point)}</h3>` + (e.status === 404 ? noAccess(w.point) : `<p class="note">${esc(e.message)}</p>`);
+        return;
+      }
+      box._t = Date.now();
+      const hist = r.points || [], fc = r.forecast || [], unit = r.unit || "";
+      const hd = `<h3 class="wt">${esc(w.point)}${w.title && w.title !== w.point ? " - " + esc(w.title) : ""}${unit ? ` <span class="u">${esc(unit)}</span>` : ""}</h3>`;
+      if (!hist.length) { box.innerHTML = hd + `<p class="note">no history yet for ${esc(w.point)}</p>`; return; }
+      const lastH = hist[hist.length - 1], lastF = fc.length ? fc[fc.length - 1] : null;
+      const f = v => Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1);
+      const legend = `<ul class="legend"><li><svg viewBox="0 0 24 6" aria-hidden="true"><line x1="0" x2="24" y1="3" y2="3"/></svg>stored</li>` +
+        `<li><svg viewBox="0 0 24 6" aria-hidden="true"><line x1="0" x2="24" y1="3" y2="3" stroke-dasharray="6 4"/></svg>forecast${lastF ? "" : " (not available)"}</li></ul>`;
+      const band = !!lastF && w.show_band !== false;
+      const vals = hist.map(i => i.value).concat(band ? fc.flatMap(i => [i.low, i.high]) : []).filter(Number.isFinite);
+      let lo = Math.min(...vals), hi = Math.max(...vals); if (hi === lo) { hi += 1; lo -= 1; }
+      const W = 600, H = 200, L = 46, R = 92, T = 12, B = 22, t0 = hist[0].ts, t1 = (lastF ? lastF.ts : lastH.ts) || t0 + 1;
+      const x = t => L + ((t - t0) / ((t1 - t0) || 1)) * (W - L - R), y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+      const line = items => items.map((p, k) => (k ? "L" : "M") + x(p.ts).toFixed(1) + " " + y(p.value).toFixed(1)).join("");
+      const bandPath = band ? fc.map((p, k) => (k ? "L" : "M") + x(p.ts).toFixed(1) + " " + y(p.high).toFixed(1)).join("") +
+        fc.slice().reverse().map(p => "L" + x(p.ts).toFixed(1) + " " + y(p.low).toFixed(1)).join("") + "Z" : "";
+      const fp = lastF ? line([{ts: lastH.ts, value: lastH.value}, ...fc]) : "";
+      const aria = `${w.point}: stored last ${f(lastH.value)}${unit ? " " + unit : ""}${lastF ? `, forecast last ${f(lastF.value)}${unit ? " " + unit : ""}` : ", no forecast"}`;
+      box.innerHTML = hd + `<div class="chartbox"><svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(aria)}">
+        <line class="axis" x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}"/><line class="axis" x1="${L}" x2="${L}" y1="${T}" y2="${H - B}"/>
+        <text x="${L - 4}" y="${T + 9}" text-anchor="end">${f(hi)}</text><text x="${L - 4}" y="${H - B}" text-anchor="end">${f(lo)}</text>
+        <text x="${L}" y="${H - 4}">${fmt(t0)}</text><text x="${W - R}" y="${H - 4}" text-anchor="end">${fmt(t1)}</text>
+        ${bandPath ? `<path class="pred-band" d="${bandPath}"/>` : ""}<path class="line" d="${line(hist)}"/>
+        ${fp ? `<path class="line" stroke-dasharray="6 4" d="${fp}"/>` : ""}
+        <text x="${lastF ? x(lastH.ts) + 4 : W - R + 4}" y="${y(lastH.value) + 3}">${f(lastH.value)}</text>
+        ${lastF ? `<text x="${W - R + 4}" y="${y(lastF.value) + 3}">${f(lastF.value)}</text>` : ""}</svg></div>` +
+        (lastF ? "" : `<p class="note">${esc(r.note || "No forecast available.")}</p>`) + legend;
+    } finally { box._busy = false; }
+  },
+});
+
 // ---- config editor (administrators)
 const KINDS = {source: "Sources", point: "Points", handler: "Handlers", publisher: "Publishers", watchlist: "Watch lists", maintenance: "Maintenance"};
 const POINT_BASE = {unit: "", tags: {}, logging: "ON_CHANGE", tolerance: 0, settable: false, read_roles: ["user"], set_roles: []};
