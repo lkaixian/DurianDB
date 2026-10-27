@@ -71,9 +71,10 @@ svg{width:100%;height:56px;display:block;margin-top:6px}
 svg .line{fill:none;stroke:var(--ink);stroke-width:1.5}
 svg .lim{stroke:var(--accent);stroke-width:1;stroke-dasharray:4 3}
 #hist svg{height:260px}
-#hist svg text{fill:var(--muted);font-size:11px;font-family:inherit}
-#hist svg .axis{stroke:var(--rule);stroke-width:1}
-#hist svg .line{stroke-width:2}
+#pd-chart svg.chart{height:260px}
+#hist svg text,#pd-chart svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+#hist svg .axis,#pd-chart svg .axis{stroke:var(--rule);stroke-width:1}
+#hist svg .line,#pd-chart svg .line{stroke-width:2}
 .login{max-width:400px;margin:56px auto 0}
 .login .card{background:var(--field);border:1px solid var(--rule);border-top:3px solid var(--ink);padding:24px 28px 20px}
 .login .brand{margin:0;font-size:.8rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
@@ -116,7 +117,7 @@ ul.errors{margin:8px 0;padding-left:20px}
 .legend line{stroke:var(--ink);stroke-width:2}
 .widget svg .axis{stroke:var(--rule);stroke-width:1}
 .widget svg .line{fill:none;stroke:var(--ink);stroke-width:1.6}
-.widget svg .pred-band{fill:var(--ink);opacity:.12;stroke:none}
+svg .pred-band{fill:var(--ink);opacity:.12;stroke:none}
 .widget svg .lim{stroke:var(--accent);stroke-width:1;stroke-dasharray:4 3}
 form.inline{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 form.inline input{width:6em}
