@@ -25,4 +25,11 @@ r = subprocess.run([sys.executable, "-m", "durian.server"], env={**env, "DURIAN_
                    capture_output=True, text=True, timeout=60)
 assert r.returncode != 0 and "DURIAN_TLS_KEY" in (r.stdout + r.stderr), r.stdout + r.stderr
 
+# a first-run password too weak to accept is a sentence, not a traceback
+r = subprocess.run([sys.executable, "-m", "durian.server"],
+                   env={**os.environ, "DURIAN_DB": ":memory:", "DURIAN_ADMIN_PASSWORD": "weak"},
+                   capture_output=True, text=True, timeout=60)
+assert r.returncode != 0 and "cannot create the first administrator" in (r.stdout + r.stderr), r.stdout + r.stderr
+assert "Traceback" not in r.stderr, r.stderr
+
 print("ok")
