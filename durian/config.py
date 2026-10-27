@@ -10,6 +10,8 @@ from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector
 from . import calc, http_source, sql_source, units, windows
+from .bacnet_source import (MAX_INSTANCE, OBJECT_TYPES, PROPERTIES, BacnetError, BacnetSource,
+                            parse_address)
 from .http_source import HttpJsonSource
 from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
@@ -21,7 +23,7 @@ from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
-SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "http_json", "sql", "http_in", "calc")
+SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "bacnet", "http_json", "sql", "http_in", "calc")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -135,6 +137,40 @@ def _snmp_point_errors(b, add):
         encode_oid(oid)
     except ValueError:
         add(f"snmp.{key}", "must be a numeric OID such as 1.3.6.1.2.1.1.5.0")
+
+
+def _bacnet_source_errors(b, add):
+    m = b.get("bacnet")
+    if not isinstance(m, dict):
+        add("bacnet", "a BACnet source needs a bacnet section with address and device")
+        return
+    try:
+        parse_address(m.get("address"))
+    except BacnetError as e:
+        add("bacnet.address", str(e))
+    if not _int(m.get("device"), 0, MAX_INSTANCE):
+        add("bacnet.device", f"must be the device instance, a whole number from 0 to {MAX_INSTANCE}")
+    if "timeout" in b and not (_num(b["timeout"]) and 1 <= b["timeout"] <= 30):
+        add("timeout", "must be a number of seconds from 1 to 30")
+    if "period" in b and not (_num(b["period"]) and 0.2 <= b["period"] <= 86400):
+        add("period", "must be a number of seconds from 0.2 to 86400")
+    if "backoff_max" in b and not (_num(b["backoff_max"]) and 1 <= b["backoff_max"] <= 86400):
+        add("backoff_max", "must be a number of seconds from 1 to 86400")
+    if "backoff_scale" in b and not (_num(b["backoff_scale"]) and 1 < b["backoff_scale"] <= 10):
+        add("backoff_scale", "must be greater than 1 and at most 10")
+
+
+def _bacnet_point_errors(b, add):
+    m = b.get("bacnet")
+    if not isinstance(m, dict):
+        add("bacnet", "a point on a BACnet source needs a bacnet section naming its object_type, instance and property")
+        return
+    if m.get("object_type") not in OBJECT_TYPES:
+        add("bacnet.object_type", f"must be one of {sorted(OBJECT_TYPES)}")
+    if not _int(m.get("instance"), 0, MAX_INSTANCE):
+        add("bacnet.instance", f"must be the object instance, a whole number from 0 to {MAX_INSTANCE}")
+    if m.get("property") not in PROPERTIES:
+        add("bacnet.property", f"must be one of {list(PROPERTIES)}")
 
 
 class Virtual(Source):
@@ -281,6 +317,8 @@ def validate_source(name, b):
         _modbus_source_errors(b, add)
     elif b.get("type") == "snmp":
         _snmp_source_errors(b, add)
+    elif b.get("type") == "bacnet":
+        _bacnet_source_errors(b, add)
     elif b.get("type") == "http_json":
         http_source.validate_source(b, add)
     elif b.get("type") == "sql":
@@ -337,8 +375,8 @@ def validate_point(name, b, store):
         add("datatype", "must be number or text")
     text = text == "text"
     if text:
-        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug", "snmp"):
-            add("datatype", "text points are supported on virtual, http_in, mqtt, sparkplug and snmp sources")
+        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug", "snmp", "bacnet"):
+            add("datatype", "text points are supported on virtual, http_in, mqtt, sparkplug, snmp and bacnet sources")
         if b.get("logging") == "INTERVAL":
             add("logging", "a text point is logged on change or always, not at an interval")
     dets = b.get("detectors", [])
@@ -401,6 +439,8 @@ def validate_point(name, b, store):
         _modbus_point_errors(b, add)
     elif src and src.get("type") == "snmp":
         _snmp_point_errors(b, add)
+    elif src and src.get("type") == "bacnet":
+        _bacnet_point_errors(b, add)
     elif src and src.get("type") == "http_json":
         http_source.validate_point(b, add)
     elif src and src.get("type") == "sql":
@@ -409,7 +449,7 @@ def validate_point(name, b, store):
     if src and src.get("type") in ("http_json", "sql") and not (
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
-    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp"):
+    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp", "bacnet"):
         add("settable", "this source type is read-only")
     if src and src.get("type") == "calc":
         try:
@@ -453,7 +493,7 @@ def make_point(name, b, source_name):
               "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "snmp", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
+    for k in ("modbus", "snmp", "bacnet", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason"):  # zero is a real value here
@@ -506,6 +546,11 @@ def build_engine(store):
                     src.add(make_point(n, p, s["name"]))
             elif s["type"] == "snmp":
                 src = SnmpSource(s["name"], s)
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
+                src.start()
+            elif s["type"] == "bacnet":
+                src = BacnetSource(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 src.start()

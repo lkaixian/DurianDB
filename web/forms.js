@@ -54,6 +54,10 @@ const SOURCE_GROUPS = {
     F("port", "Port", "int", {optional: true, hint: "Usually 161."}),
     F("community", "Community", "text", {hint: "The v2c community text the device expects, for example public."}),
     F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
+  bacnet: () => [{title: "BACnet/IP device", fields: [
+    F("bacnet.address", "Address", "text", {hint: "host:port of the device, for example 10.0.0.5:47808. The port defaults to 47808."}),
+    F("bacnet.device", "Device instance", "int", {hint: "The instance number the device answers with, such as 1001."}),
+    F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
   http_json: () => [{title: "HTTP JSON document", fields: [
     F("url", "URL", "text", {hint: "http or https. Redirects are never followed."}),
     F("period", "Fetch every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number"),
@@ -95,6 +99,10 @@ const POINT_PARTS = {
     }},
   snmp: {start: () => ({snmp: {address: "1.3.6.1.2.1.1.5.0"}}), keys: ["snmp"],
     fields: () => [F("snmp.address", "OID", "text", {hint: "The numeric OID to read, such as 1.3.6.1.2.1.1.5.0."})]},
+  bacnet: {start: () => ({bacnet: {object_type: "analogInput", instance: 1, property: "presentValue"}}), keys: ["bacnet"],
+    fields: () => [F("bacnet.object_type", "Object type", "select", {options: opts(["analogInput", "analogInput"], ["analogOutput", "analogOutput"], ["analogValue", "analogValue"], ["binaryInput", "binaryInput"], ["binaryOutput", "binaryOutput"], ["binaryValue", "binaryValue"], ["multiStateValue", "multiStateValue"])}),
+      F("bacnet.instance", "Object instance", "int", {hint: "The object's instance number, such as 1."}),
+      F("bacnet.property", "Property", "select", {options: opts(["presentValue", "presentValue"], ["statusFlags", "statusFlags"], ["units", "units"], ["objectName", "objectName"])})]},
   http_json: {start: () => ({http: {path: ""}}), keys: ["http", "scale"],
     fields: () => [F("http.path", "Path in the JSON", "text", {hint: "For example sensors.temp or items[0].value."}),
       F("scale.multiplier", "Multiplier", "number", {optional: true}), F("scale.additive", "Add", "number", {optional: true})]},
