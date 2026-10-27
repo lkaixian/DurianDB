@@ -35,8 +35,9 @@ def _text(v, n):
 class Ctx:
     """Collects errors and warnings under a property path such as widgets[2].point."""
 
-    def __init__(self):
+    def __init__(self, known=None):
         self.errors, self.warnings, self.points = [], [], set()
+        self.known = known or {}  # configured points by name, for a widget that needs more than a name
 
     def err(self, prop, msg):
         self.errors.append({"property": prop, "message": msg})
@@ -81,6 +82,26 @@ def _gauge(w, p, c):
     for i, z in enumerate(zones):
         if not (isinstance(z, dict) and _num(z.get("from")) and _num(z.get("to")) and z["from"] < z["to"] and z.get("tone") in TONES):
             c.err(f"{p}.zones[{i}]", f"needs numeric from below to, and tone ({', '.join(TONES)})")
+
+
+@widget("prediction")
+def _prediction(w, p, c):
+    c.point(w, p)
+    name = w.get("point")
+    if _text(name, 64) and name:
+        pt = c.known.get(name)
+        if pt is None:
+            c.err(f"{p}.point", f"point '{name}' is not configured")
+        elif pt.get("datatype") == "text":
+            c.err(f"{p}.point", f"point '{name}' holds text, which has no forecast")
+    hours = w.get("hours", 6)
+    if not (isinstance(hours, int) and not isinstance(hours, bool) and 1 <= hours <= 48):
+        c.err(f"{p}.hours", "must be 1 to 48 hours")
+    bucket = w.get("bucket", 60)
+    if not (isinstance(bucket, int) and not isinstance(bucket, bool) and 10 <= bucket <= 3600):
+        c.err(f"{p}.bucket", "must be 10 to 3600 seconds")
+    if not isinstance(w.get("show_band", True), bool):
+        c.err(f"{p}.show_band", "must be true or false")
 
 
 @widget("chart")
@@ -177,7 +198,8 @@ def _status(w, p, c):
 
 def validate_dashboard(name, b, store, roles_ok):
     """Return (errors, warnings). `roles_ok(list)` checks a role list; `store` supplies points for warnings."""
-    c = Ctx()
+    known = {p["name"]: p for p in store.list("point")}
+    c = Ctx(known)
     if not NAME.match(str(name)):
         c.err("name", "use 1 to 64 letters, digits, dot, dash or underscore")
     if not (_text(b.get("title", ""), 80) and b.get("title")):
@@ -223,7 +245,6 @@ def validate_dashboard(name, b, store, roles_ok):
             for cell in cells:
                 grid.setdefault(cell, i)
     # warnings: things that are legal but probably not what the author meant
-    known = {p["name"]: p for p in store.list("point")}
     public = "anonymous" in b.get("read_roles", [])
     for pt in sorted(c.points):
         if pt not in known:

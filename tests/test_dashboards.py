@@ -34,7 +34,7 @@ W = lambda **k: {"id": "a", "type": "value", "point": "boiler-temp", "x": 0, "y"
 D = lambda *ws, **k: {"title": "T", "widgets": list(ws), **k}
 
 # every widget type has a validator, and the seeded dashboard is valid
-assert set(VALIDATORS) == {"value", "gauge", "chart", "alarms", "table", "setpoint", "text", "status", "mimic"}
+assert set(VALIDATORS) == {"value", "gauge", "chart", "prediction", "alarms", "table", "setpoint", "text", "status", "mimic"}
 s, seeded = call(viewer, "GET", "/api/dashboards/plant-overview")
 assert s == 200 and len(seeded["widgets"]) == 8 and seeded["editable"] is False
 assert call(admin, "PUT", "/api/dashboards/copy", {k: v for k, v in seeded.items() if k not in ("name", "editable")})[0] == 200
