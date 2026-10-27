@@ -49,7 +49,6 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 | # | Debt | Severity | Cost |
 |---|---|---|---|
 | E2 | `paho-mqtt` must be ≥ 2.0 (`CallbackAPIVersion.VERSION2`) and nothing says so | medium | An old install fails at runtime, not at install |
-| E3 | `pymysql` is a hidden runtime dependency for MySQL: unlisted, not in CI | medium | The MySQL path cannot fail in CI, only in production |
 | E4 | `pyserial` is an optional lazy import, not installed in CI | low | Serial Modbus tests cannot run there |
 | E5 | CI tests Python 3.12 and 3.13; local development is 3.14 | low | The version actually used most is untested |
 | E6 | `tools/make_cert.py` and `tools/mqtt_lab.py` need `cryptography`, which CI installs but no test uses | low | Wasted CI time, unclear requirement |
@@ -62,7 +61,6 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 | U2 | MQTT source and publisher | A lab broker started by hand; no test file covers the source | medium |
 | U3 | Email, Slack, escalation delivery | A fake SMTP server; Slack only validates config | medium |
 | U4 | HTTPS serving | `tests/test_tls.py` checks the cookie flag and the refusal paths, not a real handshake | low |
-| U5 | MariaDB / MySQL | Opt-in, absent from CI | medium |
 | U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | Manual, headless Edge on port 9222 | medium |
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
 | U8 | SNMP source | An in-process fake agent answers crafted datagrams; never a real device | low |

@@ -30,6 +30,41 @@ jobs:
           node --check web/dashboards.js
           node --check web/admin.js
 
+  mysql:
+    name: tests on MariaDB
+    # One cell only: the SQLite path already runs on all four cells above, and the MySQL path is the same code
+    # on every Python and OS, so running it four times would quadruple the cost for no extra coverage.
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_DATABASE: durian_test
+          MARIADB_USER: durian
+          MARIADB_PASSWORD: durian
+          MARIADB_ROOT_PASSWORD: durian-root
+        ports:
+          - "3306:3306"  # Published on this job's runner only, so nothing outside the runner can reach it.
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the dependencies, including the MySQL driver
+        run: python -m pip install --disable-pip-version-check -r requirements.txt "pymysql>=1.1"
+      - name: Test suite on MariaDB
+        # The URLs below are literals pointing at the service container on this runner, and the suite drops
+        # every table in that database first, so the step has no way to point at any other server.
+        env:
+          DURIAN_TEST_STORE_URL: "mysql://durian:durian@127.0.0.1:3306/durian_test"
+          DURIAN_TEST_MYSQL_URL: "mysql://durian:durian@127.0.0.1:3306/durian_test"
+        run: python tests/run_all.py
+
   rust:
     name: real-time core (experimental)
     runs-on: ubuntu-latest
