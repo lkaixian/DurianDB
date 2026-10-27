@@ -1,7 +1,7 @@
 # DurianDB
 
 [![tests (3.12–3.14)](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-tests.yml?branch=main&label=tests%20%283.12%E2%80%933.14%29)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-tests.yml)
-[![browser checks](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci.yml?branch=main&label=browser%20checks)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml)
+[![browser checks](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-browser.yml?branch=main&label=browser%20checks)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-browser.yml)
 [![MariaDB tests](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-mysql.yml?branch=main&label=MariaDB%20tests)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-mysql.yml)
 [![rust core](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-rust.yml?branch=main&label=rust%20core)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-rust.yml)
 

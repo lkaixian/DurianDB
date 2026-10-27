@@ -113,17 +113,20 @@ async function startSimulator(dir) {
 
 async function startBrowser(dir) {
   const exe = webPath();
-  const proc = spawn(exe, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+  const proc = spawn(exe, ["--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+    "--no-first-run", "--no-default-browser-check",
     "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-extensions",
     "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222",
     "--user-data-dir=" + path.join(dir, "profile"), "about:blank"],
     {stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32"});
   const log = collect(proc);
-  await waitFor("Chrome DevTools Protocol on 9222", async () => {
-    if (proc.exitCode !== null) throw new Error(`browser exited (${proc.exitCode}): ${log.stderr}`);
+  // A browser killed by a signal (sandbox/AppArmor, OOM) otherwise shows up only as a silent CDP timeout.
+  const died = new Promise((_, reject) => proc.once("close", (code, signal) => reject(new Error(
+    signal ? `browser was killed by ${signal}: ${log.stderr}` : `browser exited (${code}): ${log.stderr}`))));
+  await Promise.race([waitFor("Chrome DevTools Protocol on 9222", async () => {
     const targets = await (await fetch(CDP + "/json/list")).json();
     return targets.some(t => t.type === "page");
-  });
+  }), died]);
   return {proc, log};
 }
 
