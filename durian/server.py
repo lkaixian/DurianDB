@@ -27,6 +27,8 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/dashboards.js": ("dashboards.js", "text/javascript; charset=utf-8"), "/admin.js": ("admin.js", "text/javascript; charset=utf-8"), "/forms.js": ("forms.js", "text/javascript; charset=utf-8"),
+          "/account.js": ("account.js", "text/javascript; charset=utf-8"), "/overview.js": ("overview.js", "text/javascript; charset=utf-8"), "/point.js": ("point.js", "text/javascript; charset=utf-8"), "/history.js": ("history.js", "text/javascript; charset=utf-8"),
+          "/alarms.js": ("alarms.js", "text/javascript; charset=utf-8"), "/reports.js": ("reports.js", "text/javascript; charset=utf-8"), "/config.js": ("config.js", "text/javascript; charset=utf-8"), "/users.js": ("users.js", "text/javascript; charset=utf-8"),
           "/app.css": ("app.css", "text/css; charset=utf-8")}
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 COOKIE = "durian_session"
