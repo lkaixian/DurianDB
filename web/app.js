@@ -103,6 +103,7 @@ function viewLogin() {
     <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
     <label id="li-code" hidden>Authentication code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></label>
     <button type="submit" class="primary">Sign in</button><p id="li-msg" role="alert" class="err"></p></form>
+    <div id="li-sso"></div>
     <details class="forgot"><summary>Forgot your password?</summary>
       <p class="note">Ask an administrator for a reset code (Users page, Reset password). The code works once and expires after an hour.</p>
       <form id="reset"><label>Username <input name="username" autocomplete="username" required></label>
@@ -127,6 +128,9 @@ function viewLogin() {
       ev.target.reset();
     } catch (e) { out.className = "err"; out.textContent = (e.errors || []).map(x => x.message).join(" ") || e.message; }
   });
+  api("GET", "/api/auth/sso").then(s => {  // a link only when an administrator configured single sign-on
+    if (s.configured) $("#li-sso").innerHTML = `<p class="note">or</p><a class="btn" href="/api/auth/sso/start">Sign in with ${esc(s.issuer)}</a>`;
+  }).catch(() => { /* no SSO status: password sign-in still works */ });
   $("#login input").focus();
 }
 
