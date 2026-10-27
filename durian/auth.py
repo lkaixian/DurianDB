@@ -26,10 +26,17 @@ def totp(secret, t=None, step=30):
     return f"{(int.from_bytes(h[o:o + 4], 'big') & 0x7fffffff) % 10 ** 6:06d}", n
 
 
-class AuthError(Exception):
-    def __init__(self, message, status=401):
+class ApiError(Exception):
+    """A request failure: the status the HTTP layer sends and the sentence the caller reads."""
+    def __init__(self, status, message, errors=None):
         super().__init__(message)
-        self.status = status
+        self.status, self.errors = status, errors
+
+
+class AuthError(ApiError):
+    """A credential failure. It is already an ApiError, so no handler has to translate it for HTTP."""
+    def __init__(self, message, status=401):
+        super().__init__(status, message)
 
 
 def hash_password(pw: str) -> str:

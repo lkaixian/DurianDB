@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import unquote
 
-from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
+from .auth import ApiError, Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from . import export, notes, pointcsv, units, windows
 from .config import (build_engine, resolve, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
@@ -35,12 +35,6 @@ log = logging.getLogger("durian.app")
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance")
 ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import", "auth"}  # the routes below the superadmin guard
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
-
-
-class ApiError(Exception):
-    def __init__(self, status, message, errors=None):
-        super().__init__(message)
-        self.status, self.errors = status, errors
 
 
 SYSTEM = "(system)"  # events about DurianDB itself rather than a point, visible to superadmins only
@@ -420,7 +414,7 @@ class App:
         """GET /api/points/<name>/forecast?hours=6&bucket=60: stored points (the truth) plus forecast rows."""
         p, _s = self.visible_points(ident).get(point, (None, None))
         if p is None:
-            raise ApiError(404, "unknown point")
+            self._404("unknown point")
         hours = self._int_param(q, "hours", 6, 1, 168)
         bucket = self._int_param(q, "bucket", 60, 1, 86400)
         steps = hours * 3600 // bucket
@@ -438,7 +432,7 @@ class App:
         """GET /api/points/<name>/baseline?window=200: an EWMA baseline over the last `window` good samples."""
         p, _s = self.visible_points(ident).get(point, (None, None))
         if p is None:
-            raise ApiError(404, "unknown point")
+            self._404("unknown point")
         window = self._int_param(q, "window", 200, 2, 10000)
         if p.text:
             raise ApiError(400, "a text point has no numeric baseline")
@@ -458,7 +452,7 @@ class App:
         """
         p, _s = self.visible_points(ident).get(point, (None, None))
         if p is None:
-            raise ApiError(404, "unknown point")
+            self._404("unknown point")
         hours = self._int_param(q, "hours", 24, 1, 168)
         compare = self._int_param(q, "compare", 24, 1, 8760)
         if compare < hours:
@@ -475,20 +469,17 @@ class App:
 
     # ---- auth
     def login(self, body):
-        body = body if isinstance(body, dict) else {}
+        body = self._body(body or {})
         return self.auth.login(body.get("username"), body.get("password"), body.get("code"))
 
     def reset_password(self, body):
         """POST /api/reset {username, code, new}: spend a code from an admin and choose a new password. Needs no sign-in."""
-        body = body if isinstance(body, dict) else {}
+        body = self._body(body or {})
         name = body.get("username")
-        try:
-            check_password_strength(body.get("new"))  # before the code is spent, so a weak password can be retried
-            if not (isinstance(name, str) and self.store.user(name)):
-                raise AuthError("that reset code is wrong or has expired", 400)
-            self.auth.redeem_reset(name, body.get("code"))
-        except AuthError as ex:
-            raise ApiError(ex.status, str(ex))
+        check_password_strength(body.get("new"))  # before the code is spent, so a weak password can be retried
+        if not (isinstance(name, str) and self.store.user(name)):
+            raise AuthError("that reset code is wrong or has expired", 400)
+        self.auth.redeem_reset(name, body.get("code"))
         self.set_password(name, body["new"])
         self.store.audit(name, "password.reset.done")
 
@@ -521,7 +512,7 @@ class App:
             claims = self.oidc.complete(cfg, query.get("code"), query.get("state"), query.get("error"))
             name = local_identity(self.store, cfg, claims)
             token = self.auth.login_sso(name)
-        except (OIDCError, AuthError) as ex:
+        except OIDCError as ex:
             raise ApiError(ex.status, str(ex))
         self.store.audit(name, "login.sso", f"provider {cfg['issuer']}")  # never the state, nonce or code
         return token
@@ -572,9 +563,9 @@ class App:
         # A point name may hold a slash (Sparkplug names one point per node/device/metric), so the console sends
         # it percent-encoded; decode after the split so an encoded slash cannot become a new path segment.
         a, b, c = (unquote(x) if x is not None else None for x in (m["a"], m["b"], m["c"]))
-        if body is not None and not isinstance(body, (dict, str)):  # a JSON body is an object; imports arrive as text
-            raise ApiError(400, "body must be a JSON object")
-        admin = "superadmin" in ident["roles"]
+        if body is not None and not isinstance(body, str):  # a JSON body is an object; imports arrive as text
+            body = self._body(body)
+        admin = can(ident["roles"], ["superadmin"])
 
         def need(ok):
             if not ok:
@@ -610,7 +601,7 @@ class App:
         if (method, a) == ("GET", "value") and b and c is None:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:
-                raise ApiError(404, "unknown point")
+                self._404("unknown point")
             tags, unit, display_unit, display_value = self.resolve_point(p, s)
             return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "quality": Quality(p.quality).name.lower(), "unit": unit,
                          "tags": tags, "source": s.name, "display_unit": display_unit, "display_value": display_value}
@@ -636,7 +627,7 @@ class App:
             rec = self.jobs.get(int(b) if b.isdigit() else -1)
             if rec is None:
                 raise ApiError(404, "unknown job")
-            if "superadmin" not in ident["roles"] and rec.get("owner") != ident["name"]:
+            if not can(ident["roles"], ["superadmin"]) and rec.get("owner") != ident["name"]:
                 raise ApiError(403, "not allowed")
             return 200, {k: rec.get(k) for k in ("id", "name", "state", "result", "error", "started", "finished")}
 
@@ -652,16 +643,17 @@ class App:
         if (method, a, c) == ("GET", "points", None) and b:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:
-                raise ApiError(404, "unknown point")
+                self._404("unknown point")
             return 200, {**self.point_view(p, s), "source_type": s.meta.get("type"), "source_down": s.down_reason,
                          "detectors": p.meta.get("detector_cfg", []), "hold": self.holds.get(b),
                          "maintenance": [{"name": m["name"], "mode": m["mode"]} for m in self.windows if windows.active(m, time.time()) and windows.covers(m, b, self.resolve_point(p, s)[0], s.name)]}
         if (method, a, c) == ("POST", "points", "set"):
             p, s = self.points().get(b, (None, None))
             if p is None or not can(ident["roles"], p.meta.get("read_roles", ["user"])):
-                raise ApiError(404, "unknown point")
+                self._404("unknown point")
             need(p.meta.get("settable") and can(ident["roles"], p.meta.get("set_roles", [])))
-            v = (body or {}).get("value", "missing")
+            body = self._body(body or {})
+            v = body.get("value", "missing")
             if p.text:
                 if v is not None and not (isinstance(v, str) and 1 <= len(v) <= 255 and v.isprintable()):
                     raise ApiError(400, "value must be printable text of 1 to 255 characters, or null to release the point")
@@ -670,13 +662,13 @@ class App:
             if not hasattr(s, "write"):
                 raise ApiError(400, "this source cannot write")
             self.check_setpoint(p, v)
-            reason = (body or {}).get("reason")
+            reason = body.get("reason")
             if reason is not None and not (isinstance(reason, str) and len(reason) <= 200 and reason.isprintable()):
                 raise ApiError(400, "reason must be printable text of up to 200 characters")
             reason = (reason or "").strip()
             if p.meta.get("require_reason") and not reason:
                 raise ApiError(422, f"{p.name} needs a reason for every write: send reason")
-            if p.meta.get("confirm") and v is not None and not self.confirmed(ident, p.name, v, (body or {}).get("confirm")):
+            if p.meta.get("confirm") and v is not None and not self.confirmed(ident, p.name, v, body.get("confirm")):
                 return 202, {"confirm": self.confirm_token(ident, p.name, v), "expires_in": CONFIRM_SECONDS,
                              "message": f"Repeat the request with this confirm token to set {p.name} to {v}"}
             scope = ident.get("scope")
@@ -687,10 +679,11 @@ class App:
         if a == "notes" and b and c is None and method in ("GET", "POST"):
             p0, _s = self.visible_points(ident).get(b, (None, None))
             if p0 is None:
-                raise ApiError(404, "unknown point")
+                self._404("unknown point")
             if method == "GET":
                 return 200, notes.for_point(self.store, b)
-            need("user" in ident["roles"])
+            need(can(ident["roles"], ["user"]))
+            body = self._body(body or {})
             errs = notes.validate(body)
             if errs:
                 raise ApiError(422, "validation failed", errs)
@@ -707,7 +700,7 @@ class App:
             return 200, self.series(ident, query)
 
     def _api_export_public(self, method, a, b, c, query, body, ident, need):
-        admin = "superadmin" in ident["roles"]
+        admin = can(ident["roles"], ["superadmin"])
         if (method, a, b) == ("GET", "export", "points"):
             need(admin)
             return 200, Raw(pointcsv.export(self.store.list("point")), "text/csv; charset=utf-8", "points.csv")
@@ -724,11 +717,11 @@ class App:
 
     def _api_import_points(self, method, a, b, c, query, body, ident, need):
         if (method, a, b) == ("POST", "import", "points"):
-            need("superadmin" in ident["roles"])
+            need(can(ident["roles"], ["superadmin"]))
             return self.import_points(query, body, ident)
 
     def _api_events(self, method, a, b, c, query, body, ident, need):
-        user = "user" in ident["roles"]
+        user = can(ident["roles"], ["user"])
         if (method, a, b, c) == ("GET", "events", "search", None):
             return self.event_journal(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
@@ -740,7 +733,8 @@ class App:
             return 200, rows
         if (method, a, b, c) == ("POST", "events", "ack-many", None):
             need(user)
-            ids = (body or {}).get("ids")
+            body = self._body(body or {})
+            ids = body.get("ids")
             if not (isinstance(ids, list) and 1 <= len(ids) <= 200 and all(isinstance(i, int) and not isinstance(i, bool) for i in ids)):
                 raise ApiError(400, "send {ids: [1 to 200 alarm ids]}")
             ok, now, n = self.event_points(ident), time.time(), 0
@@ -760,7 +754,7 @@ class App:
 
     def _api_test_source(self, method, a, b, c, query, body, ident, need):
         if (method, a, b) == ("POST", "test", "source"):
-            need("superadmin" in ident["roles"])
+            need(can(ident["roles"], ["superadmin"]))
             if query.get("wait") == "1":  # scripts and old callers keep the synchronous answer
                 return 200, test_source(body)
             jid = self.jobs.submit("test source", lambda: test_source(body), ident["name"])
@@ -781,7 +775,7 @@ class App:
 
     def _api_mylists(self, method, a, b, c, query, body, ident, need):
         if a == "mylists" and b and c is None and method in ("PUT", "DELETE"):
-            need("user" in ident["roles"])
+            need(can(ident["roles"], ["user"]))
             return self.my_list(method, b, body, ident)
 
     def _api_dashboards(self, method, a, b, c, query, body, ident, need):
@@ -791,28 +785,25 @@ class App:
     def _api_mfa(self, method, a, b, c, query, body, ident, need):
         if a == "mfa" and method == "POST" and b in ("setup", "enable", "disable") and c is None:  # a second sign-in factor (TOTP) for your own account
             need(ident["name"])
-            body = body or {}
+            body = self._body(body or {})
             u = self.store.user(ident["name"])
-            try:
-                if b == "setup":
-                    if u["totp"]:
-                        raise ApiError(409, "already enabled; disable it first")
-                    return 200, self.auth.mfa_setup(ident["name"])
-                if b == "enable":
-                    self.auth.mfa_enable(ident["name"], body.get("code"))
-                    return 200, {"ok": True}
-                if not verify_password(str(body.get("password", "")), u["hash"]):
-                    raise ApiError(403, "password is wrong")
-                self.store.run("update users set totp=null where name=?", (ident["name"],))
-                self.store.audit(ident["name"], "mfa.disable")
+            if b == "setup":
+                if u["totp"]:
+                    raise ApiError(409, "already enabled; disable it first")
+                return 200, self.auth.mfa_setup(ident["name"])
+            if b == "enable":
+                self.auth.mfa_enable(ident["name"], body.get("code"))
                 return 200, {"ok": True}
-            except AuthError as ex:
-                raise ApiError(ex.status, str(ex))
+            if not verify_password(str(body.get("password", "")), u["hash"]):
+                raise ApiError(403, "password is wrong")
+            self.store.run("update users set totp=null where name=?", (ident["name"],))
+            self.store.audit(ident["name"], "mfa.disable")
+            return 200, {"ok": True}
 
     def _api_password(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("POST", "password") and b is None:
             need(ident["name"])
-            body = body or {}
+            body = self._body(body or {})
             u = self.store.user(ident["name"])
             if not verify_password(str(body.get("old", "")), u["hash"]):
                 raise ApiError(403, "current password is wrong")
@@ -822,8 +813,7 @@ class App:
     # ---- administration route handlers, served only after the guard and `need(admin)` above
     def _api_admin_auth(self, method, a, b, c, query, body, ident):
         if (method, a, b, c) == ("PUT", "auth", "sso", None):
-            if not isinstance(body, dict):
-                raise ApiError(400, "body must be a JSON object")
+            body = self._body(body)
             errs = validate_sso(body)
             if errs:
                 raise ApiError(422, "validation failed", errs)
@@ -914,7 +904,7 @@ class App:
             return 200, [{**t, "state": "disabled" if t["disabled"] else "expired" if t["expires"] and t["expires"] < now else "active"}
                          for t in self.store.tokens()]
         if method == "POST" and name is None:
-            b = body if isinstance(body, dict) else {}
+            b = self._body(body or {})
             errs, add = [], lambda p, m: errs.append({"property": p, "message": m})
             tname, owner, scope, source, days = b.get("name"), b.get("owner") or ident["name"], b.get("scope"), b.get("source"), b.get("days")
             if not (isinstance(tname, str) and re.match(r"^[A-Za-z0-9_.-]{1,64}$", tname)):
@@ -940,7 +930,8 @@ class App:
         if name is None:
             raise ApiError(400, "give a token name in the URL")
         if method == "PUT":
-            if not (isinstance(body, dict) and isinstance(body.get("disabled"), bool)):
+            body = self._body(body)
+            if not isinstance(body.get("disabled"), bool):
                 raise ApiError(422, "validation failed", [{"property": "disabled", "message": "must be true or false"}])
             if not self.store.set_token_disabled(name, body["disabled"]):
                 raise ApiError(404, "unknown token")
@@ -961,19 +952,19 @@ class App:
             return 200, [h for h in self.holds.values() if h["name"] in pts]
         if (method, point, action) == ("GET", "kpis", None):
             h = (query or {}).get("hours", "24")
-            return 200, self.alarm_kpis(pts, "superadmin" in ident["roles"], int(h) if h.isdigit() else 24, extra=self.event_points(ident))
+            return 200, self.alarm_kpis(pts, can(ident["roles"], ["superadmin"]), int(h) if h.isdigit() else 24, extra=self.event_points(ident))
         if method != "POST" or action not in ("shelve", "unshelve", "out-of-service", "in-service"):
             raise ApiError(404, "not found")
         if not ident["name"]:
             raise ApiError(401, "log in first")
         if point not in pts:
-            raise ApiError(404, "unknown point")
+            self._404("unknown point")
         if action in ("out-of-service", "in-service"):
-            if "superadmin" not in ident["roles"]:
+            if not can(ident["roles"], ["superadmin"]):
                 raise ApiError(403, "only a superadmin can take a point out of service")
-        elif "user" not in ident["roles"]:
+        elif not can(ident["roles"], ["user"]):
             raise ApiError(403, "not allowed")
-        body, now, cur = body if isinstance(body, dict) else {}, time.time(), self.holds.get(point)
+        body, now, cur = self._body(body or {}), time.time(), self.holds.get(point)
         reason, p = str(body.get("reason", "")).strip(), pts[point][0]
         if action in ("shelve", "out-of-service"):
             if not 3 <= len(reason) <= 200:
@@ -1039,7 +1030,7 @@ class App:
         """Names an identity may see alarms for: its points, the sources it may read, and DurianDB itself for a superadmin."""
         ok = set(self.visible_points(ident))
         ok |= {SOURCE + s.name for s in self.engine.sources if can(ident["roles"], s.meta.get("read_roles", ["user"]))}
-        return ok | ({SYSTEM} if "superadmin" in ident["roles"] else set())
+        return ok | ({SYSTEM} if can(ident["roles"], ["superadmin"]) else set())
 
     def alarm_kpis(self, pts, admin, hours, now=None, extra=()):
         """Alarm system performance over the last `hours`, in the spirit of ISA-18.2 / EEMUA 191. Only points the caller can see."""
@@ -1155,8 +1146,7 @@ class App:
                 raise ApiError(404, "no such watch list")
             self.store.delete("watchlist", name)
             return 200, {"deleted": name}
-        if not isinstance(body, dict):
-            raise ApiError(400, "send {tags, points}")
+        body = self._body(body)
         errs = validate_watchlist(name, {"tags": body.get("tags", {}), "points": body.get("points", [])})
         if errs:
             raise ApiError(422, "invalid watch list", errs)
@@ -1253,7 +1243,7 @@ class App:
     def history_csv(self, ident, query):
         point = query.get("point")
         if point not in self.visible_points(ident):
-            raise ApiError(404, "unknown point")
+            self._404("unknown point")
         now = time.time()
         try:
             start, end = float(query.get("from", now - 86400)), float(query.get("to", now))
@@ -1335,19 +1325,18 @@ class App:
         if not ident["name"]:
             raise ApiError(401, "log in first")
         if method == "PUT":
-            if not isinstance(body, dict):
-                raise ApiError(400, "body must be a JSON object")
+            body = self._body(body)
             if d is not None and not self._can_edit(ident, d):
                 raise ApiError(403, "not allowed to edit this dashboard")
             if d is None and self.store.get("dashboard", name) is not None:
                 raise ApiError(404, "unknown dashboard")  # exists but hidden from this user: do not reveal it
-            if d is None and not ("superadmin" in ident["roles"] or "designer" in ident["roles"]):
+            if d is None and not can(ident["roles"], ["superadmin", "designer"]):
                 raise ApiError(403, "creating dashboards needs the designer role")
             if d is None and len(self.store.list("dashboard")) >= self.MAX_DASHBOARDS:
                 raise ApiError(409, "too many dashboards")
             body = {k: v for k, v in body.items() if k not in ("owner", "name", "editable")}
             errs, warns = validate_dashboard(name, body, self.store, roles_ok)
-            if "anonymous" in body.get("read_roles", []) and "superadmin" not in ident["roles"]:
+            if "anonymous" in body.get("read_roles", []) and not can(ident["roles"], ["superadmin"]):
                 errs.append({"property": "read_roles", "message": "only a superadmin can publish a dashboard to anonymous visitors"})
             if errs:
                 raise ApiError(422, "validation failed", errs)
@@ -1371,7 +1360,7 @@ class App:
     def series(self, ident, q):
         point = q.get("point")
         if point not in self.visible_points(ident):
-            raise ApiError(404, "unknown point")
+            self._404("unknown point")
         rollup = q.get("rollup", "avg")
         if rollup not in ALL_ROLLUPS:
             raise ApiError(400, f"rollup must be one of {', '.join(ALL_ROLLUPS)}")
@@ -1393,8 +1382,7 @@ class App:
         if name is None:
             raise ApiError(400, "give a name in the URL")
         if method == "PUT":
-            if not isinstance(body, dict):
-                raise ApiError(400, "body must be a JSON object")
+            body = self._body(body)
             errs = {"source": lambda: validate_source(name, body), "point": lambda: validate_point(name, body, self.store),
                     "handler": lambda: validate_handler(name, body),
                     "publisher": lambda: validate_publisher(name, body, self.store),
@@ -1441,7 +1429,7 @@ class App:
         if name is None:
             raise ApiError(400, "give a user name in the URL")
         if method == "PUT":
-            body = body or {}
+            body = self._body(body or {})
             roles = body.get("roles")
             if not (isinstance(roles, list) and roles and all(isinstance(r, str) and 0 < len(r) <= 32 for r in roles)):
                 raise ApiError(422, "validation failed", [{"property": "roles", "message": "give at least one role"}])
@@ -1464,10 +1452,7 @@ class App:
                     self.store.audit(ident["name"], "user.disabled" if body["disabled"] else "user.enabled", name)
                 self.store.run("update users set roles=? where name=?", (json.dumps(roles), name))
             else:
-                try:
-                    check_password_strength(body.get("password"))
-                except AuthError as ex:
-                    raise ApiError(422, "validation failed", [{"property": "password", "message": str(ex)}])
+                self._check_password(body.get("password"))
                 self.store.add_user(name, hash_password(body["password"]), roles)
             self.store.audit(ident["name"], "user.put", name)
             return 200, {"saved": name}
@@ -1482,13 +1467,25 @@ class App:
         raise ApiError(405, "method not allowed")
 
     def set_password(self, name, pw):
-        try:
-            check_password_strength(pw)
-        except AuthError as ex:
-            raise ApiError(422, "validation failed", [{"property": "password", "message": str(ex)}])
+        self._check_password(pw)
         self.store.set_hash(name, hash_password(pw))
         self.store.audit(name, "password.change")
 
     @staticmethod
-    def _404():
-        raise ApiError(404, "not found")
+    def _404(message="not found"):
+        raise ApiError(404, message)
+
+    @staticmethod
+    def _body(body):
+        """The request body as a JSON object, or the 400 sentence. Imports arrive as text and read their own body."""
+        if not isinstance(body, dict):
+            raise ApiError(400, "body must be a JSON object")
+        return body
+
+    @staticmethod
+    def _check_password(pw):
+        """A weak password is a field error on the password property, wherever a password is set."""
+        try:
+            check_password_strength(pw)
+        except AuthError as ex:
+            raise ApiError(422, "validation failed", [{"property": "password", "message": str(ex)}])

@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from durian.app import ROUTE, ApiError, App  # noqa: E402
-from durian.auth import hash_password  # noqa: E402
+from durian.auth import hash_password, held  # noqa: E402
 from durian.config import seed  # noqa: E402
 from _support import new_store  # noqa: E402
 
@@ -358,6 +358,12 @@ for who, path in (("anon", "/api/points/status-text"), ("viewer", "/api/points/s
                   ("viewer", "/api/notes/status-text"), ("viewer", "/api/dashboards/status-board"),
                   ("ops", "/api/dashboards/plant-overview")):
     assert call(WHO[who], "GET", path, query={"point": "status-text"})[0] == 404, (who, path)
+
+
+# ---- one role check: superadmin inherits every role, so can() agrees with the inline tests it replaced for every
+# identity Auth.identity hands a handler; a hand-built identity holding only superadmin passes a user-only route too
+assert held(["superadmin"]) == {"superadmin", "user", "anonymous"}
+assert call({"name": "admin", "roles": {"superadmin"}}, "POST", "/api/events/ack-many", {"ids": [1]})[0] == 200
 
 
 # ---- machine tokens: the scope path in handle() must keep every administrative route out of reach

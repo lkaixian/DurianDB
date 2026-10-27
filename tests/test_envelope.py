@@ -30,6 +30,27 @@ for path in ("/api/login", "/api/reset"):
     except ApiError as e:
         assert e.status in (400, 401), (path, e.status, str(e))
 
+# a JSON string is still not an object: every handler that reads fields refuses it the same way, including the
+# ones that used to reach .get on it and become a 500 (the C7 guard was only at the dispatcher, not in each handler)
+for method, path in (("POST", "/api/mfa/setup"), ("POST", "/api/mfa/enable"), ("POST", "/api/password"),
+                     ("PUT", "/api/users/someone"), ("POST", "/api/tokens"), ("POST", "/api/events/ack-many"),
+                     ("PUT", "/api/mylists/one"), ("PUT", "/api/dashboards/one")):
+    try:
+        app.handle(method, path, {}, "not an object", admin)
+    except ApiError as e:
+        assert e.status == 400 and "JSON object" in str(e), (path, e.status, str(e))
+    else:
+        raise AssertionError(f"{method} {path} should refuse a string body")
+
+# sign-in and reset are called by the server directly, before the dispatcher: they refuse a string the same way
+for fn in (app.login, app.reset_password):
+    try:
+        fn("not an object")
+    except ApiError as e:
+        assert e.status == 400 and "JSON object" in str(e), e
+    else:
+        raise AssertionError(f"{fn.__name__} should refuse a string body")
+
 # a text body is still allowed for the CSV imports: the rows are checked, not the body refused
 try:
     app.handle("POST", "/api/import/points", {}, "name,source\nx,y\n", admin)
