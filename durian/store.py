@@ -27,7 +27,7 @@ class Store:
     def __init__(self, url=":memory:"):
         self.url, self.lock = url, threading.RLock()  # guards this connection; engine state has its own lock in app
         self._tx = 0  # depth of an enclosing atomic() block; run() does not commit inside one
-        if url.startswith("mysql://"):
+        if url.startswith("mysql://"):  # must differ: opening the database is driver work, not SQL; every statement below is shared
             self.kind = "mysql"
             u = urllib.parse.urlparse(url)
             self._mysql = dict(host=u.hostname, port=u.port or 3306, user=urllib.parse.unquote(u.username or ""),
@@ -51,18 +51,27 @@ class Store:
     def _x(self, sql):  # one SQL text for both databases: the placeholder is the only thing that differs
         return sql.replace("?", "%s") if self.kind == "mysql" else sql
 
-    def _exec(self, sql, args=()):
+    def _int_div(self, col):
+        """`col` divided by the next ? and truncated to an integer, written once because the databases spell it
+        differently: MySQL's division keeps a fraction and needs floor(), SQLite's cast truncates. For every
+        timestamp history stores, both return the start of the same bucket."""
+        return f"floor({col} / ?)" if self.kind == "mysql" else f"cast({col} / ? as int)"
+
+    def _exec(self, sql, args=(), batch=False):
+        """One statement, or a batch of them, through one path on both databases. MySQL only adds housekeeping:
+        keep the connection alive, send %s placeholders, undo the failed statement when no atomic() owns it."""
         if self.kind == "mysql":
-            self.db.ping(reconnect=True)
-            cur = self.db.cursor()
-            try:
-                cur.execute(self._x(sql), args)
-            except Exception:
-                if not self._tx:  # inside atomic() the enclosing block decides when to roll back
-                    self.db.rollback()
-                raise
-            return cur
-        return self.db.execute(sql, args)
+            self.db.ping(reconnect=True)  # the server drops connections that sat idle between ticks
+        cur = self.db.cursor()
+        try:
+            (cur.executemany if batch else cur.execute)(self._x(sql), args)
+        except Exception:
+            # must differ: MySQL holds even a plain read in a transaction, so a failed statement there has to be
+            # undone here unless an enclosing atomic() owns the rollback
+            if self.kind == "mysql" and not self._tx:
+                self.db.rollback()
+            raise
+        return cur
 
     def ddl(self, sql):
         with self.lock:
@@ -75,7 +84,9 @@ class Store:
             cols = [c[0] for c in cur.description or []]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             if self.kind == "mysql" and not self._tx:
-                self.db.commit()  # end the read snapshot so later reads see new rows; an enclosing atomic() owns its transaction
+                # must differ: autocommit off means MySQL holds the read snapshot open even after a plain select,
+                # so the transaction has to end here for later reads to see new rows; SQLite opens none for a read.
+                self.db.commit()  # an enclosing atomic() owns its transaction
             return rows
 
     def run(self, sql, args=()):
@@ -104,17 +115,7 @@ class Store:
 
     def many(self, sql, rows):
         with self.lock:
-            if self.kind == "mysql":
-                self.db.ping(reconnect=True)
-                cur = self.db.cursor()
-                try:
-                    cur.executemany(self._x(sql), rows)
-                except Exception:
-                    if not self._tx:  # inside atomic() the enclosing block decides when to roll back
-                        self.db.rollback()
-                    raise
-            else:
-                self.db.executemany(sql, rows)
+            self._exec(sql, rows, batch=True)
             if not self._tx:
                 self.db.commit()
 
@@ -135,7 +136,7 @@ class Store:
             raise RuntimeError(f"the database schema version cannot be read: {type(e).__name__}. Restore the database or repair the schema_version table.") from e
 
     def _has_table(self, name):
-        if self.kind == "mysql":
+        if self.kind == "mysql":  # must differ: each database keeps its list of tables in its own catalog
             return bool(self.q("select 1 from information_schema.tables where table_schema = database() and table_name = ?", (name,)))
         return bool(self.q("select 1 from sqlite_master where type='table' and name=?", (name,)))
 
@@ -154,16 +155,18 @@ class Store:
         return json.loads(r[0]["svalue"]) if r else default
 
     def set_setting(self, key, value):
-        self._upsert("settings", ("skey",), "svalue", (key,), json.dumps(value))
+        self._upsert("settings", ("skey",), {"skey": key, "svalue": json.dumps(value)})
 
-    def _upsert(self, table, keys, valcol, keyvals, val):
-        cols = ", ".join(keys + (valcol,))
-        marks = ", ".join("?" * (len(keys) + 1))
+    def _upsert(self, table, keys, row):
+        """Insert a row, or update its value columns in place when the key columns are already taken. The whole
+        statement is built once for both databases; only the conflict clause differs in wording, not in effect."""
+        cols = list(row)
+        upd = [c for c in cols if c not in keys]
         if self.kind == "mysql":
-            sql = f"insert into {table}({cols}) values ({marks}) on duplicate key update {valcol}=values({valcol})"
+            tail = "on duplicate key update " + ", ".join(f"{c}=values({c})" for c in upd)
         else:
-            sql = f"insert into {table}({cols}) values ({marks}) on conflict({', '.join(keys)}) do update set {valcol}=excluded.{valcol}"
-        self.run(sql, tuple(keyvals) + (val,))
+            tail = f"on conflict({', '.join(keys)}) do update set " + ", ".join(f"{c}=excluded.{c}" for c in upd)
+        self.run(f"insert into {table}({', '.join(cols)}) values ({', '.join('?' * len(cols))}) {tail}", tuple(row[c] for c in cols))
 
     # ---- history
     def add_history(self, rows):
@@ -175,7 +178,7 @@ class Store:
 
     def series(self, point, since, bucket, rollup):
         """Bucketed history; bucket start time is returned as ts. Caller validates the arguments."""
-        b = "floor(ts / ?)" if self.kind == "mysql" else "cast(ts / ? as int)"
+        b = self._int_div("ts")  # one bucketing expression for both dialects, so a rollup change lands on each backend at once
         if rollup in ("last", "first"):
             return self.q(f"select b * ? as ts, value from (select {b} as b, value, "
                           f"row_number() over (partition by {b} order by ts {'desc' if rollup == 'last' else 'asc'}) as rn "
@@ -217,7 +220,7 @@ class Store:
         if except_points:
             where += f" and point not in ({', '.join('?' * len(except_points))})"
             args += list(except_points)
-        if self.kind == "mysql":
+        if self.kind == "mysql":  # must differ: MySQL has DELETE ... LIMIT, SQLite has no limit on delete and deletes the rowids a subquery picks
             return self.run(f"delete from history where {where} limit ?", args + [limit]).rowcount
         return self.run(f"delete from history where rowid in (select rowid from history where {where} limit ?)", args + [limit]).rowcount
 
@@ -317,15 +320,7 @@ class Store:
         return self.q("select count(*) as n from auth_failures")[0]["n"]
 
     def set_failure(self, name, attempts, locked_until):
-        now = time.time()
-        if self.kind == "mysql":
-            self.run("insert into auth_failures(name, attempts, locked_until, seen) values (?,?,?,?) "
-                     "on duplicate key update attempts=values(attempts), locked_until=values(locked_until), seen=values(seen)",
-                     (name, attempts, locked_until, now))
-        else:
-            self.run("insert into auth_failures(name, attempts, locked_until, seen) values (?,?,?,?) "
-                     "on conflict(name) do update set attempts=excluded.attempts, locked_until=excluded.locked_until, "
-                     "seen=excluded.seen", (name, attempts, locked_until, now))
+        self._upsert("auth_failures", ("name",), {"name": name, "attempts": attempts, "locked_until": locked_until, "seen": time.time()})
 
     def delete_failure(self, name):
         return self.run("delete from auth_failures where name=?", (name,)).rowcount
@@ -359,6 +354,8 @@ class Store:
     def claim_step(self, name, step):
         """Record `step` as spent, atomically. True only for the call that moved the guard forward, so two
         processes cannot both accept the same TOTP code."""
+        # must differ: both say "the step only moves forward", but SQLite has a where on its conflict update and
+        # MySQL does not, so there the column is guarded with if() instead
         if self.kind == "mysql":
             cur = self.run("insert into auth_last_step(name, last_step) values (?,?) "
                            "on duplicate key update last_step=if(last_step < values(last_step), values(last_step), last_step)",
@@ -405,6 +402,8 @@ class Store:
         """Claim or renew the one tick lease atomically. True only for the caller that holds it after this call,
         so two server processes over one database never both tick."""
         now = time.time() if now is None else now
+        # must differ: both hand the lease over when it has expired or already belongs to the caller, but SQLite
+        # says so in a where on the conflict update and MySQL has no where there, so it repeats the test in if()
         if self.kind == "mysql":
             cur = self.run("insert into tick_lease(id, owner, expires) values (?,?,?) "
                            "on duplicate key update owner=if(expires <= ? or owner = ?, values(owner), owner), "
@@ -434,6 +433,8 @@ class Store:
     def claim_escalation(self, handler, event_id):
         """Record that (handler, alarm) is being escalated, atomically. True only for the one call that got the
         row, so two server processes never mail the same escalation twice."""
+        # must differ: SQLite skips a duplicate with do nothing; MySQL has no do nothing, so it rewrites the row
+        # with the value it already holds, which changes no row and likewise reports zero
         if self.kind == "mysql":
             cur = self.run("insert into escalations(handler, event_id) values (?,?) "
                            "on duplicate key update event_id=event_id", (handler, event_id))
@@ -477,7 +478,7 @@ class Store:
 
     # ---- config objects
     def put(self, kind, name, body):
-        self._upsert("objects", ("kind", "name"), "body", (kind, name), json.dumps(body))
+        self._upsert("objects", ("kind", "name"), {"kind": kind, "name": name, "body": json.dumps(body)})
 
     def get(self, kind, name):
         r = self.q("select body from objects where kind=? and name=?", (kind, name))
@@ -495,7 +496,7 @@ class Store:
         return {t: self.q(f"select count(*) as n from {t}")[0]["n"] for t in ("history", "events", "users", "audit", "objects")}
 
     def size_bytes(self):
-        if self.kind == "mysql":
+        if self.kind == "mysql":  # must differ: MySQL adds up its statistics catalog; a SQLite database is just files on disk
             r = self.q("select coalesce(sum(data_length + index_length), 0) as n from information_schema.tables where table_schema = database()")
             return int(r[0]["n"])
         if self.path == ":memory:":
@@ -504,14 +505,14 @@ class Store:
 
     def describe(self):
         """Where the data lives, with any password removed."""
-        if self.kind == "mysql":
+        if self.kind == "mysql":  # must differ: MySQL is the URL it dials, SQLite is the file it opened
             m = self._mysql
             return f"mysql://{m['user']}@{m['host']}:{m['port']}/{m['database']}"
         return self.path
 
     def backup_to(self, dest):
         """Consistent copy of a SQLite database while it is in use. Returns the file size."""
-        if self.kind != "sqlite" or self.path == ":memory:":
+        if self.kind != "sqlite" or self.path == ":memory:":  # must differ: the online backup API only exists in SQLite
             raise NotImplementedError("in-app backup supports file-based SQLite only")
         with self.lock:
             out = sqlite3.connect(dest)

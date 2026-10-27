@@ -28,6 +28,10 @@ def check(st):
     assert got("last") == [(100, 60), (110, 5)] and got("count") == [(100, 3), (110, 1)]
     assert [r["value"] for r in st.recent("p", 2)] == [60, 5] and len(st.history_range("p", 101, 105, 10)) == 2
     assert st.series("none", 0, 10, "avg") == []
+    # integer-second bucketing on edges that are not round tens, and the one helper that spells it: MySQL floors
+    # the division, SQLite truncates the cast, and every backend must answer through the same shared statement
+    assert st._int_div("ts") == ("floor(ts / ?)" if st.kind == "mysql" else "cast(ts / ? as int)")
+    assert [(int(x["ts"]), float(x["value"])) for x in st.series("p", 0, 7, "avg")] == [(98, 15), (105, 60), (112, 5)]
     # purge: batched, per point, with exclusions
     assert st.purge_history(103, limit=1) == 1                      # the limit really limits
     assert st.purge_history(103, except_points=("q",)) == 1         # p@101 goes (p@100 already gone); q is protected
@@ -46,6 +50,16 @@ def check(st):
     st.audit("ann", "x", "d"); assert st.audit_log(1)[0]["action"] == "x" and st.audit_log(1)[0]["user"] == "ann"
     st.put("point", "a", {"v": 1}); st.put("point", "a", {"v": 2}); st.put("point", "b", {"v": 3})
     assert st.get("point", "a") == {"v": 2} and [o["name"] for o in st.list("point")] == ["a", "b"] and st.delete("point", "a") == 1 and st.get("point", "a") is None
+    # the shared upsert with three value columns: a second write updates the one row on either database
+    st.set_failure("zed", 1, 0); st.set_failure("zed", 3, 12.5)
+    assert st.failure_count() == 1 and st.failure("zed")["attempts"] == 3 and st.failure("zed")["locked_until"] == 12.5
+    # a statement that fails raises, and the store stays usable afterwards (MySQL undoes its open transaction)
+    raised = False
+    try:
+        st.run("select * from no_such_table")
+    except Exception:
+        raised = True
+    assert raised and st.get_setting("retention_days") == 45
     # facts
     c = st.table_counts(); assert c["history"] == 2 and c["events"] == 2 and c["users"] == 1 and c["audit"] == 1
     assert st.size_bytes() >= 0 and "password" not in st.describe() and st.describe()

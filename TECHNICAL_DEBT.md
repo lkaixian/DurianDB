@@ -35,6 +35,13 @@ delivery tests narrowed U3 (Slack, the webhook and the HTTP sender now reach a l
 being validated) and found that a failed delivery showed the operator an exception class name, which is now a
 sentence (`durian/outputs.py`).
 
+A sixth pass closed A12: `durian/store.py` now builds every statement once. One `_exec` path serves single and
+batched statements on either driver, one `_upsert` sits behind settings, config objects and lockouts, and one
+`_int_div` spells the integer-second buckets rollups use. A branch survives only where the databases genuinely
+differ — their table catalogs, `DELETE ... LIMIT`, conflict clauses MySQL has no `where` for, sizes and
+descriptions — and each says why. `test_store.py` checks the shared path, the bucketing on uneven edges and a
+failed statement on every backend.
+
 ## 2. Documented claims that are not true
 
 No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes now describe what is built, and
@@ -45,7 +52,6 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 | # | Debt | Where | Severity | Cost |
 |---|---|---|---|---|
 | A9 | What is still per process: password-reset codes, pending TOTP setup secrets and OIDC pending sign-ins. Sessions, lockout, the TOTP replay guard, confirm tokens, escalation and the tick lease are in the store | `durian/auth.py` | low | These already expire on restart by design; nothing security-relevant is shared by accident |
-| A12 | SQLite and MySQL diverge through hand-written branches, including `cast(ts/? as int)` vs `floor(ts/?)` | `durian/store.py` | medium | The MySQL path is the least tested code in the repo |
 
 ## 4. Dependencies and environment
 

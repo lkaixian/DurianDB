@@ -19,7 +19,7 @@ python -m durian.server     # console on http://127.0.0.1:8765
 | Console | 1,964 lines of JS/CSS/HTML in `web/` |
 | Data source types | 11: virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c, DNP3, BACnet/IP, HTTP JSON, SQL, HTTP ingest, calculated |
 | Alarm detectors | 12, with on/off delay, deadband and ISA-18.2 states |
-| Open debt entries | 14 (see `TECHNICAL_DEBT.md`) |
+| Open debt entries | 12 (see `TECHNICAL_DEBT.md`) |
 
 Built and covered by tests: authentication (scrypt, sessions, roles, lockout, TOTP, reset, disable, scoped
 machine tokens), safe control (limits, step, two-step confirm, audit), alarms and shelving, maintenance
@@ -67,7 +67,6 @@ Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these i
 
 | Item | Why it matters | Size |
 |---|---|---|
-| A12: the SQLite and MySQL paths diverge through hand-written branches | MySQL now runs in CI, but the two dialects still differ by hand | medium |
 | U1, U3, U6, U8–U12: untested paths | a real COM port, real external email/Slack delivery, the browser checks, and every device protocol against real hardware | medium each |
 | E4–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested | small |
 
