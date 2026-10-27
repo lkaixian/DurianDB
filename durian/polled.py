@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.request
 
-from .core import Quality, Source
+from .core import Quality, Source, sentence
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -43,8 +43,8 @@ class PolledSource(Source):
         raise NotImplementedError
 
     def failure_text(self, e):
-        """The health message for a failed cycle. A source whose errors are already sentences can drop the class name."""
-        return f"{type(e).__name__}: {e}"
+        """The health message for a failed cycle: a sentence, never a class name, an errno or a path (docs/12 section 4)."""
+        return sentence(e) or "the source did not answer"
 
     def start(self):
         threading.Thread(target=self._loop, daemon=True).start()

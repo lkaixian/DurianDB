@@ -20,6 +20,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .core import sentence
+
 DISCOVERY_TTL = 3600
 JWKS_TTL = 3600
 STATE_SECONDS = 600  # a sign-in started more than ten minutes ago is stale
@@ -187,7 +189,7 @@ class OIDC:
         if isinstance(ex, urllib.error.HTTPError):
             return f"HTTP {ex.code}"
         if isinstance(ex, urllib.error.URLError):
-            return str(ex.reason) or "the connection failed"
+            return sentence(ex.reason) or "the connection failed"
         return "the provider did not answer"
 
     def discovery(self, cfg):

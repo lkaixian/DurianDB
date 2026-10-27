@@ -28,7 +28,7 @@ import socket
 import struct
 import time
 
-from .core import Quality
+from .core import Quality, sentence
 from .polled import PolledSource
 
 MAX_MESSAGE = 1_048_576  # bytes in one message; also the receive buffer advertised in Hello
@@ -533,8 +533,8 @@ class OpcuaSource(PolledSource):
         return f"opc.tcp://{self.host}:{self.port}" + (f"/{self.path}" if self.path else "")
 
     def failure_text(self, e):
-        """OPC UA failures are already sentences, so the operator never sees an exception class name."""
-        return str(e)
+        """OPC UA failures are already sentences; sentence() also strips any errno tag a wrapped OS error brings."""
+        return sentence(e)
 
     def _specs(self):
         """([(point, node)], rejection sentences for a point whose node id cannot be read)."""
@@ -545,7 +545,7 @@ class OpcuaSource(PolledSource):
             try:
                 specs.append((p, parse_node_id(node)))
             except OpcuaError as e:
-                rejected.append(f"{p.name}: {e}")
+                rejected.append(f"{p.name}: {sentence(e)}")
         return specs, rejected
 
     def fetch(self):
@@ -584,7 +584,7 @@ class OpcuaSource(PolledSource):
             raise OpcuaError(f"the OPC UA server at {self.host}:{self.port} did not answer within "
                              f"{self.timeout:g}s") from None
         except OSError as e:
-            raise OpcuaError(f"cannot reach {self.host}:{self.port}: {e}") from None
+            raise OpcuaError(f"cannot reach {self.host}:{self.port}: {sentence(e)}") from None
 
         values = {}
         for i, node in enumerate(nodes):
@@ -598,7 +598,7 @@ class OpcuaSource(PolledSource):
                 try:
                     decoded = _point_value(p, node, value, name, has_value, status)
                 except OpcuaError as e:
-                    rejected.append(f"{p.name}: {e}")
+                    rejected.append(f"{p.name}: {sentence(e)}")
                     if quality == Quality.UNCERTAIN:
                         self._qualities[p.name] = Quality.UNCERTAIN
                     continue
@@ -790,7 +790,7 @@ class OpcuaSource(PolledSource):
         except socket.gaierror:
             raise OpcuaError(f"cannot resolve the OPC UA host name '{self.host}'") from None
         except OSError as e:
-            raise OpcuaError(f"cannot send to {self.host}:{self.port}: {e}") from None
+            raise OpcuaError(f"cannot send to {self.host}:{self.port}: {sentence(e)}") from None
 
     def _read_message(self, sock, deadline):
         """(type, chunk flag, content) of one complete message, with the header's size cap enforced."""
@@ -842,7 +842,7 @@ class OpcuaSource(PolledSource):
                 raise OpcuaError(f"the OPC UA server at {self.host}:{self.port} did not answer within "
                                  f"{self.timeout:g}s") from None
             except OSError as e:
-                raise OpcuaError(f"cannot read from {self.host}:{self.port}: {e}") from None
+                raise OpcuaError(f"cannot read from {self.host}:{self.port}: {sentence(e)}") from None
             if not chunk:
                 raise OpcuaError(f"the OPC UA server at {self.host}:{self.port} closed the connection while "
                                  f"{what} was still arriving")

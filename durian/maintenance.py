@@ -6,6 +6,7 @@ import csv
 import datetime as dt
 import io
 import json
+import logging
 import math
 import queue
 import re
@@ -13,7 +14,10 @@ import threading
 import time
 from pathlib import Path
 
+from .core import sentence
 from .csvfmt import csv_bytes, iso_millis
+
+log = logging.getLogger("durian.maintenance")
 
 DEFAULTS = {"retention_days": 365, "purge_hour": 3, "backup_hour": -1, "backup_keep": 7,
             "export_hour": -1, "export_keep": 7}
@@ -165,9 +169,10 @@ class Maintenance:
             try:
                 self.export_bundle(now)
             except Exception as e:  # a failed bundle is reported in status, not only written to the log
-                message = str(e).strip() or "the bundle could not be built"
+                log.warning("export bundle failed: %s: %s", type(e).__name__, e)
+                message = sentence(e) or "the bundle could not be built"
                 self._record("export", now, {"error": message})
-                self.store.audit("system", "export.failed", f"{type(e).__name__}: {e}")
+                self.store.audit("system", "export.failed", message)
             finally:
                 self._exports.task_done()
 
@@ -199,7 +204,8 @@ class Maintenance:
                     fn()
                     did.append(what)
                 except Exception as e:
-                    self.store.audit("system", f"{what}.failed", f"{type(e).__name__}: {e}")
+                    log.warning("%s failed: %s: %s", what, type(e).__name__, e)
+                    self.store.audit("system", f"{what}.failed", sentence(e) or "it failed without saying why")
         return did
 
     def status(self, pending=0, lost=0):
@@ -294,7 +300,7 @@ class Maintenance:
                 if n == 1 and not good:
                     continue  # a header line
                 skipped += 1
-                first_error = first_error or f"line {n}: {e}"
+                first_error = first_error or f"line {n}: {sentence(e)}"
         for i in range(0, len(good), 5000):
             self.store.add_history(good[i:i + 5000])
         return {"imported": len(good), "skipped": skipped, "first_error": first_error}

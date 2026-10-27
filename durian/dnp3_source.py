@@ -25,7 +25,7 @@ import socket
 import struct
 import time
 
-from .core import Quality
+from .core import Quality, sentence
 from .polled import PolledSource
 
 START = b"\x05\x64"
@@ -296,8 +296,8 @@ class Dnp3Source(PolledSource):
         self._times, self._qualities = {}, {}
 
     def failure_text(self, e):
-        """DNP3 failures are already sentences, so the operator never sees an exception class name."""
-        return str(e)
+        """DNP3 failures are already sentences; sentence() also strips any errno tag a wrapped OS error brings."""
+        return sentence(e)
 
     def _next_seq(self):
         """A fresh transport sequence number; it wraps at 64 by design."""
@@ -314,7 +314,7 @@ class Dnp3Source(PolledSource):
             except socket.gaierror:
                 raise Dnp3Error(f"cannot resolve the DNP3 host name '{self.host}'") from None
             except OSError as e:
-                raise Dnp3Error(f"cannot reach {self.host}:{self.port}: {e}") from None
+                raise Dnp3Error(f"cannot reach {self.host}:{self.port}: {sentence(e)}") from None
         raise Dnp3Error(f"the device at {self.host}:{self.port} did not answer within {self.timeout:g}s")
 
     def _one_exchange(self, app):

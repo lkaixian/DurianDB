@@ -4,9 +4,14 @@
 Only the last `keep` jobs are remembered; an old one answers "unknown job" rather than growing without bound.
 """
 import itertools
+import logging
 import queue
 import threading
 import time
+
+from .core import sentence
+
+log = logging.getLogger("durian.jobs")
 
 QUEUE_MAX = 100
 KEEP = 50
@@ -53,6 +58,7 @@ class Jobs:
             try:
                 self._finish(jid, result=fn())
             except Exception as e:  # the failure is the result: an operator gets a sentence, never only a log line
-                self._finish(jid, error=str(e).strip() or "the job failed without saying why")
+                log.warning("job %s failed: %s", jid, e)
+                self._finish(jid, error=sentence(e) or "the job failed without saying why")
             finally:
                 self.queue.task_done()

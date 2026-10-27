@@ -117,7 +117,7 @@ assert last()["temp"] == 30.0
 assert put("source", "redir", {"type": "http_json", "url": URL + "/redirect", "period": 60})[0] == 200
 put("point", "r1", {"source": "redir", "http": {"path": "sensors.temp"}})
 s = src_of("redir"); time.sleep(0.3); s.cycle()
-assert s.connected is False and "HTTPError" in s.error and "302" in s.error, s.error  # not followed
+assert s.connected is False and "302" in s.error and "HTTPError" not in s.error, s.error  # not followed, and said in words
 put("source", "bigger", {"type": "http_json", "url": URL + "/big", "max_bytes": 1024, "period": 60})
 put("point", "b1", {"source": "bigger", "http": {"path": "pad"}})
 s = src_of("bigger"); time.sleep(0.3); s.cycle()
@@ -125,7 +125,7 @@ assert "larger than max_bytes" in s.error, s.error
 put("source", "html", {"type": "http_json", "url": URL + "/nothing", "period": 60})
 put("point", "h1", {"source": "html", "http": {"path": "x"}})
 s = src_of("html"); time.sleep(0.3); s.cycle()
-assert s.connected is False and "JSONDecodeError" in s.error, s.error
+assert s.connected is False and "not JSON" in s.error and "JSONDecodeError" not in s.error, s.error
 put("source", "authd", {"type": "http_json", "url": URL + "/auth", "token_file": str(tmp / "token"), "period": 60})
 put("point", "a1", {"source": "authd", "http": {"path": "v"}})
 s = src_of("authd"); time.sleep(0.3); s.cycle(); app.tick(time.time() + 2)

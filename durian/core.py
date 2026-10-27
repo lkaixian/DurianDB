@@ -3,10 +3,38 @@
 Original teaching implementation of the concepts in docs/research. Not derived from Mango code.
 """
 import math
+import re
+import urllib.error
 from collections import deque
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, Optional
+
+
+_ERRNO_TAG = re.compile(r"\[Errno \d+\] ?")
+_CLASS_PREFIX = re.compile(r"\A\w*(?:Error|Exception|Interrupt|Exit): ")
+
+
+def sentence(ex):
+    """One operator-safe line for a caught exception (docs/12 section 4): what happened, in the console's voice.
+
+    Never an exception class name, never an `[Errno n]` tag, never a file path — those belong in the log,
+    where the code that caught the exception writes it. The empty string means "this exception says nothing";
+    the caller then supplies its own sentence. See tests/test_error_sentences.py, which keeps every other
+    operator-facing string honest about it.
+    """
+    if not isinstance(ex, BaseException):  # None or an unexpected reason object says nothing
+        return ""
+    if isinstance(ex, OSError) and ex.strerror:  # the strerror is already a sentence and carries no path
+        text = ex.strerror
+    elif isinstance(ex, urllib.error.HTTPError):
+        text = f"the server answered {ex.code} {ex.reason}".rstrip()  # reason is the HTTP phrase, not a class name
+    elif isinstance(ex, urllib.error.URLError):
+        text = sentence(ex.reason) if ex.reason is not None else "the server could not be reached"
+    else:
+        text = str(ex)
+    text = _CLASS_PREFIX.sub("", _ERRNO_TAG.sub("", " ".join(text.split())))
+    return text[:200]
 
 
 class Level(IntEnum):
@@ -544,7 +572,7 @@ class Engine:
                 if not s.manages_error:  # background sources report their own failures
                     s.error = None
             except Exception as e:  # one broken source must not stop the others
-                s.error, values = f"{type(e).__name__}: {e}", {}
+                s.error, values = sentence(e) or "this source did not answer", {}
             if isinstance(values, dict):  # {name: value} or {name: (value, source_time[, quality])}
                 values = [(n, *(v if isinstance(v, tuple) else (v,))) for n, v in values.items()]
             for name, value, *rest in values:  # a list of (name, value[, time[, quality]]) keeps several samples of one point
