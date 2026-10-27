@@ -53,6 +53,19 @@ def v8_user_disabled(s):
     s.ddl("alter table users add column disabled {int} not null default 0")  # 1: the account cannot sign in and its tokens stop working
 
 
+def v9_shared_auth_state(s):
+    # Sign-in state that a second server process must see: a session issued here, a lockout counted here, a TOTP
+    # step already spent here, and a write confirmation issued here. Every row has an expiry (or is swept) so
+    # maintenance can purge it like any other retained state.
+    s.ddl("create table if not exists sessions(token {key} primary key, name {key} not null, expires {real} not null)")
+    _index(s, "create index sessions_expires on sessions(expires)")
+    s.ddl("create table if not exists auth_failures(id {pk}, name {key} not null unique, attempts {int} not null, "
+          "locked_until {real}, seen {real} not null)")
+    s.ddl("create table if not exists auth_last_step(name {key} primary key, last_step {int} not null)")
+    s.ddl("create table if not exists confirm_tokens(id {pk}, token {key} not null unique, body {text} not null, expires {real} not null)")
+    _index(s, "create index confirm_tokens_expires on confirm_tokens(expires)")
+
+
 MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens),
               (4, "history quality", v4_history_quality), (5, "event held", v5_event_held), (6, "history text", v6_history_text), (7, "user totp", v7_user_totp),
-              (8, "user disabled", v8_user_disabled)]
+              (8, "user disabled", v8_user_disabled), (9, "shared sign-in state", v9_shared_auth_state)]

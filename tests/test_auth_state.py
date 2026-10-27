@@ -27,32 +27,42 @@ a._dummy = "not-a-hash"  # made-up names fail instantly; the scrypt cost is not 
 
 for _ in range(4):  # four wrong attempts: counted, not locked yet
     fails(lambda: a.login("viewer", "bad"), 401)
-assert a.failures["viewer"][0] == 4, a.failures
+assert st.failure("viewer")["attempts"] == 4, st.failure("viewer")
 
-for i in range(10_100):  # a flood just past the cap
-    fails(lambda n=f"made-up-{i}": a.login(n, "x"), 401)
-assert len(a.failures) < 200, len(a.failures)  # the made-up names were pruned away, not the real entry
-assert a.failures.get("viewer", (0, 0))[0] == 4, a.failures
+old_max, authmod.FAILURE_MAX = authmod.FAILURE_MAX, 100  # a smaller cap keeps the flood quick
+try:
+    for i in range(300):  # a flood just past the cap
+        fails(lambda n=f"made-up-{i}": a.login(n, "x"), 401)
+finally:
+    authmod.FAILURE_MAX = old_max
+assert st.failure_count() <= 102, st.failure_count()  # the flood stayed near the cap, not at 300
+a._prune_failures()
+assert st.failure_count() == 1, st.failure_count()  # the made-up names go, the real entry stays
+assert st.failure("viewer")["attempts"] == 4, st.failure("viewer")
 
 fails(lambda: a.login("viewer", "bad"), 401)  # the fifth wrong attempt locks the real account
-assert a.failures["viewer"][0] == 5 and a.failures["viewer"][1] > time.time(), a.failures
+assert st.failure("viewer")["attempts"] == 5 and st.failure("viewer")["locked_until"] > time.time(), st.failure("viewer")
 fails(lambda: a.login("viewer", "viewer-password-1"), 429)  # still locked, right password or not
 
-# ---- if even a dict of real entries is over the cap, the oldest unlocked entry goes and a lockout stays
+# ---- if even the known entries are over the cap, the oldest unlocked entry goes and a lockout stays
 old_max = authmod.FAILURE_MAX
 authmod.FAILURE_MAX = 3
 try:
     b = Auth(new_store())
     for name in ("first", "locked-user", "second", "third"):
         b.store.add_user(name, "not-a-hash", ["user"])
-    b.failures = {"first": (1, 0), "locked-user": (5, time.time() + 60), "second": (1, 0), "third": (1, 0)}
-    b.failures["gone"] = (5, time.time() - 1)  # an expired lockout is dropped first
-    b.failures["made-up"] = (1, 0)  # no such user: dropped first too
+    b.store.set_failure("first", 1, 0)
+    b.store.set_failure("locked-user", 5, time.time() + 60)
+    b.store.set_failure("second", 1, 0)
+    b.store.set_failure("third", 1, 0)
+    b.store.set_failure("gone", 5, time.time() - 1)  # an expired lockout is dropped first
+    b.store.set_failure("made-up", 1, 0)  # no such user: dropped first too
     b._prune_failures()
-    assert "gone" not in b.failures and "made-up" not in b.failures, b.failures
-    assert "locked-user" in b.failures, "a current lockout is never dropped"
-    assert "first" not in b.failures and "second" in b.failures, "the oldest unlocked entry goes"
-    assert len(b.failures) == 3, b.failures
+    rows = {r["name"]: r for r in b.store.q("select name, attempts, locked_until from auth_failures")}
+    assert "gone" not in rows and "made-up" not in rows, rows
+    assert "locked-user" in rows, "a current lockout is never dropped"
+    assert "first" not in rows and "second" in rows, "the oldest unlocked entry goes"
+    assert len(rows) == 3, rows
 finally:
     authmod.FAILURE_MAX = old_max
 
@@ -61,24 +71,25 @@ st2 = new_store()
 c = Auth(st2)
 assert c.bootstrap("admin-password-123") is None
 now = time.time()
-c.sessions["live"] = ("admin", now + 60)
-c.sessions["dead"] = ("admin", now - 1)
-c.failures["locked"] = (5, now + 60)
-c.failures["expired"] = (5, now - 1)
-c.failures["failed"] = (2, 0)
+st2.add_session("live", "admin", now + 60)
+st2.add_session("dead", "admin", now - 1)
+st2.set_failure("locked", 5, now + 60)
+st2.set_failure("expired", 5, now - 1)
+st2.set_failure("failed", 2, 0)
 assert c.identity("dead")["name"] is None  # an expired token is anonymous before it is swept too
 assert c.identity("live")["name"] == "admin"
+st2.add_session("dead-sweep", "admin", now - 1)
 
 c.sweep(now)
-assert "dead" not in c.sessions and "live" in c.sessions, c.sessions
-assert "expired" not in c.failures and "locked" in c.failures and "failed" in c.failures, c.failures
+assert st2.session("dead-sweep") is None and st2.session("live") is not None, st2.session("dead-sweep")
+assert st2.failure("expired") is None and st2.failure("locked") is not None and st2.failure("failed") is not None
 assert c.identity("dead")["name"] is None and c.identity("live")["name"] == "admin"
 
 # ---- creating a session sweeps too, at most once per SWEEP_SECONDS (no thread needed)
-c.sessions["dead2"] = ("admin", time.time() - 1)
+st2.add_session("dead2", "admin", time.time() - 1)
 c.swept = 0
 c.login("admin", "admin-password-123")
-assert "dead2" not in c.sessions, "a sign-in sweep must not leave an expired token behind"
+assert st2.session("dead2") is None, "a sign-in sweep must not leave an expired token behind"
 assert c.swept > 0
 
 print("ok")

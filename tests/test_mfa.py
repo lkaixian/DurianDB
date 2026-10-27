@@ -35,12 +35,12 @@ try:
     app.auth.login("admin", "admin-password-123")
     raise SystemExit("login without a code worked")
 except AuthError as e:
-    assert "code required" in str(e) and "admin" not in app.auth.failures
+    assert "code required" in str(e) and app.store.failure("admin") is None
 try:
     app.auth.login("admin", "admin-password-123", "000000")
     raise SystemExit("wrong code worked")
 except AuthError:
-    assert app.auth.failures["admin"][0] == 1
+    assert app.store.failure("admin")["attempts"] == 1
 code = totp(secret, time.time() + 30)[0]  # the next step is within the accepted drift and not yet used
 assert app.auth.login("admin", "admin-password-123", code)
 try:

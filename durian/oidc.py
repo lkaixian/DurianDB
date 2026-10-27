@@ -165,8 +165,9 @@ def local_identity(store, cfg, claims):
 
 
 class OIDC:
-    """Discovery cache, pending sign-ins and ID-token verification. One instance per App, so state is process-local like
-    sessions and lockouts (TECHNICAL_DEBT A9): a second process would need its own pending sign-ins anyway."""
+    """Discovery cache, pending sign-ins and ID-token verification. One instance per App, so a pending sign-in is
+    process-local: the provider's callback must return to the process that started it. Sessions, lockouts, the TOTP
+    replay guard and confirmations are shared in the store (TECHNICAL_DEBT A9)."""
 
     def __init__(self, timeout=TIMEOUT, clock=time.time):
         self.timeout, self.clock = timeout, clock

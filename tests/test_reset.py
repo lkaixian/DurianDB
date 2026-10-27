@@ -59,7 +59,7 @@ code = call("POST", "/api/users/bob/reset")[1]["code"]
 for _ in range(5):
     reset(code="rst_nope")
 assert reset() == 429
-app.auth.failures.clear()
+app.store.run("delete from auth_failures")
 app.auth.resets["bob"] = (app.auth.resets["bob"][0], time.time() - 1)
 assert reset() == 400
 

@@ -6,9 +6,12 @@ Roles can inherit: superadmin > user > anonymous. An empty list means superadmin
 import hashlib
 import base64
 import hmac
+import logging
 import os
 import secrets
 import time
+
+log = logging.getLogger("durian.auth")
 
 INHERIT = {"superadmin": {"superadmin", "user", "anonymous"}, "user": {"user", "anonymous"}, "anonymous": {"anonymous"}}
 MIN_PASSWORD = 10
@@ -67,11 +70,89 @@ def check_password_strength(pw):
 class Auth:
     def __init__(self, store, session_seconds=8 * 3600):
         self.store, self.ttl = store, session_seconds
-        self.resets = {}  # user -> (sha256 of the code, expires)
-        self.pending, self.last_step = {}, {}  # user -> secret not yet confirmed; user -> last accepted time step (a code works once)
-        self.sessions, self.failures = {}, {}  # token -> (user, expires); user -> (count, locked_until)
+        self.resets = {}  # user -> (sha256 of the code, expires); in memory on purpose, so a restart voids it
+        self.pending = {}  # user -> secret not yet confirmed; in memory too (TECHNICAL_DEBT "deliberate")
+        # The store holds sessions, lockouts, spent TOTP steps and confirm tokens so a second server process sees
+        # the same state. These dicts are the fallback used only while the store cannot answer.
+        self.sessions, self.failures, self.last_step = {}, {}, {}
         self.swept = 0.0  # when sweep() last ran, so the sign-in path can cap how often it sweeps
+        self._warned = False  # the one warning that shared state has degraded to this process
         self._dummy = hash_password("not-a-real-password")
+
+    def degraded(self, ex):
+        """One honest sentence when shared state cannot be read or written. The server keeps working with the
+        process-local state it had before; the warning says what a second process cannot see."""
+        if not self._warned:
+            self._warned = True
+            log.warning("the database did not answer, so sessions, lockout counters, the TOTP replay guard and "
+                        "confirm tokens are kept in this server process only and a second server process will not "
+                        "see them; restore the database to share them again")
+            log.debug("shared sign-in state is unavailable: %s", ex)
+
+    # ---- shared state accessors, each falling back to process memory only while the store cannot answer
+    def _failure(self, name):
+        try:
+            row = self.store.failure(name)
+            return (row["attempts"], row["locked_until"] or 0) if row else (0, 0)
+        except Exception as ex:
+            self.degraded(ex)
+            return self.failures.get(name, (0, 0))
+
+    def _set_failure(self, name, count, until):
+        try:
+            self.store.set_failure(name, count, until)
+            self.failures.pop(name, None)
+            return
+        except Exception as ex:
+            self.degraded(ex)
+        self.failures[name] = (count, until)
+
+    def _clear_failure(self, name):
+        try:
+            self.store.delete_failure(name)
+        except Exception as ex:
+            self.degraded(ex)
+        self.failures.pop(name, None)
+
+    def _failure_count(self):
+        try:
+            return self.store.failure_count()
+        except Exception as ex:
+            self.degraded(ex)
+            return len(self.failures)
+
+    def _add_session(self, token, name, expires):
+        try:
+            self.store.add_session(token, name, expires)
+            self.sessions.pop(token, None)
+        except Exception as ex:
+            self.degraded(ex)
+            self.sessions[token] = (name, expires)
+
+    def _session_of(self, token):
+        try:
+            row = self.store.session(token)
+            return (row["name"], row["expires"]) if row else (None, 0)
+        except Exception as ex:
+            self.degraded(ex)
+            return self.sessions.get(token, (None, 0))
+
+    def _forget_session(self, token):
+        try:
+            self.store.delete_session(token)
+        except Exception as ex:
+            self.degraded(ex)
+        self.sessions.pop(token, None)
+
+    def _claim_step(self, name, step):
+        try:
+            return self.store.claim_step(name, step)
+        except Exception as ex:
+            self.degraded(ex)
+            if step > self.last_step.get(name, 0):
+                self.last_step[name] = step
+                return True
+            return False
 
     def bootstrap(self, password=None):
         """Create the first admin. Returns a generated password to show once, or None if nothing was made."""
@@ -88,8 +169,7 @@ class Auth:
         code = code.strip() if isinstance(code, str) else ""
         for d in (0, -1, 1):
             want, n = totp(secret, time.time() + d * 30)
-            if hmac.compare_digest(want, code) and n > self.last_step.get(name, 0):
-                self.last_step[name] = n
+            if hmac.compare_digest(want, code) and self._claim_step(name, n):
                 return True
         return False
 
@@ -108,12 +188,22 @@ class Auth:
     def _prune_failures(self):
         """Before made-up names can grow `failures`, drop what cannot matter: names with no account and lockouts
         whose window has passed. A real account's live lockout must survive a flood, so only then, and only while
-        still over the cap, are the oldest unlocked entries dropped (dict order is insertion order)."""
-        now, known = time.time(), {u["name"] for u in self.store.users()}
+        still over the cap, are the oldest unlocked entries dropped."""
+        try:
+            self.store.prune_failures(FAILURE_MAX)
+            return
+        except Exception as ex:
+            self.degraded(ex)
+        try:
+            known = {u["name"] for u in self.store.users()}
+        except Exception:
+            known = None  # the store is down: clean only what this process can still see
+        now = time.time()
         for name in list(self.failures):
             user = name[6:] if isinstance(name, str) and name.startswith("reset:") else name
             count, until = self.failures[name]
-            if not (isinstance(user, str) and user in known) or (until and until <= now):
+            unknown = known is not None and not (isinstance(user, str) and user in known)
+            if unknown or (until and until <= now):
                 del self.failures[name]
         excess = len(self.failures) - FAILURE_MAX
         if excess > 0:  # only real, still-live state is left: the oldest goes, never one that is locked out now
@@ -125,17 +215,24 @@ class Auth:
                     excess -= 1
 
     def sweep(self, now=None):
-        """Drop sessions and lockouts that have expired: otherwise they wait for a lookup to notice them.
-        Called once a minute by maintenance, and (capped by SWEEP_SECONDS) when a session is created."""
+        """Drop sessions, lockouts and confirmations that have expired. Called once a minute by maintenance, and
+        (capped by SWEEP_SECONDS) when a session is created. The store is the source of truth, so this cleans the
+        state every process shares; the dicts are cleaned too while the store cannot answer."""
         now = now or time.time()
-        for token in [t for t, (_, exp) in self.sessions.items() if exp <= now]:
-            del self.sessions[token]
-        for name in [n for n, (count, until) in self.failures.items() if until and until <= now]:
-            del self.failures[name]
+        try:
+            self.store.purge_sessions(now)
+            self.store.purge_failures(now)
+            self.store.purge_confirms(now)
+        except Exception as ex:
+            self.degraded(ex)
+            for token in [t for t, (_, exp) in self.sessions.items() if exp <= now]:
+                del self.sessions[token]
+            for name in [n for n, (count, until) in self.failures.items() if until and until <= now]:
+                del self.failures[name]
         self.swept = now
 
     def login(self, name, pw, code=None):
-        count, until = self.failures.get(name, (0, 0))
+        count, until = self._failure(name)
         if until > time.time():
             raise AuthError("too many failed attempts, try again later", 429)
         user = self.store.user(name) if isinstance(name, str) else None
@@ -146,34 +243,34 @@ class Auth:
                 raise AuthError("authentication code required")
             ok = self.check_code(name, user["totp"], code)
         if not ok:
-            if len(self.failures) > FAILURE_MAX:  # unknown names must not grow this without bound
+            if self._failure_count() > FAILURE_MAX:  # unknown names must not grow this without bound
                 self._prune_failures()
             count += 1
-            self.failures[name] = (count, time.time() + LOCK_SECONDS if count >= LOCK_AFTER else 0)
+            self._set_failure(name, count, time.time() + LOCK_SECONDS if count >= LOCK_AFTER else 0)
             if user:  # only real accounts are audited: a stream of made-up names must not fill the trail
                 self.store.audit(name, "login.locked" if count == LOCK_AFTER else "login.failed", f"attempt {count}")
             raise AuthError("bad username, password or code")
-        self.failures.pop(name, None)
+        self._clear_failure(name)
         self.store.audit(name, "login")
         return self._session(name)
 
     def _session(self, name):
         """Open a session for an account that has already been allowed in."""
         token = secrets.token_urlsafe(32)
-        self.sessions[token] = (name, time.time() + self.ttl)
+        self._add_session(token, name, time.time() + self.ttl)
         if time.time() - self.swept > SWEEP_SECONDS:  # cheap cap: at most one sweep a minute inline, no thread
             self.sweep()
         return token
 
     def login_sso(self, name):
         """A verified SSO identity opening a session. The same lockout and disable rules as a password sign-in apply."""
-        _count, until = self.failures.get(name, (0, 0))
+        _count, until = self._failure(name)
         if until > time.time():
             raise AuthError("too many failed attempts, try again later", 429)
         user = self.store.user(name)
         if not user or user.get("disabled"):
             raise AuthError("that account is disabled" if user else "no such account", 403)
-        self.failures.pop(name, None)
+        self._clear_failure(name)
         return self._session(name)
 
     def issue_reset(self, name):
@@ -185,27 +282,33 @@ class Auth:
     def redeem_reset(self, name, code):
         """Spend a reset code. Wrong guesses count toward the same lockout as passwords. Signs the user out everywhere and lifts any lockout."""
         key = "reset:" + str(name)
-        count, until = self.failures.get(key, (0, 0))
+        count, until = self._failure(key)
         if until > time.time():
             raise AuthError("too many failed attempts, try again later", 429)
         want, exp = self.resets.get(name, ("", 0))
         if not (isinstance(code, str) and exp > time.time() and hmac.compare_digest(hashlib.sha256(code.encode()).hexdigest(), want)):
-            self.failures[key] = (count + 1, time.time() + LOCK_SECONDS if count + 1 >= LOCK_AFTER else 0)
+            self._set_failure(key, count + 1, time.time() + LOCK_SECONDS if count + 1 >= LOCK_AFTER else 0)
             raise AuthError("that reset code is wrong or has expired", 400)
         self.resets.pop(name)
-        self.failures.pop(key, None)
-        self.failures.pop(name, None)
+        self._clear_failure(key)
+        self._clear_failure(name)
         self.end_sessions(name)
 
     def end_sessions(self, name):
         """Sign a person out everywhere: used on a password reset and when an administrator disables the account."""
-        for t in [t for t, (u, _) in self.sessions.items() if u == name]:
-            del self.sessions[t]
+        try:
+            tokens = self.store.sessions_for(name)
+        except Exception as ex:
+            self.degraded(ex)
+            tokens = [t for t, (u, _) in self.sessions.items() if u == name]
+        for t in tokens:
+            self._forget_session(t)
 
     def logout(self, token):
-        name = self.sessions.pop(token, (None,))[0]
+        name = self._session_of(token)[0]
         if name:
             self.store.audit(name, "logout")
+        self._forget_session(token)
 
     # ---- machine tokens: for Node-RED, scripts and other systems. Scoped, expiring, revocable, stored only as a hash.
     TOKEN_SCOPES = ("read", "write", "ingest")  # read: look at data. write: also set points. ingest: push values into one source only.
@@ -232,10 +335,14 @@ class Auth:
 
     def identity(self, token):
         """{'name': str|None, 'roles': set}. Unknown or expired tokens are anonymous."""
-        name, exp = self.sessions.get(token, (None, 0))
+        name, exp = self._session_of(token)
         if name and exp > time.time():
-            user = self.store.user(name)
+            try:
+                user = self.store.user(name)
+            except Exception as ex:  # the store is down: deny rather than guess, but keep the session for when it returns
+                self.degraded(ex)
+                return {"name": None, "roles": {"anonymous"}}
             if user and not user.get("disabled"):
                 return {"name": name, "roles": held(user["roles"])}
-        self.sessions.pop(token, None)
+        self._forget_session(token)
         return {"name": None, "roles": {"anonymous"}}
