@@ -734,6 +734,10 @@ class App:
             return 200, self.store.audit_log()
         if a == "tokens" and c is None:
             return self.tokens(method, b, body, ident)
+        if (method, a, b, c) == ("GET", "database", "exports", None):
+            return 200, self.maint.exports()
+        if (method, a, b) == ("GET", "database", "exports") and c:
+            return self.export_retrieve(c, ident)
         if a == "database":
             return self.database(method, b, c, body, ident, query)
         if (method, a) == ("GET", "export") and b is None:
@@ -1142,6 +1146,16 @@ class App:
         except export.ExportError as e:
             raise ApiError(422, str(e))
         self.store.audit(ident["name"], "export.bundle", f"{name}: {len(data)} bytes")
+        return 200, Raw(data, "application/zip", name)
+
+    def export_retrieve(self, name, ident):
+        """One stored bundle by name. A name outside the scheduler's pattern and a missing file get the same 404,
+        so the answer cannot reveal whether a file exists."""
+        p = self.maint.export_file(name)
+        if p is None:
+            raise ApiError(404, "unknown export bundle")
+        data = p.read_bytes()
+        self.store.audit(ident["name"], "export.download", f"{name}: {len(data)} bytes")
         return 200, Raw(data, "application/zip", name)
 
     def export_manifest(self, query):

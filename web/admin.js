@@ -90,6 +90,8 @@ async function viewDatabase() {
       ${d.backups_supported ? "" : `<p class="note">In-app backups cover SQLite files. For ${esc(d.backend)} use the database's own backup tooling.</p>`}
       <div id="dbm" role="status"></div>
       ${d.backups_supported ? `<h3>Backups</h3>${d.backups.length ? `<ul class="rows">${d.backups.map(b => `<li><a href="/api/database/backups/${encodeURIComponent(b.name)}" download>${esc(b.name)}</a> <span class="note num">${bytes(b.bytes)}, ${when(b.ts)}</span></li>`).join("")}</ul>` : `<p class="note">None yet.</p>`}` : ""}
+      <h3>Export bundles</h3>
+      ${d.exports.length ? `<ul class="rows">${d.exports.map(b => `<li><a href="/api/database/exports/${encodeURIComponent(b.name)}" download>${esc(b.name)}</a> <span class="note num">${bytes(b.bytes)}, ${when(b.ts)}</span></li>`).join("")}</ul>` : `<p class="note">No stored export bundles yet: none has been written to the export folder.</p>`}
       <h3>Move configuration between servers</h3>
       <p class="note">Export every source, point, handler, publisher, watch list and dashboard as one file. Importing checks everything first and shows what would change. Nothing is applied until you confirm.</p>
       <div class="row"><a class="btn" href="/api/export" download>Export configuration</a><label>Import file <input id="imp" type="file" accept="application/json,.json"></label>
