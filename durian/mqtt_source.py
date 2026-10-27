@@ -71,19 +71,28 @@ def tls_client(c: dict, client_id=""):
 
 
 class MqttSource(Source):
+    QUEUE_MAX = 10_000  # ponytail: one cap for the source; the engine drains it every tick
+
     def __init__(self, name, creds, prefix="durian/", cmd_prefix="durian-cmd/", factory=None):
         """`factory(name)` builds a Point for a topic seen for the first time; None drops unknown topics."""
         super().__init__(name)
         self.prefix, self.cmd_prefix, self.factory = prefix, cmd_prefix, factory
         self.manages_error = True  # the paho callbacks report the link state, so a tick must not clear it
-        self.q, self.dropped, self.connected = queue.Queue(), 0, False
+        self.q, self.dropped, self.connected = queue.Queue(maxsize=self.QUEUE_MAX), 0, False
         self.error = f"not connected to {creds['host']}:{creds['port']} yet"
         self.client = tls_client(creds)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
-        self.client.on_message = lambda c, u, m: self.q.put((m.topic, m.payload))
+        self.client.on_message = self._on_message
         self.client.connect_async(creds["host"], creds["port"])
         self.client.loop_start()
+
+    def _on_message(self, c, u, m):
+        """The broker's thread: never block it. A full queue drops the message and counts it on the source health table."""
+        try:
+            self.q.put_nowait((m.topic, m.payload))
+        except queue.Full:
+            self.dropped += 1
 
     def _on_connect(self, c, u, flags, rc, props):
         self.connected = rc == 0
@@ -108,7 +117,7 @@ class MqttSource(Source):
                 self.dropped += 1
                 continue
             if name not in self.points:
-                if self.factory is None:
+                if self.factory is None or len(self.points) >= self.AUTO_POINTS_MAX:  # an endless supply of topics must not grow the source
                     self.dropped += 1  # unknown topic, like Mango's "unknown topic" event
                     continue
                 self.add(self.factory(name))
