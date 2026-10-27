@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.12", "3.13"]
+        python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,8 +67,8 @@ jobs:
 
   mysql:
     name: tests on MariaDB
-    # One cell only: the SQLite path already runs on all four cells above, and the MySQL path is the same code
-    # on every Python and OS, so running it four times would quadruple the cost for no extra coverage.
+    # One cell only: the SQLite path already runs on every cell above, and the MySQL path is the same code
+    # on every Python and OS, so running it per cell would multiply the cost for no extra coverage.
     runs-on: ubuntu-latest
     services:
       mariadb:

@@ -52,17 +52,19 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 
 ## 3. Architecture
 
-| # | Debt | Where | Severity | Cost |
-|---|---|---|---|---|
-| A9 | What is still per process: password-reset codes, pending TOTP setup secrets and OIDC pending sign-ins. Sessions, lockout, the TOTP replay guard, confirm tokens, escalation and the tick lease are in the store | `durian/auth.py` | low | These already expire on restart by design; nothing security-relevant is shared by accident |
+No open entries. A9 was closed on 2026-10-28 as deliberate, not debt: what stays per process
+(password-reset codes, pending TOTP secrets, OIDC pending sign-ins) is exactly what must die on a
+restart — sharing them in the store would extend the lifetime of a code an operator voided by
+rebooting. It is now recorded in §6 instead.
 
 ## 4. Dependencies and environment
 
-| # | Debt | Severity | Cost |
-|---|---|---|---|
-| E4 | `pyserial` is an optional lazy import, not installed in CI | low | Serial Modbus tests cannot run there |
-| E5 | CI tests Python 3.12 and 3.13; local development is 3.14 | low | The version actually used most is untested |
-| E6 | `cryptography` is needed by `tools/make_cert.py`, `tools/mqtt_lab.py` and `tests/test_tls.py`; CI installs it, a local run without it fails that suite | low | The TLS suite cannot run on a bare install |
+No open entries. E4, E5 and E6 were closed on 2026-10-28, each proven before it was claimed: E4 and E6
+were stale — `pyserial>=3.5` and `cryptography>=42` have been in `requirements.txt` since 83aaf6a and
+15e01ef, every CI job installs from that file, and the serial suites genuinely run there (with the
+import shadowed out, `test_tls.py` exits with one sentence and a pip hint, which is the right answer
+for a declared dependency). E5: the CI matrix now includes 3.14, and the full suite (66) passes on
+3.14.4 locally before the push.
 
 ## 5. Untested paths
 
