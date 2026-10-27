@@ -31,6 +31,7 @@ from .store import ALL_ROLLUPS
 log = logging.getLogger("durian.app")
 
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance")
+ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import"}  # the routes below the superadmin guard
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
 
 
@@ -630,7 +631,10 @@ class App:
             self.set_password(ident["name"], body.get("new"))
             return 200, {"ok": True}
 
-        # everything below is administration
+        # everything below is administration. A name that is not an administration area is an unknown route,
+        # and it is a 404 for everyone: answering 403 only to a signed-in caller would confirm the route exists.
+        if a not in ADMIN_AREAS:
+            raise ApiError(404, "not found")
         need(admin)
         if a == "config" and b in KINDS:
             return self.config(method, b, c, body, ident)
