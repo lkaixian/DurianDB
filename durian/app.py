@@ -21,6 +21,7 @@ from . import notes, pointcsv, windows
 from .config import (build_engine, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .dashboards import validate_dashboard
+from .forecast import baseline as ewma_baseline, forecast as forecast_series
 from .ingest import HttpInSource, parse_payload
 from .maintenance import Maintenance, Raw
 from .testsource import test_source
@@ -326,6 +327,52 @@ class App:
     def visible_points(self, ident):
         return {n: (p, s) for n, (p, s) in self.points().items() if can(ident["roles"], p.meta.get("read_roles", ["user"]))}
 
+    @staticmethod
+    def _int_param(q, name, default, lo, hi):
+        raw = q.get(name)
+        if raw is None:
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            raise ApiError(422, "validation failed", [{"property": name, "message": f"{name} must be a whole number"}])
+        if not lo <= value <= hi:
+            raise ApiError(422, "validation failed", [{"property": name, "message": f"{name} must be from {lo} to {hi}"}])
+        return value
+
+    def forecast_view(self, ident, point, q):
+        """GET /api/points/<name>/forecast?hours=6&bucket=60: stored points (the truth) plus forecast rows."""
+        p, _s = self.visible_points(ident).get(point, (None, None))
+        if p is None:
+            raise ApiError(404, "unknown point")
+        hours = self._int_param(q, "hours", 6, 1, 168)
+        bucket = self._int_param(q, "bucket", 60, 1, 86400)
+        steps = hours * 3600 // bucket
+        if not 1 <= steps <= 2000:
+            raise ApiError(422, "validation failed", [{"property": "bucket", "message":
+                f"bucket must give 1 to 2000 forecast points over {hours} h; it gives {steps}"}])
+        if p.text:
+            raise ApiError(400, "a text point has no numeric forecast")
+        history = self.store.series(point, time.time() - hours * 3600, bucket, "avg")
+        result = forecast_series([(r["ts"], r["value"]) for r in history], steps)
+        return 200, {"point": point, "unit": p.meta.get("unit", ""), "hours": hours, "bucket": bucket,
+                     "points": history, "forecast": result["items"], "note": result["note"]}
+
+    def baseline_view(self, ident, point, q):
+        """GET /api/points/<name>/baseline?window=200: an EWMA baseline over the last `window` good samples."""
+        p, _s = self.visible_points(ident).get(point, (None, None))
+        if p is None:
+            raise ApiError(404, "unknown point")
+        window = self._int_param(q, "window", 200, 2, 10000)
+        if p.text:
+            raise ApiError(400, "a text point has no numeric baseline")
+        pairs = [(r["ts"], r["value"]) for r in self.store.recent(point, window)]
+        try:
+            base = ewma_baseline(pairs, 0.3)
+        except ValueError as e:  # too little history is an answer with a note, not an error
+            return 200, {"point": point, "window": window, "baseline": None, "note": str(e)}
+        return 200, {"point": point, "window": window, "baseline": base}
+
     # ---- auth
     def login(self, body):
         body = body if isinstance(body, dict) else {}
@@ -381,6 +428,10 @@ class App:
                          "faults": faults}
         if (method, a) == ("GET", "points") and b is None:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
+        if (method, a, c) == ("GET", "points", "forecast") and b:
+            return self.forecast_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "baseline") and b:
+            return self.baseline_view(ident, b, query)
         if (method, a, c) == ("GET", "points", None) and b:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:
