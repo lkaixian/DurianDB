@@ -163,10 +163,7 @@ def run_maintenance():
     while True:  # purge and backup run on their schedule, once a day each, checked every minute
         time.sleep(60)
         try:
-            app.maint.tick()
-            app.auth.sweep()
-            app.send_reports()
-            app.escalate()
+            app.maintenance()  # does nothing in a process that does not own the tick lease
         except Exception:
             log.exception("maintenance failed")
 
@@ -209,7 +206,13 @@ def main():
     if not cert and host not in ("127.0.0.1", "::1", "localhost"):
         raise SystemExit(f"Refusing to serve plain HTTP on {host}: set DURIAN_TLS_CERT and DURIAN_TLS_KEY, or use 127.0.0.1.")
     print(f"DurianDB on {scheme}://{host}:{port}")
-    httpd.serve_forever()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:  # a clean shutdown hands the tick lease back instead of leaving it to expire
+        app.stop()
+        httpd.server_close()
 
 
 if __name__ == "__main__":

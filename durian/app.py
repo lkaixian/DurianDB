@@ -46,6 +46,7 @@ TICK_ALARM_AFTER = 3  # consecutive failed polls before a (system) alarm is rais
 INTERNAL_ALARM_AFTER = 10  # more unhandled errors than this on one route inside the window is a programming fault
 INTERNAL_ALARM_SECONDS = 600  # the window: ten minutes
 INTERNAL_ROUTES_MAX = 100  # routes whose error times are remembered; beyond this the oldest live route is forgotten
+TICK_LEASE_SECONDS = 30  # the tick lease outlives a missing renewal by this long, so a dead process's lease expires
 
 
 
@@ -74,7 +75,11 @@ class App:
         self.jobs = Jobs()  # slow work runs off the request thread; GET /api/jobs/<id> reports it
         self.engine, self.outputs, self.open_events = None, None, []
         self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
-        self.escalated = set()  # (handler, event id) already escalated; pruned when the event closes
+        self.escalated = set()  # fallback only: escalations live in the store, so any process escalates an alarm once
+        self.lease_owner = secrets.token_hex(8)  # this process's identity in the tick lease
+        self.lease_held = False  # set by the last tick: True when this process owns polling and the scheduled work
+        self.lease_warned = False  # the one sentence that another process owns the tick
+        self.state_warned = False  # the one sentence that the shared tick lease and escalation guard are unavailable
         self.confirms = {}  # fallback only: confirm tokens live in the store, so any process can spend one exactly once
         self.confirms_lost = 0  # live tokens evicted past CONFIRM_MAX; the caller is asked for a new one
         self.windows = []  # maintenance windows, see windows.py
@@ -110,10 +115,37 @@ class App:
             for name, (p, _) in self.points().items():
                 p.in_service = self.holds.get(name, {}).get("kind") != "oos"
 
-    def tick(self, ts=None):
-        """One poll of every source, then store what it produced. Failures are counted: after three in a row the
-        engine is not running at all, and that must reach an operator instead of staying in the log."""
+    def _degraded(self, ex):
+        """One honest sentence when the state a second process must share cannot be read or written. The tick and
+        escalation fall back to this process alone, exactly as they were before the store held them."""
+        if not self.state_warned:
+            self.state_warned = True
+            log.warning("the database did not answer, so the tick lease and the escalation guard are kept in this "
+                        "server process only and a second server process may tick and escalate alongside it; "
+                        "restore the database to share them again")
+            log.debug("shared engine state is unavailable: %s", ex)
+
+    def _take_lease(self):
+        """Claim or renew the tick lease. False means another process owns the tick; True when there is no store to
+        ask, because a degraded database must not stop a single server from polling."""
         try:
+            return self.store.take_lease(self.lease_owner, TICK_LEASE_SECONDS)
+        except Exception as ex:
+            self._degraded(ex)
+            return True
+
+    def tick(self, ts=None):
+        """One poll of every source, then store what it produced. Two processes over one database must not both
+        write history, so only the process that owns the tick lease polls; the other says so once and waits."""
+        try:
+            if not self._take_lease():
+                self.lease_held = False
+                if not self.lease_warned:
+                    self.lease_warned = True
+                    log.warning("another server process owns the tick lease on this database, so this process is not "
+                                "polling; stop one of the two processes, or give this one its own database")
+                return
+            self.lease_held = True
             self._tick(ts)
         except Exception as e:
             self.tick_error = f"{type(e).__name__}: {e}"
@@ -124,6 +156,25 @@ class App:
         self.tick_failures, self.tick_error, self.tick_ok_ts = 0, None, ts or time.time()
         self._tick_alarm(None)
         self._internal_healthy(ts or time.time())
+
+    def maintenance(self):
+        """The minute's scheduled work. Only the process that owns the tick lease does it, so two servers over one
+        database do not both purge it, and reports are sent once."""
+        if not self.lease_held:
+            return
+        self.maint.tick()
+        self.auth.sweep()
+        self.send_reports()
+        self.escalate()
+
+    def stop(self):
+        """A clean shutdown gives the tick lease back, so another process can take over at once instead of waiting
+        for it to expire."""
+        self.lease_held = False
+        try:
+            self.store.release_lease(self.lease_owner)
+        except Exception as ex:
+            self._degraded(ex)
 
     def _raise_or_clear(self, event_id, message):
         """One (system) URGENT alarm per slot: raise it once, keep it while the fault lasts, clear it when `message`
@@ -1190,10 +1241,15 @@ class App:
 
     def escalate(self, now=None):
         """Call once a minute. An alarm still active and unacknowledged `escalate_after` minutes after it was raised is mailed to a
-        handler's escalate_to list, once. Held (shelved, suppressed) alarms are not announced, so they do not escalate."""
+        handler's escalate_to list, once. The claim is a row in the store, so a second server process cannot mail the
+        same alarm again. Held (shelved, suppressed) alarms are not announced, so they do not escalate."""
         now = now or time.time()
         open_ids = {ev.id for ev in self.open_events if ev.id is not None}
         self.escalated = {k for k in self.escalated if k[1] in open_ids}  # a closed alarm needs no memory of being escalated
+        try:
+            self.store.purge_escalations()  # the same prune, shared: an alarm closed anywhere is forgotten everywhere
+        except Exception as ex:
+            self._degraded(ex)
         for h in self.store.list("handler"):
             if h.get("type") != "email" or not h.get("enabled", True) or "escalate_after" not in h:
                 continue
@@ -1203,6 +1259,13 @@ class App:
                         or ev.level < Level[h.get("min_level", "WARNING")] or not self.outputs._in_scope(h, ev)):
                     continue
                 if self.store.q("select acked_ts from events where id=?", (ev.id,))[0]["acked_ts"] is None:
+                    try:
+                        won = self.store.claim_escalation(h["name"], ev.id)
+                    except Exception as ex:  # the store is down: fall back to this process's set, and say so once
+                        self._degraded(ex)
+                        won = key not in self.escalated
+                    if not won:
+                        continue
                     self.escalated.add(key)
                     self.outputs.escalate(h, ev)
                     self.store.audit("system", "alarm.escalate", f"{ev.point} -> {h['name']}")

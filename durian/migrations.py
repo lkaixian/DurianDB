@@ -66,6 +66,15 @@ def v9_shared_auth_state(s):
     _index(s, "create index confirm_tokens_expires on confirm_tokens(expires)")
 
 
+def v10_shared_engine_state(s):
+    # Two things a second server process must agree on before it acts: which process owns the tick (one row, id 1),
+    # and which (handler, alarm) pairs have already been escalated. Both are self-limiting: the lease row is
+    # overwritten each tick, and an escalation row is deleted when its alarm closes.
+    s.ddl("create table if not exists tick_lease(id {int} primary key, owner {key} not null, expires {real} not null)")
+    s.ddl("create table if not exists escalations(handler {key} not null, event_id {int} not null, primary key(handler, event_id))")
+
+
 MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens),
               (4, "history quality", v4_history_quality), (5, "event held", v5_event_held), (6, "history text", v6_history_text), (7, "user totp", v7_user_totp),
-              (8, "user disabled", v8_user_disabled), (9, "shared sign-in state", v9_shared_auth_state)]
+              (8, "user disabled", v8_user_disabled), (9, "shared sign-in state", v9_shared_auth_state),
+              (10, "shared engine state", v10_shared_engine_state)]
