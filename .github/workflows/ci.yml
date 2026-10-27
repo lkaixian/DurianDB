@@ -29,6 +29,14 @@ jobs:
           node --check web/forms.js
           node --check web/dashboards.js
           node --check web/admin.js
+          node --check web/alarms.js
+          node --check web/overview.js
+          node --check web/point.js
+          node --check web/history.js
+          node --check web/reports.js
+          node --check web/config.js
+          node --check web/users.js
+          node --check web/account.js
 
   mysql:
     name: tests on MariaDB
