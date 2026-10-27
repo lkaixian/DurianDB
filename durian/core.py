@@ -454,8 +454,14 @@ class Point:
             del self.unsaved[:drop]
             self.unsaved_lost += drop
 
-    def update(self, value, ts, on_event: Callable[[Event], None], quality=Quality.GOOD, recv=None):
-        """`ts` is the source's time for the value, `recv` ours (defaults to ts). A BAD update only marks the point."""
+    def update(self, value, ts, on_event: Callable[[Event], None], quality=Quality.GOOD, recv=None, backfill=False):
+        """`ts` is the source's time for the value, `recv` ours (defaults to ts). A BAD update only marks the point.
+        A `backfill` is an explicitly old sample: it fills history only, so it never becomes last and detectors,
+        interval periods and ON_CHANGE filtering keep seeing live samples alone."""
+        if backfill:
+            if value is not None and self.logging != Logging.NEVER:
+                self._queue_sample((ts, value, int(quality)))
+            return
         if quality == Quality.BAD:
             if value is None:
                 value = self.last
@@ -603,20 +609,22 @@ class Engine:
                 s.error, values = sentence(e) or "this source did not answer", {}
             if isinstance(values, dict):  # {name: value} or {name: (value, source_time[, quality])}
                 values = [(n, *(v if isinstance(v, tuple) else (v,))) for n, v in values.items()]
-            for name, value, *rest in values:  # a list of (name, value[, time[, quality]]) keeps several samples of one point
+            for name, value, *rest in values:  # a list of (name, value[, time[, quality[, backfill]]]) keeps several samples of one point
                 t, q = (rest[0] if rest else ts), (rest[1] if len(rest) > 1 else Quality.GOOD)
+                # ponytail: a 4th positional element would silently mean backfill; typed samples or a source capability flag if another source grows one
+                bf = bool(rest[2]) if len(rest) > 2 else False  # ingest-only: an explicit old sample fills history only
                 p = s.points.get(name)
                 if p is None:  # removed by a config change while the value was in flight
                     continue
                 if q != Quality.BAD:
                     if t > ts + FUTURE_SLACK:  # a clock that runs ahead: keep the value, stamp it with our time, say it is doubtful
                         t, q = ts, max(q, Quality.UNCERTAIN)
-                    elif p.last_ts is not None and t < p.last_ts:  # older than what we already have
+                    elif not bf and p.last_ts is not None and t < p.last_ts:  # older than what we already have
                         continue
                 if q != Quality.BAD:
                     s.last_data = ts
-                p.update(value, t, self._event, q, ts)
-                if p.last is not None:
+                p.update(value, t, self._event, q, ts, backfill=bf)
+                if not bf and p.last is not None:
                     for pub in self.publishers:
                         pub(p, p.last, t)
             self._watch(s, ts)

@@ -47,7 +47,7 @@ For the MQTT groups open **DurianDB MQTT (TLS)**: set the host and port of your 
 {"temp": 21.5, "level": 7.5}
 ```
 
-`ts` is optional: epoch seconds or milliseconds, or ISO-8601. Without it the arrival time is used. A value is refused when its point is unknown (unless `auto_create`), the value is not a finite number, the timestamp is more than a minute in the future, older than the source accepts (7 days by default) or older than the newest value already received for that point, which keeps history in order.
+`ts` is optional: epoch seconds or milliseconds, or ISO-8601. Without it the arrival time is used. A value is refused when its point is unknown (unless `auto_create`), the value is not a finite number, the timestamp is more than a minute in the future, or older than the source accepts (7 days by default). An explicit timestamp older than the newest value already received for that point is a backfill: it lands in history at its own time and never becomes the point's current value.
 
 For tools that can only GET: `GET /api/ingest/<source>?point=temp&value=21.5&ts=1700000000` with the same header.
 

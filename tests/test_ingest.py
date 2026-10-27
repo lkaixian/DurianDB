@@ -106,12 +106,12 @@ batch = [{"point": "temp", "value": 22.0, "ts": now + 5}, {"point": "level", "va
          {"point": "level", "value": True, "ts": now + 3600}, {"point": "temp", "value": 5.0, "ts": now - 50}]
 s, r = ing({"values": batch})
 reasons = {x["index"]: x["reason"] for x in r["rejected"]}
-assert s == 200 and r["accepted"] == 2 and set(reasons) == {2, 3, 4, 5, 6, 7}, (r["accepted"], reasons)
+assert s == 200 and r["accepted"] == 3 and set(reasons) == {2, 3, 4, 5, 6}, (r["accepted"], reasons)
 assert "unknown point" in reasons[2] and "number" in reasons[3] and "finite" in reasons[4] and "name of 1 to 64" in reasons[5]
-assert "future" in reasons[6] and "older than the newest" in reasons[7]                                                  # out of order is refused so history stays in order
+assert "future" in reasons[6]                                                                                           # an explicit old ts (index 7) is backfill: accepted, history only (tests/test_backfill.py:79)
 s, r = ing({"temp": 23.0, "level": 8.0}); assert s == 200 and r["accepted"] == 2
 s, r = ing({"point": "temp", "value": 1, "ts": now - 30 * 86400}); assert s == 422 and "older than this source accepts" in r["rejected"][0]["reason"]
-s, r = ing({"point": "temp", "value": 99, "ts": 1}); assert s == 422                                                   # old and out of order, refused
+s, r = ing({"point": "temp", "value": 99, "ts": 1}); assert s == 422                                                   # epoch-old is past the source's max age, refused
 assert ing({"nothing": "useful", "values": 3})[0] == 400 and ing(None)[0] == 400 and ing([1, 2])[0] == 400
 s, r = ing(None, method="GET", point="level", value="9.5"); assert s == 200 and r["accepted"] == 1                    # the GET form, for tools that can only GET
 assert ing(None, method="GET")[0] == 400 and call(I, "GET", "/api/ingest/ghost", None, point="a", value="1")[0] == 403

@@ -5,8 +5,9 @@ Accepted bodies for POST /api/ingest/<source>, and the same names as query param
     add "quality": "good" | "uncertain" | "bad" (or 0, 1, 2) when the sender knows a reading is doubtful; default good
     {"values": [{"point": "temp", "value": 21.5, "ts": ...}, ...]} a batch
     {"temp": 21.5, "pressure": 3.1}                                  a flat map of point name to value, time is now
-The device's own timestamp is kept when it is plausible. Values older than the newest one already received for a
-point are refused, so history stays in order. The reply says exactly what was accepted and what was not and why.
+The device's own timestamp is kept when it is plausible. An explicit timestamp older than the newest one already
+received for a point is a backfill: it lands in history at its own time and never becomes the point's current
+value. The reply says exactly what was accepted and what was not and why.
 """
 import datetime as dt
 import math
@@ -128,14 +129,17 @@ class HttpInSource(Source):
                     no("timestamp is in the future, check the sender's clock")
                 elif t < now - self.max_age:
                     no("timestamp is older than this source accepts")
-                elif t <= self._high.get(point, 0):
-                    no("older than the newest value already received for this point")
                 else:
                     if len(self._q) >= self.MAX_PENDING:  # the engine has not drained it: refuse now rather than grow for ever
                         no("too many values are waiting for the engine; try again")
                         continue
-                    self._high[point] = t
-                    self._q.append((point, value if isinstance(value, str) else float(value), t, q))
+                    # Older than the newest received, or older than one earlier in this batch: a gap in history, not a
+                    # refusal. The trailing flag tells the engine to log it without touching the live state.
+                    backfill = t <= self._high.get(point, 0)
+                    if not backfill:
+                        self._high[point] = t
+                    item = (point, value if isinstance(value, str) else float(value), t, q)
+                    self._q.append(item + (True,) if backfill else item)
                     accepted += 1
         return accepted, rejected
 
