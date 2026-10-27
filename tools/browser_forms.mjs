@@ -142,6 +142,23 @@ await set("group", "Plan/t"); await save();
 const badGroup = await ev(`document.querySelector('[data-err="group"]')?.textContent`);
 console.log("sparkplug bad group:", badGroup);
 if (!badGroup) { console.log("FAIL: a Sparkplug group id with '/' was not refused on its field"); process.exit(1); }
+// 11b. a Sparkplug publisher can be started from the Start from dropdown, not only by pasting JSON into Advanced
+await go("#config/publisher/_new");
+const spTpl = await ev(`(()=>{const s=document.querySelector('#tpl');if(!s)return 'no dropdown';if(![...s.options].some(o=>o.textContent==='Sparkplug B publisher'))return 'missing';s.value='Sparkplug B publisher';s.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()`);
+console.log("sparkplug template in Start from:", spTpl);
+if (spTpl !== "ok") { console.log("FAIL: the Start from dropdown has no Sparkplug B publisher template"); process.exit(1); }
+await sleep(400);
+const spTplBody = JSON.parse(await adv());
+console.log("sparkplug template body:", JSON.stringify(spTplBody));
+if (spTplBody.type !== "sparkplug") { console.log("FAIL: the Sparkplug template does not start the form as a sparkplug publisher"); process.exit(1); }
+await ev(`document.querySelector('#ed').name.value='spark-tpl'`);
+const tplFields = [await set("creds", spCreds), await set("group", "Plant"), await set("node", "edge-tpl"), await set("device", "plc-9")];
+console.log("sparkplug template fields:", tplFields.join());
+if (tplFields.some(x => x !== "ok")) { console.log("FAIL: the Sparkplug template's form is missing creds/group/node/device"); process.exit(1); }
+await save();
+const tplCfg = await ev(`fetch('/api/config/publisher/spark-tpl').then(r=>r.json())`);
+console.log("sparkplug from template:", JSON.stringify({type: tplCfg?.type, group: tplCfg?.group, node: tplCfg?.node, device: tplCfg?.device}));
+if (tplCfg?.type !== "sparkplug" || tplCfg?.group !== "Plant" || tplCfg?.node !== "edge-tpl" || tplCfg?.device !== "plc-9") { console.log("FAIL: a publisher started from the Sparkplug template saved the wrong type or ids"); process.exit(1); }
 // mobile
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");
