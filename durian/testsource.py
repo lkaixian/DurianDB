@@ -6,6 +6,7 @@ saving the source would.
 """
 from . import http_source, sql_source
 from .config import validate_source
+from .core import sentence
 from .http_source import HttpJsonSource
 from .modbus import RANGES, ModbusError, ModbusException
 from .modbus_source import make_client
@@ -52,14 +53,14 @@ def test_source(body):
                         client.read_regs(1, RANGES["holding"], 0, 1)
                         said = "The device answered a read of holding register 0 at address 1."
                     except ModbusException as e:  # it answered, just not with data: the link works
-                        said = f"The device answered (it refused holding register 0 at address 1: {e}). The link works."
+                        said = f"The device answered (it refused holding register 0 at address 1: {sentence(e)}). The link works."
                     finally:
                         client.end_cycle()
             finally:
                 client.close()
             return {"ok": True, "message": said, "found": []}
     except ModbusError as e:
-        return {"ok": False, "message": f"No answer from the device: {e}", "found": []}
+        return {"ok": False, "message": f"No answer from the device: {sentence(e)}", "found": []}
     except Exception as e:  # any transport or parsing failure is the test result
-        return {"ok": False, "message": f"{type(e).__name__}: {e}", "found": []}
+        return {"ok": False, "message": f"Could not test this source: {sentence(e) or 'it did not answer'}", "found": []}
     return {"ok": False, "message": "This source type cannot be tested from here.", "found": []}

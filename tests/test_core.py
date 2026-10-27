@@ -63,7 +63,7 @@ class Broken(Source):
 good = Scripted("g", [1]); good.add(Point("p"))
 bad = Broken("b")
 eng = Engine(); eng.sources += [bad, good]; eng.tick(0.0)
-assert bad.error == "RuntimeError: boom" and good.points["p"].last == 1
+assert bad.error == "boom" and good.points["p"].last == 1, "the operator reads the reason, not the class name"
 
 # config validation
 assert make_detector({"kind": "HIGH_LIMIT", "limit": 5, "level": "urgent"}).level == Level.URGENT

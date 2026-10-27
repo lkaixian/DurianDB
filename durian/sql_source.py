@@ -8,6 +8,7 @@ import sqlite3
 import time
 from pathlib import Path
 
+from .core import sentence
 from .polled import PolledSource, number, scale
 
 SELECT = re.compile(r"^\s*select\s", re.I)
@@ -64,5 +65,5 @@ class SqlSource(PolledSource):
             try:
                 values[p.name] = scale(p, number(by_key[key]))
             except ValueError as e:
-                rejected.append(f"{p.name}: {e}")
+                rejected.append(f"{p.name}: {sentence(e)}")
         return values, rejected

@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .core import sentence
 from .polled import NoRedirect, PolledSource, number, scale
 
 PATH_OK = re.compile(r"^(?:[A-Za-z0-9_-]+|\[\d+\])(?:\.[A-Za-z0-9_-]+|\[\d+\])*$")
@@ -76,14 +77,22 @@ class HttpJsonSource(PolledSource):
             raw = r.read(self.max_bytes + 1)
         if len(raw) > self.max_bytes:
             raise ValueError("response larger than max_bytes")
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except ValueError as e:
+            raise ValueError(f"the reply was not JSON: {sentence(e)}") from e
 
     def fetch(self):
         data = self.document()
         values, rejected = {}, []
         for p in self.points.values():
+            path = p.meta["http"]["path"]
             try:
-                values[p.name] = scale(p, number(dig(data, p.meta["http"]["path"])))
-            except (KeyError, IndexError, TypeError, ValueError) as e:
-                rejected.append(f"{p.name}: {type(e).__name__} {e}")
+                values[p.name] = scale(p, number(dig(data, path)))
+            except KeyError:
+                rejected.append(f"{p.name}: {path} is not in the reply")
+            except (IndexError, TypeError):
+                rejected.append(f"{p.name}: {path} does not reach a value in the reply")
+            except ValueError as e:
+                rejected.append(f"{p.name}: {sentence(e)}")
         return values, rejected

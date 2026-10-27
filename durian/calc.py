@@ -8,7 +8,7 @@ Arithmetic is + - * / % only (no powers: they can be made to run for ever). A tr
 import ast
 import math
 
-from .core import Quality, Source
+from .core import Quality, Source, sentence
 
 MAX_LEN, MAX_REFS = 500, 20
 FUNCS = {"abs": abs, "min": min, "max": max, "round": round, "sqrt": math.sqrt}
@@ -115,6 +115,6 @@ class CalcSource(Source):
                 out[name] = (evaluate(tree, read), ts, Quality(worst[0]))
             except (ArithmeticError, ValueError, LookupError, TypeError) as e:
                 out[name] = (None, ts, Quality.BAD)
-                failed.append(f"{name}: {e}")
+                failed.append(f"{name}: {sentence(e)}")
         self.error = f"{len(failed)} calculation(s) failed: " + "; ".join(failed[:3]) if failed else None
         return out

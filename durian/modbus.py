@@ -7,6 +7,8 @@ import socket
 import struct
 import threading
 
+from .core import sentence
+
 READ_COILS, READ_DISCRETE, READ_HOLDING, READ_INPUT = 1, 2, 3, 4
 WRITE_COIL, WRITE_REG, WRITE_COILS, WRITE_REGS = 5, 6, 15, 16
 EXCEPTIONS = {1: "illegal function", 2: "illegal data address", 3: "illegal data value", 4: "server device failure",
@@ -61,7 +63,7 @@ class TcpLink:
         except socket.timeout as e:
             raise ModbusTimeout(f"connect to {self.host}:{self.port} timed out") from e
         except OSError as e:
-            raise ModbusIOError(f"connect to {self.host}:{self.port} failed: {e}") from e
+            raise ModbusIOError(f"connect to {self.host}:{self.port} failed: {sentence(e)}") from e
 
     def send(self, data):
         if self.sock is None:
@@ -69,7 +71,7 @@ class TcpLink:
         try:
             self.sock.sendall(data)
         except OSError as e:
-            raise ModbusIOError(f"send failed: {e}") from e
+            raise ModbusIOError(f"send failed: {sentence(e)}") from e
 
     def recv_exact(self, n):
         buf = b""
@@ -84,7 +86,7 @@ class TcpLink:
         except socket.timeout as e:
             raise ModbusTimeout("no response within the timeout") from e
         except OSError as e:
-            raise ModbusIOError(f"receive failed: {e}") from e
+            raise ModbusIOError(f"receive failed: {sentence(e)}") from e
         return buf
 
     def flush(self):  # discard bytes left over from an earlier, abandoned request
@@ -119,20 +121,20 @@ class SerialLink:
         try:
             self.ser = serial.serial_for_url(self.port, **self.args)
         except (OSError, ValueError, serial.SerialException) as e:
-            raise ModbusIOError(f"cannot open {self.port}: {e}") from e
+            raise ModbusIOError(f"cannot open {self.port}: {sentence(e)}") from e
 
     def send(self, data):
         try:
             self.ser.write(data)
             self.ser.flush()
         except Exception as e:
-            raise ModbusIOError(f"write failed: {e}") from e
+            raise ModbusIOError(f"write failed: {sentence(e)}") from e
 
     def recv_exact(self, n):
         try:
             buf = self.ser.read(n)
         except Exception as e:
-            raise ModbusIOError(f"read failed: {e}") from e
+            raise ModbusIOError(f"read failed: {sentence(e)}") from e
         if len(buf) < n:
             raise ModbusTimeout("no response within the timeout")
         return buf
