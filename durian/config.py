@@ -4,8 +4,11 @@ Validation returns every problem at once as [{property, message}], the way the s
 """
 import json
 import math
+import os
 import random
 import re
+import shutil
+import time
 from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector, sentence
@@ -28,7 +31,7 @@ from .sql_source import SqlSource
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
 SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "dnp3", "bacnet", "opcua", "http_json",
-                "sql", "http_in", "calc")
+                "sql", "http_in", "calc", "system")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -280,6 +283,25 @@ class Virtual(Source):
             self.override[name] = value
 
 
+class SystemSource(Source):
+    """The host's own vitals as ordinary points: free bytes on a disk and this process's CPU seconds.
+
+    Synchronous, like Virtual: the engine tick calls poll. Stdlib only, and nothing POSIX-only, so Windows works too.
+    """
+
+    def __init__(self, name, path=None):
+        super().__init__(name)
+        self.path = path or "."
+
+    def poll(self, ts):
+        out = {"sys-disk-free-bytes": shutil.disk_usage(self.path).free,
+               "sys-process-cpu-seconds": time.process_time()}
+        count = os.cpu_count()
+        if count is not None:
+            out["sys-cpu-count"] = count
+        return out
+
+
 def _roles_ok(v):
     return isinstance(v, list) and all(isinstance(r, str) and 0 < len(r) <= 32 for r in v) and len(v) <= 20
 
@@ -406,6 +428,9 @@ def validate_source(name, b):
             add("auto_create", "must be true or false")
         if "max_age_days" in b and not _int(b["max_age_days"], 1, 365):
             add("max_age_days", "must be a whole number from 1 to 365")
+    elif b.get("type") == "system":
+        if "path" in b and not (isinstance(b["path"], str) and 0 < len(b["path"]) <= MAX_TEXT):
+            add("path", "must be the directory whose free space to report, up to 255 characters")
     return e
 
 
@@ -683,6 +708,13 @@ def build_engine(store):
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 src.start()
+            elif s["type"] == "system":
+                src = SystemSource(s["name"], s.get("path"))
+                names = ["sys-disk-free-bytes", "sys-process-cpu-seconds"]
+                if os.cpu_count() is not None:
+                    names.append("sys-cpu-count")
+                for n in names:
+                    src.add(make_point(n, {}, s["name"]))
             else:
                 auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create", True) else None
                 src = MqttSource(s["name"], load_creds(s["creds"]), s.get("prefix", "durian/"),
