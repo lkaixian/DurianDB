@@ -155,11 +155,26 @@ class Auth:
             raise AuthError("bad username, password or code")
         self.failures.pop(name, None)
         self.store.audit(name, "login")
+        return self._session(name)
+
+    def _session(self, name):
+        """Open a session for an account that has already been allowed in."""
         token = secrets.token_urlsafe(32)
         self.sessions[token] = (name, time.time() + self.ttl)
         if time.time() - self.swept > SWEEP_SECONDS:  # cheap cap: at most one sweep a minute inline, no thread
             self.sweep()
         return token
+
+    def login_sso(self, name):
+        """A verified SSO identity opening a session. The same lockout and disable rules as a password sign-in apply."""
+        _count, until = self.failures.get(name, (0, 0))
+        if until > time.time():
+            raise AuthError("too many failed attempts, try again later", 429)
+        user = self.store.user(name)
+        if not user or user.get("disabled"):
+            raise AuthError("that account is disabled" if user else "no such account", 403)
+        self.failures.pop(name, None)
+        return self._session(name)
 
     def issue_reset(self, name):
         """A one-time code an admin hands to a user who cannot sign in. Only its hash is kept, in memory, so a restart voids it."""

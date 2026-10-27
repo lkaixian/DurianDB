@@ -64,6 +64,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def redirect(self, location, extra=()):
+        """A 302 to the provider, or back to the console after a sign-in. No body, nothing cached."""
+        self.send_response(302)
+        for k, v in (("Location", location), ("Content-Length", "0"), ("Cache-Control", "no-store"),
+                     ("Referrer-Policy", "no-referrer"), *extra):
+            self.send_header(k, v)
+        self.end_headers()
+
     def token(self):
         c = SimpleCookie(self.headers.get("Cookie", ""))
         return c[COOKIE].value if COOKIE in c else None
@@ -111,6 +119,11 @@ class Handler(BaseHTTPRequestHandler):
                 app.auth.logout(self.token())
                 return self.send(200, {"ok": True}, extra=[("Set-Cookie", session_cookie("", 0))])
             query = {k: v[0] for k, v in parse_qs(url.query).items()}
+            if (method, url.path) == ("GET", "/api/auth/sso/start"):
+                return self.redirect(app.sso_start())
+            if (method, url.path) == ("GET", "/api/auth/sso/callback"):
+                token = app.sso_callback(query)  # state is checked before the provider's token endpoint is called
+                return self.redirect("/", extra=[("Set-Cookie", session_cookie(token, app.auth.ttl))])
             if bearer:  # a presented token is used or refused, never silently replaced by a cookie session
                 ident = app.auth.token_identity(bearer)
                 if ident is None:

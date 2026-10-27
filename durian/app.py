@@ -24,6 +24,7 @@ from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, forecast as forecast_series
 from .ingest import HttpInSource, parse_payload
 from .jobs import Jobs
+from .oidc import OIDC, OIDCError, local_identity, validate_sso
 from .maintenance import Maintenance, Raw
 from .testsource import test_source
 from .outputs import Outputs, validate_handler, validate_publisher
@@ -71,6 +72,7 @@ def _diff(old, new):
 class App:
     def __init__(self, store, backup_dir=None):
         self.store, self.auth = store, Auth(store)
+        self.oidc = OIDC()  # SSO sign-in: discovery cache, pending states and ID-token checks (in-process like sessions)
         self.maint = Maintenance(store, backup_dir or Path("backups"))
         self.jobs = Jobs()  # slow work runs off the request thread; GET /api/jobs/<id> reports it
         self.engine, self.outputs, self.open_events = None, None, []
@@ -442,6 +444,40 @@ class App:
         self.set_password(name, body["new"])
         self.store.audit(name, "password.reset.done")
 
+    def sso_config(self):
+        """The stored `sso` block, or None when it is absent or not valid. A bad block cannot start a sign-in."""
+        cfg = self.store.get_setting("sso")
+        return cfg if isinstance(cfg, dict) and not validate_sso(cfg) else None
+
+    def sso_public(self):
+        """What the sign-in page may know: that SSO is configured, and with whom. Never the client secret."""
+        cfg = self.sso_config()
+        return {"configured": cfg is not None, "issuer": cfg["issuer"] if cfg else None}
+
+    def sso_start(self):
+        """The provider URL to redirect to."""
+        cfg = self.sso_config()
+        if cfg is None:
+            raise ApiError(404, "single sign-on is not configured")
+        try:
+            return self.oidc.authorize_url(cfg)
+        except OIDCError as ex:
+            raise ApiError(ex.status, str(ex))
+
+    def sso_callback(self, query):
+        """Complete a sign-in and return the session token. State is checked before the token endpoint is touched."""
+        cfg = self.sso_config()
+        if cfg is None:
+            raise ApiError(404, "single sign-on is not configured")
+        try:
+            claims = self.oidc.complete(cfg, query.get("code"), query.get("state"), query.get("error"))
+            name = local_identity(self.store, cfg, claims)
+            token = self.auth.login_sso(name)
+        except (OIDCError, AuthError) as ex:
+            raise ApiError(ex.status, str(ex))
+        self.store.audit(name, "login.sso", f"provider {cfg['issuer']}")  # never the state, nonce or code
+        return token
+
     # ---- API
     def handle(self, method, path, query, body, ident):
         m = ROUTE.match(path)
@@ -471,6 +507,8 @@ class App:
                          "tags": tags, "source": s.name, "display_unit": display_unit, "display_value": display_value}
         if (method, a, b, c) == ("GET", "me", None, None):
             return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp"))}
+        if (method, a, b, c) == ("GET", "auth", "sso", None):  # the sign-in page asks this before anyone is signed in
+            return 200, self.sso_public()
         if (method, a, b, c) == ("GET", "health", None, None):
             # The data plane's own state. A stalled loop is the one failure a console cannot otherwise see.
             faults = self.outputs.faults() if self.outputs else []
@@ -633,6 +671,19 @@ class App:
 
         # everything below is administration
         need(admin)
+        if (method, a, b, c) == ("PUT", "auth", "sso", None):
+            if not isinstance(body, dict):
+                raise ApiError(400, "body must be a JSON object")
+            errs = validate_sso(body)
+            if errs:
+                raise ApiError(422, "validation failed", errs)
+            self.store.set_setting("sso", body)
+            self.store.audit(ident["name"], "sso.configure", body["issuer"])
+            return 200, {"saved": True}
+        if (method, a, b, c) == ("DELETE", "auth", "sso", None):
+            self.store.set_setting("sso", None)
+            self.store.audit(ident["name"], "sso.remove")
+            return 200, {"configured": False}
         if a == "config" and b in KINDS:
             return self.config(method, b, c, body, ident)
         if (method, a, c) == ("POST", "users", "reset") and b:  # a one-time code for a user who cannot sign in
