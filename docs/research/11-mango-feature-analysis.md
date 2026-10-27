@@ -20,7 +20,7 @@ Written 2026-10-20. Sources are the public documentation pages at docs.radixiot.
 | Binary and multistate types | `states` labels on a point, label shown everywhere, select to set | Operators read "Running", not 1. Values stay numbers underneath, so history, limits and rollups are unchanged. |
 | Alphanumeric and image types | Not built | Everything stored is a number. Strings would touch history, detectors and every chart. |
 | State, range, change, no-change detectors | `STATE`, `RANGE`, `CHANGE`, `NO_CHANGE` | They answer real plant questions: a pump in Fault, a value out of band, a frozen sensor. Same on-delay, off-delay and level model as the others. |
-| Smoothness and CUSUM detectors | Not built | Statistical detectors that need tuning guidance the pages do not give. |
+| Smoothness and CUSUM detectors | `SMOOTHNESS` and `CUSUM` detectors in `durian/core.py`, configured in the alert form | Smoothness alarms on scatter over a window; CUSUM accumulates a small steady offset from a target. Both take the same on-delay, off-delay and level settings as the other detectors. |
 | Maintenance events (drop, acknowledge, suppress) | Config kind `maintenance` with those three modes, scope by points, tags or sources, schedules once, weekly or manual | Planned work should not page anyone. Held alarms reuse the shelving machinery, so an alarm still active when the window ends is announced. |
 | Interval logging | `logging: INTERVAL` with the last value or the average, minimum or maximum of each period | Slow, steady signals do not need every update stored. |
 | Rollups beyond avg/min/max/last/count | `first`, `sum`, `delta` (last minus first of the bucket) | Counters and totals. Counter resets inside a bucket are not corrected. |
@@ -28,7 +28,7 @@ Written 2026-10-20. Sources are the public documentation pages at docs.radixiot.
 | Email event handler | `email` handler with SMTP (none, STARTTLS, SSL), credentials file, scope | The first thing an operator without Node-RED expects. Recipient lists per group and templates are not built. |
 | Process and script handlers, scripting meta points | Declined | They run arbitrary code or commands on the server. The expression language in `calc.py` covers calculations without that risk, and the webhook handler reaches anything external. |
 | Hierarchy watch lists, point folders | A `folder` path on each point, grouping on the overview and a `folder` filter that includes subfolders | Operators think in plant areas. Tags and watch lists still group points across folders. |
-| HTTP sender, Slack, gRPC publishers | Not built | MQTT and the webhook cover outbound data and alarms. |
+| HTTP sender, Slack, gRPC publishers | HTTP sender as the `http` publisher and Slack as the `slack` handler, both in `durian/outputs.py`; gRPC not built | The HTTP sender posts `{point, value, ts, quality}` as JSON and can carry a Bearer token. Slack posts `{text}` to an incoming-webhook URL. MQTT remains the publisher for a broker, and the webhook handler covers anything else. |
 
 ## Left open
 

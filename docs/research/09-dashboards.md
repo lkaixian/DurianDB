@@ -29,7 +29,7 @@ A dashboard is data: title, columns, refresh period, read roles, edit roles, own
 | Edit permission | Owner, `edit_roles`, or superadmin | Creating needs the `designer` role. Only a superadmin can make one public. |
 | Public pages | A role `anonymous` in the read roles. Everyone, signed in or not, holds it | "Public" means everyone. Fixed along the way: a user with only a custom role did not count as anonymous. |
 | (unclear) | Public dashboard does not make its data public. Saving warns when a public dashboard shows a point anonymous cannot read | The common mistake is publishing a page and assuming its data is published. The warning names each point. |
-| Designer canvas | Form with move and size buttons, a settings box per widget, a live preview | Keyboard usable and testable; drag and drop is a later layer over the same data. |
+| Designer canvas | Drag-and-drop canvas in `web/dashboards.js`: drag a widget to move it, drag its corner to resize it, drag a type from the palette to add one; arrow keys move the selected widget and Shift with arrows resizes it | Mouse and keyboard act on the same JSON, so the designer stays testable. |
 
 Widget types now: `value` (with rules), `gauge` (zones), `chart` (up to 6 series, distinguished by line pattern and label), `alarms`, `table` (by tag, watch list or names), `setpoint`, `text` (plain text only), `status` (source health).
 
@@ -41,7 +41,7 @@ Adding a widget type is two small, reviewable pieces: a validator registered wit
 
 ## Not built
 
-Drag and drop, templates and import/export of a dashboard on its own (the JSON is already portable), URL parameters that retarget a dashboard, per-user dashboards, themes, and a menu editor.
+Templates and import/export of a dashboard on its own (the JSON is already portable), URL parameters that retarget a dashboard, per-user dashboards, themes, and a menu editor.
 
 ## Checked
 
