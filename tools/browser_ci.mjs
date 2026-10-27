@@ -19,7 +19,7 @@ const NODE = process.env.NODE ?? process.execPath;
 
 // A check is self-contained unless it needs a second process: only the Modbus check needs the simulator.
 const CHECKS = {
-  admin: {}, check: {}, dashboard: {}, designer: {}, forms: {}, login: {}, mango: {},
+  account: {}, admin: {}, check: {}, dashboard: {}, designer: {}, forms: {}, login: {}, mango: {},
   mimic: {}, modbus: {simulator: "modbus"}, mylists: {}, point: {},
 };
 const wanted = process.argv.slice(2);
