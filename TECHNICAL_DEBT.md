@@ -48,7 +48,6 @@ the schema version, Modbus finiteness, the MQTT source-down reason and the engin
 | A8 | `POST /api/test/source` opens live connections on the request thread | `durian/testsource.py` | low | A hanging device hangs a console request |
 | A9 | All state is in-process: sessions, lockout counters, reset codes, TOTP replay guard, confirm tokens, escalation set | `durian/auth.py`, `durian/app.py` | high | Two server processes would double-tick, double-purge and double-escalate, and accept a replayed TOTP code. This is why "no HA" is in the known limits |
 | A10 | `web/app.js` is 788 lines in one file | `web/app.js` | low | One page's change risks another's |
-| A11 | Two near-identical ISO-time lambdas and four CSV-writer setups | `durian/app.py`, `durian/maintenance.py`, `durian/pointcsv.py` | low | Small, easy to unify |
 | A12 | SQLite and MySQL diverge through hand-written branches, including `cast(ts/? as int)` vs `floor(ts/?)` | `durian/store.py` | medium | The MySQL path is the least tested code in the repo |
 
 ## 4. Dependencies and environment

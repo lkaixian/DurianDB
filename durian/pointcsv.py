@@ -6,6 +6,8 @@ import csv
 import io
 import json
 
+from .csvfmt import csv_bytes
+
 COLUMNS = ["name", "source", "folder", "unit", "description", "tags", "logging", "tolerance", "settable", "read_roles", "set_roles",
            "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "extra"]
 LISTS = ("read_roles", "set_roles")
@@ -16,9 +18,7 @@ MAX_ROWS = 5000
 
 def export(points):
     """CSV bytes for a list of point config bodies (each with its `name`)."""
-    out = io.StringIO()
-    w = csv.writer(out, lineterminator="\n")
-    w.writerow(COLUMNS)
+    rows = []
     for p in points:
         extra = {k: v for k, v in p.items() if k not in COLUMNS}
         row = []
@@ -35,8 +35,8 @@ def export(points):
             elif c in BOOLS:
                 v = "true" if v else "false"
             row.append(v)
-        w.writerow(row)
-    return out.getvalue().encode()
+        rows.append(row)
+    return csv_bytes(COLUMNS, rows)
 
 
 def parse(text):
