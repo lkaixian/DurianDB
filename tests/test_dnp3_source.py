@@ -213,8 +213,12 @@ assert v["analog"] == 0.0 and v["counter"] == 1234.0 and v["binary"] == 1.0 and 
 assert src.connected is True and src.points["analog"].quality == Quality.GOOD
 
 # ---- later ticks read classes 1, 2 and 3; an event updates the static point it belongs to
-EVENT_MS = int(time.time() * 1000)
-station.events = events(EVENT_MS)  # stamped now, so it is newer than the class 0 value just read
+# The device clock is whole milliseconds; the class 0 value carries our receive time for it at full
+# resolution, and core.py drops a source stamp older than the one it holds. "Now" truncated to a
+# millisecond can therefore lose a sub-millisecond race and be dropped as stale, so stamp the event
+# 1 ms past the class 0 value itself: newer than what the engine holds, by construction.
+EVENT_MS = int(src.points["time"].last_ts * 1000) + 1
+station.events = events(EVENT_MS)  # newer than the class 0 value just read
 before = len(station.requests)
 src.cycle()
 assert station.requests[before:] == [(60, 2, 0x06), (60, 3, 0x06), (60, 4, 0x06)], station.requests[before:]
