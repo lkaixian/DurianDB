@@ -50,6 +50,20 @@ for nid in ("0002-b", "0001-a"):
 same = [n["text"] for n in notes.for_point(store, "temp") if n["ts"] == 1.0]
 assert same == ["0001-a", "0002-b"], same
 
+# and two written back to back on a clock that does not tick between them keep the order they were written in
+class Frozen:  # a 15 ms Windows clock can give both notes the same time
+    def time(self):
+        return 1.7e9
+
+real_time, notes.time = notes.time, Frozen()
+try:
+    notes.add(store, "clock", "first", "admin")
+    notes.add(store, "clock", "second", "admin")
+finally:
+    notes.time = real_time
+order = [n["text"] for n in notes.for_point(store, "clock")]
+assert order[-2:] == ["first", "second"], order
+
 # notes stay with their own point
 try:
     call(admin, "GET", "/api/notes/nope", None)
