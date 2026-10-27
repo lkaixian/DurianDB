@@ -40,14 +40,15 @@ function showErr(e, where) {
 }
 
 // ---- navigation
-const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, reports: viewReports, point: viewPoint, alarms: viewAlarms, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount};
+const VIEWS = {overview: viewOverview, dashboards: viewDashList, d: viewDashboard, design: viewDesigner, history: viewHistory, reports: viewReports, point: viewPoint, alarms: viewAlarms, config: viewConfig, users: viewUsers, tokens: viewTokens, database: viewDatabase, audit: viewAudit, account: viewAccount, about: viewAbout};
 function nav(view) {
   const groups = me.name ? [["Monitor", [["overview", "Overview"], ["alarms", "Alarms"], ["dashboards", "Dashboards"], ["history", "History"], ["reports", "Reports"]]],
     ...(isAdmin() ? [["Configure", [["config", "Config"], ["users", "Users"], ["tokens", "Tokens"]]], ["System", [["database", "Database"], ["audit", "Audit"]]]] : []),
-    ["Signed in", [["account", me.name]]]] : [];
+    ["Signed in", [["account", me.name], ["about", "About"]]]] : [];
   document.querySelector(".shell").classList.toggle("solo", !me.name);  // before sign-in there is nothing to navigate to
   const cur = v => v === view || (view === "point" && v === "overview") || (view === "d" && v === "dashboards") || (view === "design" && v === "dashboards") ? 'aria-current="page"' : "";
   $("#nav").innerHTML = groups.map(([g, items]) => `<p class="ng">${esc(g)}</p>${items.map(([v, l]) => `<a href="#${v}" ${cur(v)}>${esc(l)}</a>`).join("")}`).join("");
+  if (me.name) $("#nav").insertAdjacentHTML("beforeend", `<a class="navver" href="#about" title="About DurianDB">v${esc(me.version)}</a>`);  // pinned to the foot of the sidebar
 }
 // The header shows how many alarms still wait for someone, whatever page is open. Text and colour together.
 // Optional audible alert: a short beep when the number of unacknowledged alarms goes up. Off until someone turns it on (browsers need a click first).

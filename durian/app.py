@@ -17,6 +17,7 @@ from urllib.parse import unquote
 
 from .auth import ApiError, Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from . import export, notes, pointcsv, units, windows
+from . import VERSION, BUILD, REPO
 from .config import (build_engine, resolve, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_label
 from .csvfmt import csv_bytes, iso
@@ -678,7 +679,8 @@ class App:
 
     def _api_identity(self, method, a, b, c, query, body, ident, need):
         if (method, a, b, c) == ("GET", "me", None, None):
-            return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp"))}
+            return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp")),
+                         "version": VERSION, "build": BUILD, "repo": REPO}
         if (method, a, b, c) == ("GET", "health", None, None):
             # The data plane's own state. A stalled loop is the one failure a console cannot otherwise see.
             faults = self.outputs.faults() if self.outputs else []

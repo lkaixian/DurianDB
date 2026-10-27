@@ -40,6 +40,14 @@ function viewLogin() {
   $("#login input").focus();
 }
 
+function viewAbout() {
+  main.innerHTML = `<section aria-labelledby="ab-h"><h2 id="ab-h">About DurianDB</h2>
+    <p class="note">Plant monitoring and alarm console.</p>
+    <dl class="kv"><dt>Version</dt><dd class="num">${esc(me.version)}</dd>
+    <dt>Build</dt><dd class="num">${esc(me.build)}</dd>
+    <dt>Source</dt><dd><a href="${esc(me.repo)}" rel="noopener noreferrer">${esc(me.repo)}</a></dd></dl></section>`;
+}
+
 function viewAccount() {
   main.innerHTML = `<section aria-labelledby="ac-h"><h2 id="ac-h">Account: ${esc(me.name)}</h2>
     <p class="note">Roles: ${esc(me.roles.join(", "))}</p>
