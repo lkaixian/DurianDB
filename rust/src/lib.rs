@@ -14,6 +14,8 @@
 //!    excluded there too). Detectors that need the point's state labels take them at construction.
 //!  - Every sample count is bounded at construction, so memory per detector is fixed for its whole life.
 //!  - Non-finite input is rejected and reported once, instead of flowing into comparisons that are always false.
+//!  - `Kind::Anomaly` and `Summary` have no Python counterpart: the nearest thing Python has is `Smoothness`,
+//!    which alarms on how much the window scatters, not on the one sample that left it.
 
 use std::fmt;
 
@@ -118,14 +120,79 @@ impl Ring {
         (0..n).map(move |i| self.buf[(start + i) % cap])
     }
 
+    /// Arithmetic mean of the samples held, or 0.0 for an empty ring.
+    pub fn mean(&self) -> f64 {
+        let n = self.len();
+        if n == 0 {
+            return 0.0;
+        }
+        self.iter().sum::<f64>() / n as f64
+    }
+
     /// Population standard deviation, as the Python smoothness detector computes it.
     pub fn stdev(&self) -> f64 {
         let n = self.len();
         if n == 0 {
             return 0.0;
         }
-        let mean = self.iter().sum::<f64>() / n as f64;
+        let mean = self.mean();
         (self.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / n as f64).sqrt()
+    }
+}
+
+/// Fixed-capacity statistics summary: the `count / min / max / mean / sd` line a console shows for a point's
+/// recent window. Bounded like the detectors — at capacity, `add` drops the oldest sample — so memory is
+/// constant for the life of the process.
+///
+/// `min` and `max` are recomputed over the window on each read rather than held across evictions: a stored
+/// peak would keep reporting a value that left the window long ago, and a wrong peak on a SCADA console is
+/// worse than a scan of at most `MAX_SAMPLES` values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Summary {
+    ring: Ring,
+    /// Values refused as non-finite. They are counted, not guessed into the statistics.
+    pub rejected: u64,
+}
+
+impl Summary {
+    pub fn new(capacity: usize) -> Summary {
+        Summary { ring: Ring::new(capacity), rejected: 0 }
+    }
+
+    /// Take a sample; a non-finite value is refused (`false`) rather than poisoning the mean.
+    pub fn add(&mut self, v: f64) -> bool {
+        if !v.is_finite() {
+            self.rejected += 1;
+            return false;
+        }
+        self.ring.push(v);
+        true
+    }
+
+    pub fn count(&self) -> usize {
+        self.ring.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ring.is_empty()
+    }
+
+    /// The smallest sample still inside the window, or `None` while the window is empty.
+    pub fn min(&self) -> Option<f64> {
+        self.ring.iter().reduce(f64::min)
+    }
+
+    /// The largest sample still inside the window — the peak hold, for as long as the peak is in the window.
+    pub fn max(&self) -> Option<f64> {
+        self.ring.iter().reduce(f64::max)
+    }
+
+    pub fn mean(&self) -> f64 {
+        self.ring.mean()
+    }
+
+    pub fn stdev(&self) -> f64 {
+        self.ring.stdev()
     }
 }
 
@@ -142,6 +209,9 @@ pub enum Kind {
     Range { low: f64, high: f64, inside: bool },
     Smoothness { limit: f64, samples: usize },
     Cusum { target: f64, slack: f64, threshold: f64 },
+    /// Statistical outlier: alarm while a sample sits more than `z_limit` standard deviations away from the
+    /// mean of the previous `window` samples. `Summary`'s job is describing the window; this is the decision.
+    Anomaly { window: usize, z_limit: f64 },
 }
 
 impl Kind {
@@ -166,6 +236,18 @@ impl Kind {
                 Kind::Smoothness { limit: need("limit")?, samples: n }
             }
             "CUSUM" => Kind::Cusum { target: need("target")?, slack: opt("slack"), threshold: need("threshold")? },
+            "ANOMALY" => {
+                let n = need("window")? as usize;
+                if !(MIN_ANOMALY_BASELINE..=MAX_SAMPLES).contains(&n) {
+                    return Err(vec![format!("window must be {MIN_ANOMALY_BASELINE} to {MAX_SAMPLES}")]);
+                }
+                let z = need("z_limit")?;
+                // NaN passes a `<=` test, so it needs saying: the CLI's parser accepts the word
+                if !z.is_finite() || z <= 0.0 {
+                    return Err(vec!["z_limit must be a finite number above zero".into()]);
+                }
+                Kind::Anomaly { window: n, z_limit: z }
+            }
             "STATE" => return Err(vec!["STATE needs its list of states; use Kind::State directly".into()]),
             other => return Err(vec![format!("unknown detector {other}")]),
         })
@@ -205,6 +287,16 @@ pub fn num(v: f64) -> String {
 /// Ceiling on a smoothness window, so a configuration mistake cannot ask for unbounded memory.
 pub const MAX_SAMPLES: usize = 4096;
 
+/// The smallest baseline that can say anything about spread. With two samples the standard deviation is just
+/// half their distance, so the third is the first that measures scatter rather than a coincidence — the same
+/// lower bound Python puts on a SMOOTHNESS window.
+pub const MIN_ANOMALY_BASELINE: usize = 3;
+
+/// How far below `z_limit`, in standard deviations, a sample must fall before a raised anomaly alarm clears.
+/// Without the band a value sitting at the limit raises on one sample and clears on the next, forever.
+/// `Anomaly` keeps only `window` and `z_limit` as its configuration because a sigma band has one honest size.
+pub const ANOMALY_BAND: f64 = 0.5;
+
 /// One detector. The per-kind scratch lives together because a detector is only ever one kind: an enum here
 /// beats a trait object, which would put an allocation and a vtable on the hot path for no benefit.
 #[derive(Clone, Debug)]
@@ -235,6 +327,7 @@ impl Detector {
     pub fn with_delays(kind: Kind, level: Level, duration: f64, off_delay: f64) -> Detector {
         let window = match &kind {
             Kind::Smoothness { samples, .. } => Some(Ring::new(*samples)),
+            Kind::Anomaly { window, .. } => Some(Ring::new(*window)),
             _ => None,
         };
         Detector {
@@ -283,10 +376,7 @@ impl Detector {
         match self.kind.clone() {
             Kind::NoUpdate { .. } => {
                 // its condition is about time passing, not about the value
-                match self.raised_at.take() {
-                    Some(raised_at) => Some(Transition::Cleared { raised_at, cleared_at: ts }),
-                    None => None,
-                }
+                self.raised_at.take().map(|raised_at| Transition::Cleared { raised_at, cleared_at: ts })
             }
             Kind::NoChange { seconds: _, tolerance } => {
                 if self.still.map(|(v, _)| (v - value).abs() > tolerance).unwrap_or(true) {
@@ -369,6 +459,28 @@ impl Detector {
                 } else {
                     None
                 }
+            }
+            Kind::Anomaly { z_limit, .. } => {
+                let w = self.window.as_mut()?;
+                let (n, mean, sd) = (w.len(), w.mean(), w.stdev());
+                // the verdict is against the previous samples; only then does this one join the baseline,
+                // so a spike cannot dilute the standard deviation it is measured against
+                w.push(value);
+                if n < MIN_ANOMALY_BASELINE || sd == 0.0 {
+                    return None; // too little baseline, or no scale to divide by: no verdict, no panic
+                }
+                let z = (value - mean) / sd;
+                let edge =
+                    if self.raised_at.is_some() { (*z_limit - ANOMALY_BAND).max(0.0) } else { *z_limit };
+                (z.abs() > edge).then(|| {
+                    format!(
+                        "{} is {:.2} sd {} mean {} over {n} samples",
+                        num(value),
+                        z.abs(),
+                        if z >= 0.0 { "above" } else { "below" },
+                        num(mean)
+                    )
+                })
             }
             _ => None,
         }
@@ -653,5 +765,129 @@ mod tests {
             r.push(v);
         }
         assert_eq!(r.iter().collect::<Vec<_>>(), vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn anomaly_judges_nothing_until_the_window_has_three_samples() {
+        let mut d = det(Kind::Anomaly { window: 8, z_limit: 3.0 });
+        // one and two samples describe no spread, however far the next value sits from them
+        assert_eq!(d.check(0.0, 10.0), None);
+        assert_eq!(d.check(1.0, 11.0), None);
+        assert_eq!(d.check(2.0, 10.0), None);
+        // three is the first baseline that can carry the fourth sample thousands of sigma away
+        assert!(matches!(d.check(3.0, 1000.0), Some(Transition::Raised(_))));
+        assert!(d.is_active());
+    }
+
+    #[test]
+    fn anomaly_alarms_on_nothing_when_the_window_has_no_variance() {
+        let mut d = det(Kind::Anomaly { window: 4, z_limit: 3.0 });
+        for (ts, v) in [(0.0, 10.0), (1.0, 10.0), (2.0, 10.0), (3.0, 10.0)] {
+            assert_eq!(d.check(ts, v), None);
+        }
+        // a flat baseline has no scale to divide by: the answer is no verdict, not infinity and not a panic
+        assert_eq!(d.check(4.0, 1000.0), None);
+        assert!(!d.is_active());
+    }
+
+    #[test]
+    fn anomaly_raises_on_one_outlier_and_clears_when_the_signal_returns() {
+        let mut d = det(Kind::Anomaly { window: 4, z_limit: 3.0 });
+        for (ts, v) in [(0.0, 10.0), (1.0, 11.0), (2.0, 10.0), (3.0, 11.0)] {
+            assert_eq!(d.check(ts, v), None);
+        }
+        // 13 sits exactly 5 sd above the mean of [10, 11, 10, 11]
+        let raised = d.check(4.0, 13.0).expect("the outlier raises");
+        if let Transition::Raised(a) = &raised {
+            assert_eq!(a.message, "13 is 5.00 sd above mean 10.5 over 4 samples");
+        } else {
+            panic!("expected a raise, got {raised:?}");
+        }
+        // back inside, with the spike still in the window stretching the sigma it is measured against
+        assert_eq!(d.check(5.0, 10.0), Some(Transition::Cleared { raised_at: 4.0, cleared_at: 5.0 }));
+        assert!(!d.is_active());
+    }
+
+    #[test]
+    fn anomaly_leaves_a_steady_ramp_to_the_rate_detector() {
+        let mut d = det(Kind::Anomaly { window: 16, z_limit: 3.0 });
+        // a trend puts the newest sample sqrt(3(m+1)/(m-1)) sd from its own baseline — at most sqrt(6) ≈
+        // 2.449 sd, whatever the slope — so any z_limit worth setting cannot call a ramp anomalous
+        for i in 0..300 {
+            assert_eq!(d.check(i as f64, i as f64 * 0.1), None, "the ramp was called anomalous at {i}");
+        }
+        assert!(!d.is_active());
+    }
+
+    #[test]
+    fn anomaly_deadband_holds_an_alarm_at_the_threshold_instead_of_chattering() {
+        let mut d = det(Kind::Anomaly { window: 16, z_limit: 3.0 });
+        for ts in 0..16 {
+            assert_eq!(d.check(ts as f64, if ts % 2 == 0 { 10.0 } else { 11.0 }), None);
+        }
+        assert!(matches!(d.check(16.0, 13.0), Some(Transition::Raised(_)))); // z = 5.00
+        // 12.8 is 2.75 sd above: past the clear edge of 2.5, short of the raise edge of 3.0. It holds the
+        // alarm; with no band it would read as normal, clear, and be raised again by the next sample.
+        assert_eq!(d.check(17.0, 12.8), None);
+        assert!(d.is_active());
+        // 10.0 is inside the band on a window the spike is still stretching: that is a clear
+        assert_eq!(d.check(18.0, 10.0), Some(Transition::Cleared { raised_at: 16.0, cleared_at: 18.0 }));
+    }
+
+    #[test]
+    fn anomaly_config_refuses_windows_that_cannot_measure_anything() {
+        fn cfg<'a>(pairs: &'a [(&'a str, f64)]) -> impl Fn(&str) -> Option<f64> + 'a {
+            move |k| pairs.iter().find(|(s, _)| *s == k).map(|(_, v)| *v)
+        }
+        assert!(Kind::from_config("ANOMALY", &cfg(&[])).is_err());
+        assert!(Kind::from_config("ANOMALY", &cfg(&[("window", 2.0), ("z_limit", 3.0)])).is_err());
+        assert!(Kind::from_config("ANOMALY", &cfg(&[("window", 5000.0), ("z_limit", 3.0)])).is_err());
+        assert!(Kind::from_config("ANOMALY", &cfg(&[("window", 32.0), ("z_limit", 0.0)])).is_err());
+        assert!(Kind::from_config("ANOMALY", &cfg(&[("window", 32.0), ("z_limit", f64::NAN)])).is_err());
+        assert_eq!(
+            Kind::from_config("ANOMALY", &cfg(&[("window", 32.0), ("z_limit", 3.0)])).unwrap(),
+            Kind::Anomaly { window: 32, z_limit: 3.0 }
+        );
+    }
+
+    #[test]
+    fn summary_describes_the_samples_it_holds() {
+        let mut s = Summary::new(8);
+        assert!(s.is_empty());
+        assert_eq!(s.min(), None);
+        for v in [1.0, 2.0, 3.0, 4.0] {
+            assert!(s.add(v));
+        }
+        assert_eq!(s.count(), 4);
+        assert_eq!(s.min(), Some(1.0));
+        assert_eq!(s.max(), Some(4.0));
+        assert!((s.mean() - 2.5).abs() < 1e-12);
+        assert!((s.stdev() - (1.25f64).sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn summary_forgets_a_peak_once_it_leaves_the_window() {
+        let mut s = Summary::new(3);
+        for v in [100.0, 1.0, 2.0] {
+            s.add(v);
+        }
+        assert_eq!(s.max(), Some(100.0));
+        s.add(3.0); // evicts the 100: a held peak would keep reporting it, and that peak is gone
+        assert_eq!(s.max(), Some(3.0));
+        assert_eq!(s.min(), Some(1.0));
+        assert_eq!(s.count(), 3);
+    }
+
+    #[test]
+    fn summary_refuses_non_finite_samples_rather_than_poisoning_the_mean() {
+        let mut s = Summary::new(4);
+        assert!(!s.add(f64::NAN));
+        assert!(!s.add(f64::INFINITY));
+        assert_eq!(s.rejected, 2);
+        assert_eq!(s.count(), 0);
+        assert_eq!(s.mean(), 0.0);
+        assert_eq!(s.stdev(), 0.0);
+        assert!(s.add(5.0));
+        assert!((s.mean() - 5.0).abs() < 1e-12);
     }
 }
