@@ -17,7 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
-from . import notes, pointcsv, units, windows
+from . import export, notes, pointcsv, units, windows
 from .config import (build_engine, resolve, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .dashboards import validate_dashboard
@@ -518,6 +518,14 @@ class App:
             return self.import_points(query, body, ident)
         if (method, a, b) == ("GET", "export", "history"):
             return self.history_csv(ident, query)
+        # The bundle carries config.json, the same administrator-only configuration export as GET /api/export,
+        # so the bundle and its manifest follow that rule rather than the data-only `user` rule.
+        if (method, a, b) == ("GET", "export", "bundle"):
+            need(admin)
+            return self.export_download(query, ident)
+        if (method, a, b) == ("GET", "export", "manifest"):
+            need(admin)
+            return self.export_manifest(query)
         if (method, a, b, c) == ("GET", "events", "search", None):
             return self.event_journal(ident, query)
         if (method, a, c) == ("GET", "events", None) and b is None:
@@ -1011,6 +1019,31 @@ class App:
         if data is None:
             raise ApiError(413, "too many rows for one file, narrow the time range")
         return 200, Raw(data, "text/csv; charset=utf-8", f"{point}.csv")
+
+    @staticmethod
+    def _export_args(query):
+        raw = query.get("days", "7")
+        try:
+            days = int(raw)
+        except (TypeError, ValueError):
+            raise ApiError(422, "days must be a whole number of days, 1 or more")
+        raw = query.get("points")
+        points = [p.strip() for p in raw.split(",") if p.strip()] if isinstance(raw, str) and raw.strip() else None
+        return {"days": days, "points": points}
+
+    def export_download(self, query, ident):
+        try:
+            data, name, _ = export.build(self.store, **self._export_args(query))
+        except export.ExportError as e:
+            raise ApiError(422, str(e))
+        self.store.audit(ident["name"], "export.bundle", f"{name}: {len(data)} bytes")
+        return 200, Raw(data, "application/zip", name)
+
+    def export_manifest(self, query):
+        try:
+            return 200, export.preview(self.store, **self._export_args(query))
+        except export.ExportError as e:
+            raise ApiError(422, str(e))
 
     def import_history(self, query, text, ident):
         point = query.get("point")

@@ -7,13 +7,18 @@ import datetime as dt
 import io
 import json
 import math
+import queue
 import re
+import threading
 import time
 from pathlib import Path
 
-DEFAULTS = {"retention_days": 365, "purge_hour": 3, "backup_hour": -1, "backup_keep": 7}
-LIMITS = {"retention_days": (0, 36500), "purge_hour": (0, 23), "backup_hour": (-1, 23), "backup_keep": (1, 365)}
+DEFAULTS = {"retention_days": 365, "purge_hour": 3, "backup_hour": -1, "backup_keep": 7,
+            "export_hour": -1, "export_keep": 7}
+LIMITS = {"retention_days": (0, 36500), "purge_hour": (0, 23), "backup_hour": (-1, 23), "backup_keep": (1, 365),
+          "export_hour": (-1, 23), "export_keep": (1, 365)}
 BACKUP_NAME = re.compile(r"^durian-\d{8}-\d{6}\.db$")
+EXPORT_NAME = re.compile(r"^durian-export-\d{8}-\d{6}\.zip$")
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance", "dashboard")
 CSV_MAX_ROWS, IMPORT_MAX_ROWS = 200_000, 50_000
 EPOCH_MIN = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc).timestamp()
@@ -43,8 +48,10 @@ class Overlay:
 
 
 class Maintenance:
-    def __init__(self, store, backup_dir):
+    def __init__(self, store, backup_dir, export_dir=None):
         self.store, self.backup_dir = store, Path(backup_dir)
+        self.export_dir = Path(export_dir) if export_dir else self.backup_dir.parent / "exports"
+        self._exports, self._export_thread = queue.Queue(), None
 
     # ---- settings
     def settings(self):
@@ -117,12 +124,61 @@ class Maintenance:
         p = self.backup_dir / name
         return p if p.is_file() else None
 
+    # ---- scheduled export bundles
+    def exports(self):
+        if not self.export_dir.is_dir():
+            return []
+        files = [p for p in self.export_dir.iterdir() if EXPORT_NAME.match(p.name)]
+        return [{"name": p.name, "bytes": p.stat().st_size, "ts": p.stat().st_mtime} for p in sorted(files, reverse=True)]
+
+    def export_bundle(self, now=None):
+        """Build one bundle and prune older ones. Called by the worker, so the schedule never blocks purge or backup."""
+        from . import export  # local import: export reads KINDS from this module
+        now = now or time.time()
+        days = self.settings()["retention_days"]
+        days = min(7, days) if days > 0 else 7  # never ask for a window the retention setting forbids
+        data, name, manifest = export.build(self.store, days=days, now=now)
+        self.export_dir.mkdir(parents=True, exist_ok=True)
+        (self.export_dir / name).write_bytes(data)
+        for old in self.exports()[self.settings()["export_keep"]:]:
+            (self.export_dir / old["name"]).unlink(missing_ok=True)
+        self._record("export", now, {"name": name, "bytes": len(data), "points": manifest["points"]["count"],
+                                     "rows": manifest["rows"]["history"], "events": manifest["rows"]["events"]})
+        return {"name": name, "bytes": len(data)}
+
+    def _export_loop(self):
+        while True:
+            now = self._exports.get()
+            try:
+                self.export_bundle(now)
+            except Exception as e:  # a failed bundle is reported in status, not only written to the log
+                message = str(e).strip() or "the bundle could not be built"
+                self._record("export", now, {"error": message})
+                self.store.audit("system", "export.failed", f"{type(e).__name__}: {e}")
+            finally:
+                self._exports.task_done()
+
+    def _queue_export(self, now):
+        """One long-lived worker thread: a large bundle must not hold up the purge and backup in the timer thread."""
+        if self._export_thread is None:
+            self._export_thread = threading.Thread(target=self._export_loop, daemon=True, name="durian-export")
+            self._export_thread.start()
+        self._exports.put(now)
+
+    def wait_export(self):
+        """Wait until every queued bundle has been attempted (tests, and a caller that wants the schedule to finish)."""
+        if self._export_thread is not None:
+            self._exports.join()
+
     # ---- schedule: call once a minute
     def tick(self, now=None):
         now = now or time.time()
         local = dt.datetime.fromtimestamp(now)
         s, today, did = self.settings(), local.strftime("%Y-%m-%d"), []
-        for what, hour, fn in (("purge", s["purge_hour"], lambda: self.purge(now)), ("backup", s["backup_hour"], lambda: self.backup(now))):
+        jobs = (("purge", s["purge_hour"], lambda: self.purge(now)),
+                ("backup", s["backup_hour"], lambda: self.backup(now)),
+                ("export", s["export_hour"], lambda: self._queue_export(now)))
+        for what, hour, fn in jobs:
             last = self.store.get_setting(f"last_{what}_day")
             if hour >= 0 and local.hour >= hour and last != today and (what != "backup" or self.supported()):
                 self.store.set_setting(f"last_{what}_day", today)  # first, so a failure is retried tomorrow, not every minute
@@ -138,6 +194,7 @@ class Maintenance:
         return {"backend": st.kind, "location": st.describe(), "schema_version": st.version(), "size_bytes": st.size_bytes(),
                 "counts": st.table_counts(), "history": st.history_stats(), "settings": self.settings(),
                 "last_purge": st.get_setting("last_purge"), "last_backup": st.get_setting("last_backup"),
+                "last_export": st.get_setting("last_export"), "exports": self.exports(),
                 "backups_supported": self.supported(), "backups": self.backups(), "buffered_samples": pending, "lost_samples": lost}
 
     # ---- config export and import
