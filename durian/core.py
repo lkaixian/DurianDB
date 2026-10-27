@@ -268,6 +268,38 @@ class Smoothness(_Latch):
         return f"scatter {sd:.3g} > {self.limit:g} over {len(self.window)} samples" if sd > self.limit else None
 
 
+class Anomaly(_Latch):
+    """Alarm when a value is further than `z_limit` standard deviations from the mean of the `window` samples before it.
+    The sample is judged against the window it left, not the one it joins: a spike inside its own window raises the
+    deviation it is measured by, which is how a lone 13 among tens looks mild. While raised, it clears only below
+    the limit minus `deadband`, so a value sitting on the edge does not chatter."""
+    kind = "ANOMALY"
+
+    def __init__(self, z_limit, window=20, level=Level.WARNING, duration=0.0, off_delay=0.0, deadband=0.5):
+        super().__init__(level, duration, off_delay)
+        self.z_limit, self.deadband, self.window = z_limit, deadband, deque(maxlen=window)
+
+    def reset(self):
+        super().reset()
+        self.window.clear()
+
+    def evaluate(self, point, value, ts):
+        prior, n = self.window, len(self.window)
+        if n < 3:  # fewer than three samples have no spread worth measuring
+            self.window.append(value)
+            return None
+        mean = sum(prior) / n
+        sd = math.sqrt(sum((x - mean) ** 2 for x in prior) / n)
+        self.window.append(value)  # after the verdict, so this sample cannot widen the spread that judges it
+        if sd == 0:  # a flat window has no scale to divide by
+            return None
+        z = abs(value - mean) / sd
+        edge = max(self.z_limit - self.deadband, 0.0) if self.event else self.z_limit
+        if z <= edge:
+            return None
+        return f"{value:g} is {z:.2f} sd from mean {mean:.3g} over {n} samples"
+
+
 class Cusum(_Latch):
     """Cumulative-sum drift alarm: adds up how far the value sits from `target` beyond a `slack` allowance, and alarms when that total passes `threshold`.
     It catches a small steady offset that no single limit would, and the total drains back once the value returns to target."""
@@ -290,8 +322,8 @@ class Cusum(_Latch):
             return f"drifting below {self.target:g} (sum {self.lo:.3g} > {self.threshold:g})"
 
 
-DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange, Smoothness, Cusum, TextDetector)}
-LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE", "SMOOTHNESS", "CUSUM", "TEXT")  # these take duration (on-delay) and off_delay
+DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange, Smoothness, Cusum, TextDetector, Anomaly)}
+LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE", "SMOOTHNESS", "CUSUM", "TEXT", "ANOMALY")  # these take duration (on-delay) and off_delay
 
 
 def make_detector(cfg: dict) -> Detector:
@@ -343,6 +375,11 @@ def make_detector(cfg: dict) -> Detector:
         return Smoothness(num("limit", lo=0), n, level, **late)
     if kind == "CUSUM":
         return Cusum(num("target"), num("threshold", lo=0), float(num("slack", 0, 0)), level, **late)
+    if kind == "ANOMALY":
+        n = cfg.get("window", 20)
+        if not isinstance(n, int) or isinstance(n, bool) or not 3 <= n <= 1000:
+            raise ValueError("window must be a whole number from 3 to 1000")
+        return Anomaly(num("z_limit", lo=0.1), n, level, deadband=float(num("deadband", 0.5, 0)), **late)
     if kind == "CHANGE":
         return ChangeDetector(float(num("tolerance", 0, 0)), level)
     return NoChange(num("seconds", lo=1), float(num("tolerance", 0, 0)), level)
