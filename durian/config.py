@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector
 from . import calc, http_source, sql_source, units, windows
+from .dnp3_source import POINT_GROUPS, Dnp3Source, parse_address
 from .http_source import HttpJsonSource
 from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
@@ -21,7 +22,7 @@ from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
-SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "http_json", "sql", "http_in", "calc")
+SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "dnp3", "http_json", "sql", "http_in", "calc")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -135,6 +136,36 @@ def _snmp_point_errors(b, add):
         encode_oid(oid)
     except ValueError:
         add(f"snmp.{key}", "must be a numeric OID such as 1.3.6.1.2.1.1.5.0")
+
+
+def _dnp3_source_errors(b, add):
+    d = b.get("dnp3")
+    if not isinstance(d, dict):
+        add("dnp3", "a DNP3 source needs a dnp3 section with address and outstation")
+    else:
+        try:
+            parse_address(d.get("address"))
+        except ValueError:
+            add("dnp3.address", "must be host:port, such as 10.0.0.5:20000")
+        if not _int(d.get("outstation"), 0, 65535):
+            add("dnp3.outstation", "must be the outstation's link address, 0 to 65535")
+    for k, lo, hi in (("timeout", 1, 30), ("period", 0.2, 86400), ("backoff_max", 1, 86400)):
+        if k in b and not (_num(b[k]) and lo <= b[k] <= hi):
+            add(k, f"must be a number from {lo} to {hi}")
+    if "backoff_scale" in b and not (_num(b["backoff_scale"]) and 1 < b["backoff_scale"] <= 10):
+        add("backoff_scale", "must be greater than 1 and at most 10")
+
+
+def _dnp3_point_errors(b, add):
+    m = b.get("dnp3")
+    if not isinstance(m, dict):
+        add("dnp3", "a point on a DNP3 source needs a dnp3 section naming its group and index")
+        return
+    g = m.get("group")
+    if not (isinstance(g, int) and not isinstance(g, bool) and g in POINT_GROUPS):
+        add("dnp3.group", "must be one of 1, 10, 20, 30 or 40")
+    if not _int(m.get("index"), 0, 65535):
+        add("dnp3.index", "must be an object index from 0 to 65535")
 
 
 class Virtual(Source):
@@ -281,6 +312,8 @@ def validate_source(name, b):
         _modbus_source_errors(b, add)
     elif b.get("type") == "snmp":
         _snmp_source_errors(b, add)
+    elif b.get("type") == "dnp3":
+        _dnp3_source_errors(b, add)
     elif b.get("type") == "http_json":
         http_source.validate_source(b, add)
     elif b.get("type") == "sql":
@@ -401,6 +434,8 @@ def validate_point(name, b, store):
         _modbus_point_errors(b, add)
     elif src and src.get("type") == "snmp":
         _snmp_point_errors(b, add)
+    elif src and src.get("type") == "dnp3":
+        _dnp3_point_errors(b, add)
     elif src and src.get("type") == "http_json":
         http_source.validate_point(b, add)
     elif src and src.get("type") == "sql":
@@ -409,7 +444,7 @@ def validate_point(name, b, store):
     if src and src.get("type") in ("http_json", "sql") and not (
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
-    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp"):
+    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp", "dnp3"):
         add("settable", "this source type is read-only")
     if src and src.get("type") == "calc":
         try:
@@ -453,7 +488,7 @@ def make_point(name, b, source_name):
               "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "snmp", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
+    for k in ("modbus", "snmp", "dnp3", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason"):  # zero is a real value here
@@ -506,6 +541,11 @@ def build_engine(store):
                     src.add(make_point(n, p, s["name"]))
             elif s["type"] == "snmp":
                 src = SnmpSource(s["name"], s)
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
+                src.start()
+            elif s["type"] == "dnp3":
+                src = Dnp3Source(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 src.start()
