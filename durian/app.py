@@ -99,6 +99,10 @@ class App:
         self.state_warned = False  # the one sentence that the shared tick lease and escalation guard are unavailable
         self.confirms = {}  # fallback only: confirm tokens live in the store, so any process can spend one exactly once
         self.confirms_lost = 0  # live tokens evicted past CONFIRM_MAX; the caller is asked for a new one
+        # ponytail: last-write times are per server process, so with N server processes over one database the
+        # window is enforced at most N times over, and a restart forgets it (one immediate write is possible).
+        # Store-backed state (the tick-lease precedent) is the upgrade if either ever matters.
+        self.last_write = {}  # point name -> time of the last accepted write, for min_write_gap
         self.windows = []  # maintenance windows, see windows.py
         self.holds = {}  # point name -> {kind: shelved|oos, user, reason, created, until}; kept in the objects table so they survive restarts
         self.pending, self.lost, self.unstored, self.sys_event = [], 0, [], None  # history and events waiting for a database that failed
@@ -310,8 +314,13 @@ class App:
     def perform_write(self, p, s, v, who, note=""):
         """The one place a value is written to a source: used by operators and by set-point handlers alike."""
         try:
-            with self.engine_lock:
+            with self.engine_lock:  # the gap is re-checked and consumed here, under the lock, so two writers cannot both pass
+                gap, last = p.meta.get("min_write_gap"), self.last_write.get(p.name)
+                if v is not None and gap and last is not None and time.time() - last < gap:
+                    raise ApiError(422, f"{p.name} may be written at most once every {gap} seconds")
                 s.write(p.name, v)
+                if v is not None and gap:  # record as soon as the device write lands, before persistence that may fail
+                    self.last_write[p.name] = time.time()
         except RuntimeError as ex:
             raise ApiError(502, sentence(ex))
         if hasattr(s, "override"):  # keep held values across engine rebuilds and restarts
@@ -341,7 +350,12 @@ class App:
         return v if v is not None else p.meta.get("eu_low" if which == "min" else "eu_high")
 
     def check_setpoint(self, p, v):
-        if v is None or isinstance(v, str):  # releasing a point is always allowed; a text value has no range
+        if v is None:  # releasing a point is always allowed
+            return
+        gap, last = p.meta.get("min_write_gap"), self.last_write.get(p.name)
+        if gap and last is not None and time.time() - last < gap:
+            raise ApiError(422, f"{p.name} may be written at most once every {gap} seconds")
+        if isinstance(v, str):  # a text value has no range, but it is still rate-limited
             return
         lo, hi, step = self.set_limit(p, "min"), self.set_limit(p, "max"), p.meta.get("max_step")
         if (lo is not None and v < lo) or (hi is not None and v > hi):
@@ -748,7 +762,11 @@ class App:
                 raise ApiError(400, "value must be a number, or null to release the point")
             if not hasattr(s, "write"):
                 raise ApiError(400, "this source cannot write")
-            self.check_setpoint(p, v)
+            try:
+                self.check_setpoint(p, v)
+            except ApiError as e:  # an operator's refused write is audited, like a handler's
+                self.store.audit(ident["name"], "set.refused", f"{p.name}: {sentence(e)}")
+                raise
             reason = body.get("reason")
             if reason is not None and not (isinstance(reason, str) and len(reason) <= 200 and reason.isprintable()):
                 raise ApiError(400, "reason must be printable text of up to 200 characters")
@@ -759,7 +777,11 @@ class App:
                 return 202, {"confirm": self.confirm_token(ident, p.name, v), "expires_in": CONFIRM_SECONDS,
                              "message": f"Repeat the request with this confirm token to set {p.name} to {v}"}
             scope = ident.get("scope")
-            self.perform_write(p, s, v, ident["name"], (f" via token {ident['token']}" if scope else "") + (f" reason: {reason}" if reason else ""))
+            try:
+                self.perform_write(p, s, v, ident["name"], (f" via token {ident['token']}" if scope else "") + (f" reason: {reason}" if reason else ""))
+            except ApiError as e:  # the gap re-check inside perform_write lost a concurrent race: audited like any refusal
+                self.store.audit(ident["name"], "set.refused", f"{p.name}: {sentence(e)}")
+                raise
             return 200, {"ok": True}
 
     def _api_notes(self, method, a, b, c, query, body, ident, need):
@@ -1531,6 +1553,7 @@ class App:
             if kind == "point":  # runtime and stored state keyed by the point name must not outlive the point
                 self.store.delete("alarmhold", name)
                 self.store.delete("override", name)
+                self.last_write.pop(name, None)
                 for n in self.store.list("note"):
                     if str(n.get("name", "")).startswith(name + "/"):
                         self.store.delete("note", n["name"])

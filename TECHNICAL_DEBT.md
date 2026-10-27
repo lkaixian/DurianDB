@@ -8,7 +8,12 @@ makes a claim untrue. **low** = cosmetic or documentation.
 
 ## 1. Correctness and silent failure
 
-No open entries. C12, C13 and C14 were closed on 2026-10-27; what they cost is now covered by
+| # | Defect | Where | Severity |
+|---|---|---|---|
+| C15 | `validate_point` has no known-key check and the config PUT stores the raw body, so a typo'd or junk setting on a point is silently accepted and persisted — a mistyped `max_step` or `set_min` drops the safety limit without a word. Related (C16): the same route's value sentinel leaks. Found 2026-10-28 by the F4 RED probe; the `min_write_gap` field itself is validated since the F4 wave, but a typo'd known key (`max_stepp`) is still stored and silently ignored, and unknown keys on any kind persist. Fix shape: one known-key guard at the shared PUT path with per-kind key lists. | `durian/config.py:412`, `durian/app.py:1508` | high |
+| C16 | A text set-point request whose body omits `value` writes the literal string `"missing"`: the route's default sentinel passes the printable-text check, so the point takes a nonsense value that looks like a real one. Found by the F4 security review as a pre-existing sibling of that path (static trace; runtime confirmation owed with the fix's RED test). | `durian/app.py:751-753` | medium |
+
+C12, C13 and C14 were closed on 2026-10-27; what they cost is now covered by
 `test_calc_health.py` and `test_auth_state.py`.
 
 ## 1a. Fixed on 2026-10-27, kept for the record
