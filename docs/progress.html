@@ -260,8 +260,8 @@
   </header>
 
   <div class="figures">
-    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">5,153</div><div class="n">lines, 25 modules</div></div>
-    <div class="fig"><div class="k">Tests</div><div class="v">2,877</div><div class="n">lines, 31 suites, all passing</div></div>
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">5,338</div><div class="n">lines, 25 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">3,440</div><div class="n">lines, 40 suites, all passing</div></div>
     <div class="fig"><div class="k">Commits</div><div class="v">99</div><div class="n">across 9 calendar days</div></div>
     <div class="fig"><div class="k">Open debt</div><div class="v">48</div><div class="n">entries, 14 high severity</div></div>
   </div>
@@ -271,7 +271,7 @@
     <div class="charts">
       <div class="card">
         <h3>Code in the tree</h3>
-        <div class="summary">Server 5,153 lines · tests 2,877 lines</div>
+        <div class="summary">Server 5,338 lines · tests 3,440 lines</div>
         <div class="legend">
           <span><i class="swatch"></i>server</span>
           <span><i class="swatch dashed"></i>tests</span>
@@ -280,7 +280,7 @@
       </div>
       <div class="card">
         <h3>Test suites</h3>
-        <div class="summary">31 suites · one process each, <code>run_all.py</code></div>
+        <div class="summary">40 suites · one process each, <code>run_all.py</code></div>
         <div class="chart-wrap" id="wrap-suites"></div>
       </div>
     </div>
@@ -318,7 +318,7 @@
           <tr><td class="name">Data in</td><td class="name">Virtual, MQTT over TLS, Modbus TCP/RTU/ASCII, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens</td><td class="name"><code>test_modbus*</code>, <code>test_pull_sources</code>, <code>test_ingest</code></td></tr>
           <tr><td class="name">Data model</td><td class="name">Numeric and text points, engineering range, units, decimals, binary and multistate labels, folders, tags, descriptions</td><td class="name"><code>test_app</code>, <code>test_text_points</code></td></tr>
           <tr><td class="name">Quality and time</td><td class="name">GOOD / UNCERTAIN / BAD per value, source timestamps, future-clock and stale rules, out-of-order drop</td><td class="name"><code>test_quality</code></td></tr>
-          <tr><td class="name">Alarms</td><td class="name">11 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all</td><td class="name"><code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
+          <tr><td class="name">Alarms</td><td class="name">12 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all</td><td class="name"><code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
           <tr><td class="name">Control</td><td class="name">Permissioned writes, engineering limits, max step, two-step confirm, reason required, audit with old and new value</td><td class="name"><code>test_safe_control</code></td></tr>
           <tr><td class="name">Outbound</td><td class="name">Webhook, email, Slack, escalation, set-point handler, scheduled reports, MQTT publisher, HTTP sender</td><td class="name"><code>test_handlers</code>, <code>test_http_sender</code></td></tr>
           <tr><td class="name">HMI</td><td class="name">Overview, point page with trend and logbook, history comparison, dashboards with 9 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>; 11 browser scripts</td></tr>
@@ -411,9 +411,9 @@
   var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"];
   var COMMITS = [34, 94, 94, 94, 94, 94, 94, 94, 99];
   var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 25];
-  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 31];
-  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 5153];
-  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 2877];
+  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 40];
+  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 5338];
+  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 3440];
 
   var NS = "http://www.w3.org/2000/svg";
   var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
@@ -518,12 +518,12 @@
   }
 
   build("wrap-code", [
-    { name: "Server lines", short: "5,153", values: SERVER },
-    { name: "Test lines", short: "2,877", values: TESTS, dashed: true }
+    { name: "Server lines", short: "5,338", values: SERVER },
+    { name: "Test lines", short: "3,440", values: TESTS, dashed: true }
   ], { label: "Lines of code in durian and tests, 19 to 27 October" });
 
   build("wrap-suites", [
-    { name: "Test suites", short: "31", values: SUITES }
+    { name: "Test suites", short: "40", values: SUITES }
   ], { label: "Number of test suites, 19 to 27 October" });
 
   // daily table

@@ -1,8 +1,8 @@
 # 12 Graceful failure: every way DurianDB can fail, and what the operator sees
 
-Written 2026-10-27, after an audit of the current code (`durian/`, `web/`). It is a plan as much as a record:
-section 1 is what exists, section 2 is what is missing and in what order to close it, section 3 is the rule
-that decides where a new failure belongs.
+Written 2026-10-27, after an audit of the current code (`durian/`, `web/`). Section 1 is what exists,
+section 2 is the audit's eleven gaps and how each was closed, section 3 is the rule that decides where a new
+failure belongs, and section 4 is the wording it should use.
 
 The principle: **a failure must reach a human, name the thing that failed, and not be worse than the failure.**
 Silently degraded is the worst state — the console looks healthy while values are stale.
@@ -38,37 +38,29 @@ Silently degraded is the worst state — the console looks healthy while values 
 | A publisher cannot start | `Outputs.__init__` | **nothing** — `log.warning` only |
 | Retention or backup fails | `maintenance.tick` | an audit row; the purge or backup HTTP call returns 500 |
 
-## 2. Gaps, worst first
+## 2. Gaps found in the audit, and how they were closed
 
-Ordered by what would actually hurt an operator. Each is a real defect found in the audit, not a wish.
+All eleven were real defects, ordered here by what would have hurt an operator most. Each is now closed and
+each has a test that fails if it reopens. Section 1.2 above describes the table as it reads today.
 
-1. **A failing tick loop is invisible.** `server.py:136` logs and continues. If `app.tick()` keeps raising,
-   history stops, alarms stop, and source-down detection stops, while the console still renders the last
-   values. *Fix:* count consecutive failures in the engine and raise a `(system)` URGENT alarm at the third,
-   naming the exception; clear it on a good tick. The console shows it in the header count like any other.
-2. **Delivery failures are invisible.** Webhook, email, Slack and set-point handlers can fail forever and no
-   page says so. *Fix:* `Outputs.failed` and a per-handler last-error/last-success surface on the Handlers
-   page, plus a `(system)` alarm when a handler has failed for five minutes.
-3. **Publishers that never start are invisible.** A bad credentials file means values are silently not
-   published. *Fix:* hold the publisher as a faulted stub with its reason, show it in the Publishers list, and
-   alarm like (2).
-4. **The event write path can grow without bound.** Failed alarm inserts are retried with no cap (unlike
-   history's `PENDING_MAX`), so a database outage during an alarm storm grows memory until the process dies.
-   *Fix:* the same cap and the same `(system)` alarm as history.
-5. **The source-down alarm is less informative than the source table.** For sources that manage their own
-   errors it says "not connected" and drops the real reason. *Fix:* put `s.error` in the alarm detail.
-6. **Config import has no rollback.** Replace mode writes and deletes as it goes; a failure halfway leaves half
-   a configuration. *Fix:* validate everything first (already done), then apply inside one transaction.
-7. **A saved config whose reload fails returns 500 but stays saved.** The operator cannot tell whether it took.
-   *Fix:* reload first, persist second, and say which of the two failed.
-8. **A non-object JSON body becomes 500.** `[]` reaches `.get` and raises `AttributeError`. *Fix:* one guard in
-   `App.handle` turning a non-dict, non-str body into 400 `body must be a JSON object`.
-9. **A corrupt schema version replays every migration.** `Store.version()` returns 0 on any error. *Fix:*
-   distinguish "no table" from "unreadable" and refuse to start on the second.
-10. **NaN can enter from Modbus.** `decode` output is never checked for finiteness, unlike the HTTP and SQL
-    paths. *Fix:* the same check, and a rejection message naming the register.
-11. **A slow starter-up crashes with a traceback.** `bootstrap` can raise `AuthError` before the server is
-    listening. *Fix:* catch it in `main()` and exit with the reason, as the TLS settings already do.
+| # | Gap | Closed by | Test |
+|---|---|---|---|
+| 1 | A failing tick loop was invisible: `app.tick()` raised, the loop logged and continued, and the console kept showing the last values | three consecutive failures raise one `(system)` URGENT alarm naming the exception; a good tick clears it and starts the count again | `test_tick_health.py` |
+| 2 | Delivery failures were invisible: a webhook, email or Slack route could be dead for weeks | per-target failed / last-error / last-ok, `GET /api/outputs`, and a Delivery column on the Handlers and Publishers pages | `test_output_health.py` |
+| 3 | Publishers that never start were invisible | a publisher with unreadable credentials is held as a fault with its reason, on the same surface | `test_output_health.py` |
+| 4 | The event write path could grow without bound during an alarm storm | capped at `EVENT_PENDING_MAX`, with a count, and one `(system)` alarm saying what the outage cost once writes work again | `test_event_buffer.py` |
+| 5 | The source-down alarm said "not connected" and dropped the reason | the MQTT connect and disconnect callbacks carry the broker and reason code, and `manages_error` stops the engine clearing it | `test_mqtt_health.py` |
+| 6 | Config import had no rollback | the whole apply runs inside `Store.atomic()` | `test_config_rollback.py` |
+| 7 | A saved config whose reload failed stayed saved | the stored body is restored and the caller gets a 409 saying the previous version is still in place | `test_config_rollback.py` |
+| 8 | A non-object JSON body became a 500 | one guard in `App.handle`; sign-in and reset get the same treatment | `test_envelope.py` |
+| 9 | A corrupt schema version replayed every migration | "no table" and "unreadable table" are different answers, and the second stops the server | `test_envelope.py` |
+| 10 | NaN or infinity could enter history from Modbus | a non-finite reading, including one produced by scaling, is a rejected point | `test_modbus_finite.py` |
+| 11 | A weak first-run password crashed with a traceback | `main()` exits with a sentence | `test_tls.py` |
+
+One architecture gap behind the same principle was closed too: the engine and the database no longer share a
+lock, so a slow tick cannot stall every request (`test_engine_lock.py`).
+
+What is still open is tracked in `TECHNICAL_DEBT.md`, not here.
 
 ## 3. The rule for a new failure
 

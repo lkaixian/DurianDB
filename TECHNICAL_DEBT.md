@@ -10,20 +10,17 @@ makes a claim untrue. **low** = cosmetic or documentation.
 
 | # | Debt | Where | Severity | Cost |
 |---|---|---|---|---|
-| C1 | A failing tick loop is logged and the loop continues; the console keeps showing the last values | `durian/server.py` `run_ticks` | high | The whole data plane can stop with no visible sign. Fix is planned in `docs/12-error-handling.md` §2.1 |
-| C2 | Handler and publisher failures are a counter nothing displays | `durian/outputs.py` (`failed`), no API field | high | A webhook, email or Slack route can be dead for weeks |
-| C3 | A publisher whose credentials fail to load is dropped with a log line | `durian/outputs.py` `__init__` | high | Values silently stop being published |
-| C4 | Failed event inserts are retried with no cap (history has `PENDING_MAX`) | `durian/app.py` event path | high | Unbounded memory growth during a database outage |
-| C5 | An `AuthError` from `bootstrap` reaches the top of `main()` as a traceback | `durian/server.py` `main` | medium | An operator sees a stack trace instead of a sentence |
-| C6 | `Store.version()` returns 0 on any exception | `durian/store.py` | medium | A corrupt `schema_version` makes `migrate()` replay every migration |
-| C7 | A non-object JSON body reaches `.get` and becomes a 500 | `durian/app.py` `handle` | medium | The caller's mistake is reported as a server fault |
-| C8 | Config import writes and deletes without a transaction | `durian/maintenance.py` replace mode | high | A failure halfway leaves half a configuration |
-| C9 | Config is saved before the reload that activates it | `durian/app.py` config path | medium | A reload failure returns 500 but the change is stored |
-| C10 | Modbus `decode` output is never checked for finiteness | `durian/modbus_source.py` | medium | NaN/inf reaches history and comparisons, which are then always false |
-| C11 | The source-down alarm says "not connected" and drops the real reason | `durian/core.py` `_watch` | medium | A down alarm is less useful than the source table |
 | C12 | A broken calc expression sets points BAD but raises no source-down alarm | `durian/calc.py` | medium | The fault is only a string in the source list |
 | C13 | `Auth.failures` overflow clears the whole dict | `durian/auth.py` | low | Drops live lockout state along with made-up names |
 | C14 | `Auth.sessions` keeps expired entries until they are next looked up | `durian/auth.py` | low | Memory grows with distinct expired tokens until restart |
+
+## 1a. Fixed on 2026-10-27, kept for the record
+
+C1–C11 and A6 were closed with a test each, so their entries were removed above. The tick loop, handler and
+publisher delivery, the event buffer cap, config-import rollback, config-save rollback, the request envelope,
+the schema version, Modbus finiteness, the MQTT source-down reason and the engine lock are covered by
+`test_tick_health.py`, `test_output_health.py`, `test_event_buffer.py`, `test_config_rollback.py`,
+`test_envelope.py`, `test_modbus_finite.py`, `test_mqtt_health.py` and `test_engine_lock.py`.
 
 ## 2. Documented claims that are not true
 
@@ -47,7 +44,6 @@ makes a claim untrue. **low** = cosmetic or documentation.
 | A3 | `AuthError` → `ApiError` conversion repeated in 4 places, then to HTTP in a 5th | `durian/app.py`, `durian/server.py` | low | A new auth exception must be handled in each |
 | A4 | Two permission idioms: `can()` and inline `"superadmin" in ident["roles"]` (7 sites) | `durian/auth.py`, `durian/app.py` | medium | Role logic drifts between routes |
 | A5 | `if not isinstance(body, dict)` guard repeated 6 times (and missed in one place, C7) | `durian/app.py` | low | The one that was missed proved the pattern is fragile |
-| A6 | One `RLock` held across the whole tick and `reload()`, shared with request-path writes | `durian/store.py`, `durian/app.py` | high | A slow tick serialises API requests; the console stalls with the engine |
 | A7 | Backup runs synchronously on the request thread | `durian/app.py` → `durian/maintenance.py` | medium | An HTTP request can block for the whole copy |
 | A8 | `POST /api/test/source` opens live connections on the request thread | `durian/testsource.py` | low | A hanging device hangs a console request |
 | A9 | All state is in-process: sessions, lockout counters, reset codes, TOTP replay guard, confirm tokens, escalation set | `durian/auth.py`, `durian/app.py` | high | Two server processes would double-tick, double-purge and double-escalate, and accept a replayed TOTP code. This is why "no HA" is in the known limits |

@@ -13,13 +13,13 @@ python -m durian.server     # console on http://localhost:8080
 
 | Measure | Value |
 |---|---|
-| Commits on `main` | 96, at the time of writing |
-| Python modules in `durian/` | 25, 5,301 lines |
-| Test suites in `tests/` | 39, 3,369 lines, all passing |
-| Console | 2,036 lines of JS/CSS/HTML in `web/` |
+| Commits on `main` | 99, at the time of writing |
+| Python modules in `durian/` | 25, 5,338 lines |
+| Test suites in `tests/` | 40, 3,440 lines, all passing |
+| Console | 2,037 lines of JS/CSS/HTML in `web/` |
 | Data source types | 6: virtual, MQTT over TLS, Modbus (TCP/RTU/ASCII), HTTP JSON, SQL, HTTP ingest |
-| Alarm detectors | 11, with on/off delay, deadband and ISA-18.2 states |
-| Open debt entries | 48 (see `TECHNICAL_DEBT.md`) |
+| Alarm detectors | 12, with on/off delay, deadband and ISA-18.2 states |
+| Open debt entries | 36 (see `TECHNICAL_DEBT.md`) |
 
 Built and covered by tests: authentication (scrypt, sessions, roles, lockout, TOTP, reset, disable, scoped
 machine tokens), safe control (limits, step, two-step confirm, audit), alarms and shelving, maintenance
@@ -64,9 +64,6 @@ Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these i
 | D1–D8: documented claims that are not true | README and research notes drift from the tree | small each |
 | E5: CI tests 3.12/3.13, local is 3.14 | the version most used is untested | small |
 | A1/A10: one 1,000-line `App` and one 700-line `app.js` | every new route widens the same function | medium |
-
-Also: `PROGRESS.md`, `docs/progress.html` and `TECHNICAL_DEBT.md` still quote 31 suites and 48 open entries
-after this work; they need the recount.
 
 ## 3. What we plan to do
 
