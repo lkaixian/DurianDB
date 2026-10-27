@@ -396,6 +396,57 @@ class Store:
     def purge_confirms(self, now):
         return self.run("delete from confirm_tokens where expires <= ?", (now,)).rowcount
 
+    # ---- engine scheduling shared by server processes: one tick lease and one row per escalated alarm. These
+    # decide who acts, not what happened, so a second process over the same database neither double-ticks nor
+    # double-escalates.
+    LEASE_ID = 1
+
+    def take_lease(self, owner, ttl, now=None):
+        """Claim or renew the one tick lease atomically. True only for the caller that holds it after this call,
+        so two server processes over one database never both tick."""
+        now = time.time() if now is None else now
+        if self.kind == "mysql":
+            cur = self.run("insert into tick_lease(id, owner, expires) values (?,?,?) "
+                           "on duplicate key update owner=if(expires <= ? or owner = ?, values(owner), owner), "
+                           "expires=if(expires <= ? or owner = ?, values(expires), expires)",
+                           (self.LEASE_ID, owner, now + ttl, now, owner, now, owner))
+        else:
+            cur = self.run("insert into tick_lease(id, owner, expires) values (?,?,?) "
+                           "on conflict(id) do update set owner=excluded.owner, expires=excluded.expires "
+                           "where tick_lease.expires <= ? or tick_lease.owner = ?",
+                           (self.LEASE_ID, owner, now + ttl, now, owner))
+        if cur.rowcount > 0:
+            return True
+        # MySQL counts only the rows it changed: a renewal that happens to write the same expiry still belongs
+        # to its owner, so confirm with a read before refusing it.
+        r = self.q("select owner from tick_lease where id=?", (self.LEASE_ID,))
+        return bool(r and r[0]["owner"] == owner)
+
+    def lease(self):
+        """The tick lease row (owner, expires), or None when no process holds it."""
+        r = self.q("select owner, expires from tick_lease where id=?", (self.LEASE_ID,))
+        return r[0] if r else None
+
+    def release_lease(self, owner):
+        """Give the lease back on a clean shutdown, so another process can take over at once. Only its owner may."""
+        return self.run("delete from tick_lease where id=? and owner=?", (self.LEASE_ID, owner)).rowcount
+
+    def claim_escalation(self, handler, event_id):
+        """Record that (handler, alarm) is being escalated, atomically. True only for the one call that got the
+        row, so two server processes never mail the same escalation twice."""
+        if self.kind == "mysql":
+            cur = self.run("insert into escalations(handler, event_id) values (?,?) "
+                           "on duplicate key update event_id=event_id", (handler, event_id))
+        else:
+            cur = self.run("insert into escalations(handler, event_id) values (?,?) "
+                           "on conflict(handler, event_id) do nothing", (handler, event_id))
+        return cur.rowcount > 0
+
+    def purge_escalations(self):
+        """Forget escalations of alarms that are no longer open: a closed alarm needs no memory of being escalated."""
+        return self.run("delete from escalations where event_id not in "
+                        "(select id from events where cleared_ts is null)").rowcount
+
     # ---- machine tokens
     def add_token(self, name, token_hash, owner, scope, source, expires):
         self.run("insert into api_tokens(name, token_hash, owner, scope, source, created, expires) values (?,?,?,?,?,?,?)",
