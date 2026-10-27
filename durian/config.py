@@ -155,6 +155,10 @@ def _dnp3_source_errors(b, add):
     for k, lo, hi in (("timeout", 1, 30), ("period", 0.2, 86400), ("backoff_max", 1, 86400)):
         if k in b and not (_num(b[k]) and lo <= b[k] <= hi):
             add(k, f"must be a number from {lo} to {hi}")
+    if "backoff_scale" in b and not (_num(b["backoff_scale"]) and 1 < b["backoff_scale"] <= 10):
+        add("backoff_scale", "must be greater than 1 and at most 10")
+
+
 def _bacnet_source_errors(b, add):
     m = b.get("bacnet")
     if not isinstance(m, dict):
@@ -186,6 +190,8 @@ def _dnp3_point_errors(b, add):
         add("dnp3.group", "must be one of 1, 10, 20, 30 or 40")
     if not _int(m.get("index"), 0, 65535):
         add("dnp3.index", "must be an object index from 0 to 65535")
+
+
 def _bacnet_point_errors(b, add):
     m = b.get("bacnet")
     if not isinstance(m, dict):
@@ -582,6 +588,9 @@ def build_engine(store):
                 src.start()
             elif s["type"] == "dnp3":
                 src = Dnp3Source(s["name"], s)
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
+                src.start()
             elif s["type"] == "bacnet":
                 src = BacnetSource(s["name"], s)
                 for n, p in mine.items():
