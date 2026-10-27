@@ -4,6 +4,7 @@
 // DURIAN_ADMIN_PASSWORD set and a throwaway DURIAN_DB, then: node tools/browser_forms.mjs <outdir>
 // Env: DURIAN_BASE (default http://127.0.0.1:8766), DURIAN_ADMIN_PASSWORD. Expect no problems.
 import fs from "node:fs";
+import path from "node:path";
 const out = process.argv[2]; fs.mkdirSync(out, {recursive: true});
 const targets = await (await fetch("http://127.0.0.1:9222/json/list")).json();
 const ws = new WebSocket(targets.find(t => t.type === "page").webSocketDebuggerUrl);
@@ -119,7 +120,10 @@ console.log("points by watch list:", resolved);
 if (JSON.stringify(wlCfg?.query) !== JSON.stringify({folder: "plant/boiler"})) { console.log("FAIL: the saved watch list did not keep its query"); process.exit(1); }
 if (!String(resolved).includes("zone-fan") || String(resolved).includes("zone-pump")) { console.log("FAIL: the watch list query did not resolve the folder subtree at read time"); process.exit(1); }
 // 11. a Sparkplug B publisher: the group/node/device ids are on the form, saved, and read back (durian/outputs.py validate_publisher)
-const seeded = await putCfg("publisher/spark-line", {type: "sparkplug", enabled: true, creds: "lab/mqtt/creds.json", group: "Plant", node: "edge-1", points: ["*"]});
+// Its own throwaway creds file: lab/ is a gitignored vendor directory CI never clones. Disabled, so the check needs no broker.
+const spCreds = path.resolve(out, "sparkplug-creds.json");
+fs.writeFileSync(spCreds, JSON.stringify({host: "127.0.0.1", port: 1883, ca: "unused", user: "u", password: "p"}));
+const seeded = await putCfg("publisher/spark-line", {type: "sparkplug", enabled: false, creds: spCreds, group: "Plant", node: "edge-1", points: ["*"]});
 console.log("sparkplug seed:", seeded);
 if (seeded < 200 || seeded >= 300) { console.log("FAIL: the server would not take a Sparkplug publisher to open in the form"); process.exit(1); }
 await go("#config/publisher/spark-line");
