@@ -17,8 +17,8 @@ from collections import Counter
 from pathlib import Path
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
-from . import notes, pointcsv, windows
-from .config import (build_engine, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
+from . import notes, pointcsv, units, windows
+from .config import (build_engine, resolve, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
 from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, forecast as forecast_series
@@ -48,13 +48,13 @@ TICK_ALARM_AFTER = 3  # consecutive failed polls before a (system) alarm is rais
 
 
 
-def watch_match(w, name, p):
+def watch_match(w, name, tags, description=""):
     """Does a watch list's rule (tags, and/or a name pattern and description text) select this point? All the rule's parts must hold."""
     if not (w.get("tags") or w.get("name_like") or w.get("text_like")):
         return False
-    return (all(p.tags.get(k) == v for k, v in w.get("tags", {}).items())
+    return (all(tags.get(k) == v for k, v in w.get("tags", {}).items())
             and (not w.get("name_like") or fnmatch.fnmatchcase(name.lower(), w["name_like"].lower()))
-            and (not w.get("text_like") or w["text_like"].lower() in p.meta.get("description", "").lower()))
+            and (not w.get("text_like") or w["text_like"].lower() in description.lower()))
 
 
 def _diff(old, new):
@@ -98,6 +98,7 @@ class App:
             self.outputs = Outputs(self.store, self.scope_of, self.handler_write)
             self.engine.publishers.append(self.outputs.on_value)
             self.holds = {h["name"]: h for h in self.store.list("alarmhold")}
+            self.folder_defaults = {f["name"]: f for f in self.store.list("folder")}  # folder tags and unit, if any are configured
             self.load_windows()
             for name, (p, _) in self.points().items():
                 p.in_service = self.holds.get(name, {}).get("kind") != "oos"
@@ -209,7 +210,7 @@ class App:
 
     def scope_of(self, name):
         p, s = self.points().get(name, (None, None))
-        return (p.tags if p else {}), (s.name if s else None)
+        return (self.resolve_point(p, s)[0] if p else {}), (s.name if s else None)  # inherited tags count for handlers too
 
     @staticmethod
     def set_limit(p, which):
@@ -249,7 +250,7 @@ class App:
                     hit = windows.covers(m, point, source=point[len(SOURCE):])
                 else:
                     p, s = pts.get(point, (None, None))
-                    hit = windows.covers(m, point, p.tags if p else None, s.name if s else None)
+                    hit = windows.covers(m, point, self.resolve_point(p, s)[0] if p else None, s.name if s else None)
                 if hit:
                     return m
         return None
@@ -311,11 +312,28 @@ class App:
     def points(self):
         return {p.name: (p, s) for s in self.engine.sources for p in s.points.values()}
 
+    def resolve_point(self, p, s):
+        """Resolved tags, unit, display unit and display value for one point. Every list, page, report and tag filter
+        reads this one place, so inherited values cannot drift between them. A display value is offered only for a
+        good numeric reading: a stale or BAD held value must not be shown converted as if it were current."""
+        tags, unit = resolve(p.tags, p.meta.get("unit", ""), p.meta.get("folder", ""), s.meta, getattr(self, "folder_defaults", None))
+        display = p.meta.get("display_unit", "")
+        display = display if display and units.compatible(unit, display) else ""
+        value = None
+        if display and not p.text and p.last is not None and p.quality == Quality.GOOD and not isinstance(p.last, bool):
+            try:
+                value = units.convert(p.last, unit, display)
+            except (TypeError, ValueError):  # a stored value can still be text or a unit can have changed under it
+                value = None
+        return tags, unit, display, value
+
     # ---- views
     def point_view(self, p, s):
         cfg = p.meta.get("detector_cfg", [])
         limit = lambda kind: next((d["limit"] for d in cfg if d.get("kind") == kind), None)
-        return {"name": p.name, "source": s.name, "unit": p.meta.get("unit", ""), "tags": p.tags, "last": p.last,
+        tags, unit, display_unit, display_value = self.resolve_point(p, s)
+        return {"name": p.name, "source": s.name, "unit": unit, "tags": tags, "last": p.last,
+                "display_unit": display_unit, "display_value": display_value,
                 "datatype": "text" if p.text else "number", "description": p.meta.get("description", ""), "decimals": p.meta.get("decimals"),
                 "folder": p.meta.get("folder", ""), "states": p.meta.get("states"), "text": state_label(p, p.last) if p.meta.get("states") and p.last is not None else None,
                 "eu": {"low": p.meta.get("eu_low"), "high": p.meta.get("eu_high")},
@@ -416,7 +434,9 @@ class App:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:
                 raise ApiError(404, "unknown point")
-            return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "quality": Quality(p.quality).name.lower(), "unit": p.meta.get("unit", ""), "tags": p.tags, "source": s.name}
+            tags, unit, display_unit, display_value = self.resolve_point(p, s)
+            return 200, {"name": p.name, "value": p.last, "ts": p.last_ts, "quality": Quality(p.quality).name.lower(), "unit": unit,
+                         "tags": tags, "source": s.name, "display_unit": display_unit, "display_value": display_value}
         if (method, a, b, c) == ("GET", "me", None, None):
             return 200, {"name": ident["name"], "roles": sorted(ident["roles"]), "mfa": bool(ident["name"] and (self.store.user(ident["name"]) or {}).get("totp"))}
         if (method, a, b, c) == ("GET", "health", None, None):
@@ -438,7 +458,7 @@ class App:
                 raise ApiError(404, "unknown point")
             return 200, {**self.point_view(p, s), "source_type": s.meta.get("type"), "source_down": s.down_reason,
                          "detectors": p.meta.get("detector_cfg", []), "hold": self.holds.get(b),
-                         "maintenance": [{"name": m["name"], "mode": m["mode"]} for m in self.windows if windows.active(m, time.time()) and windows.covers(m, b, p.tags, s.name)]}
+                         "maintenance": [{"name": m["name"], "mode": m["mode"]} for m in self.windows if windows.active(m, time.time()) and windows.covers(m, b, self.resolve_point(p, s)[0], s.name)]}
         if a == "notes" and b and c is None and method in ("GET", "POST"):
             p0, _s = self.visible_points(ident).get(b, (None, None))
             if p0 is None:
@@ -881,10 +901,11 @@ class App:
             w = self.store.get("watchlist", wl)
             if not w or not self.watch_visible(ident, w):
                 raise ApiError(404, "unknown watch list")
-            pts = {n: ps for n, ps in pts.items() if n in w.get("points", []) or watch_match(w, n, ps[0])}
+            pts = {n: ps for n, ps in pts.items() if n in w.get("points", [])
+                   or watch_match(w, n, self.resolve_point(ps[0], ps[1])[0], ps[0].meta.get("description", ""))}
         if tag:
             k, _, v = tag.partition(":")
-            pts = {n: ps for n, ps in pts.items() if ps[0].tags.get(k) == v}
+            pts = {n: ps for n, ps in pts.items() if self.resolve_point(ps[0], ps[1])[0].get(k) == v}
         return pts
 
     REPORT_MAX_POINTS = 200
@@ -941,7 +962,7 @@ class App:
         for n in sorted(pts):
             p = pts[n][0]
             r = self.store.history_summary(n, start, end)
-            items.append({"point": n, "unit": p.meta.get("unit", ""), "description": p.meta.get("description", ""), "samples": r["n"],
+            items.append({"point": n, "unit": self.resolve_point(p, pts[n][1])[1], "description": p.meta.get("description", ""), "samples": r["n"],
                           "min": r["lo"], "max": r["hi"], "avg": r["mean"], "first": r.get("first"), "last": r.get("last"),
                           "bad_samples": r["bad"], "alarms": alarms.get(n, 0)})
         doc = {"from": start, "to": end, "items": items}
