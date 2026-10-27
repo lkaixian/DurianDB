@@ -13,13 +13,13 @@ python -m durian.server     # console on http://localhost:8080
 
 | Measure | Value |
 |---|---|
-| Commits on `main` | 99, at the time of writing |
-| Python modules in `durian/` | 25, 5,338 lines |
-| Test suites in `tests/` | 40, 3,440 lines, all passing |
-| Console | 2,037 lines of JS/CSS/HTML in `web/` |
+| Commits on `main` | 127, at the time of writing |
+| Python modules in `durian/` | 32, 7,125 lines |
+| Test suites in `tests/` | 53, 5,292 lines, all passing |
+| Console | 2,106 lines of JS/CSS/HTML in `web/` |
 | Data source types | 6: virtual, MQTT over TLS, Modbus (TCP/RTU/ASCII), HTTP JSON, SQL, HTTP ingest |
 | Alarm detectors | 12, with on/off delay, deadband and ISA-18.2 states |
-| Open debt entries | 36 (see `TECHNICAL_DEBT.md`) |
+| Open debt entries | 25 (see `TECHNICAL_DEBT.md`) |
 
 Built and covered by tests: authentication (scrypt, sessions, roles, lockout, TOTP, reset, disable, scoped
 machine tokens), safe control (limits, step, two-step confirm, audit), alarms and shelving, maintenance
@@ -55,15 +55,11 @@ Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these i
 
 | Item | Why it matters | Size |
 |---|---|---|
-| C12: a broken calc expression sets points BAD but raises no source-down alarm | a calculated point silently stops updating | small |
-| A7: backup runs on the request thread | one HTTP request can block for the whole copy | small |
-| A8: `POST /api/test/source` opens live connections on the request thread | a hanging device hangs a console request | small |
-| C13/C14: lockout dict overflow clears cell state; expired sessions linger until read | small leaks and a lost lockout in a burst | small |
-| A9: all state in-process (sessions, lockout, TOTP replay guard, confirms, escalation) | blocks any second server process; this is the "no HA" limit | large |
+| A9: all state in-process (sessions, lockout, TOTP replay guard, confirm tokens, escalation, SSO state) | blocks any second server process; this is the "no HA" limit | large |
 | U1–U8: untested paths | real COM ports, a real broker, MariaDB in CI, the browser checks, the reset CLI | medium each |
-| D1–D8: documented claims that are not true | README and research notes drift from the tree | small each |
-| E5: CI tests 3.12/3.13, local is 3.14 | the version most used is untested | small |
-| A1/A10: one 1,000-line `App` and one 700-line `app.js` | every new route widens the same function | medium |
+| D3–D5, D8: documented claims that are not true, and `graphify-out/` in git | research notes drift from the tree; generated files in every diff | small each |
+| E2–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested; one Windows 3.12 job is red intermittently, cause not yet known | small |
+| A1/A10: one 1,000-line `App` and an 854-line `app.js` | every new route widens the same function | medium |
 
 ## 3. What we plan to do
 
@@ -72,12 +68,11 @@ run of commits, pushed as it lands.
 
 | Item | Next concrete step | Why in this order |
 |---|---|---|
-| AI/ML dashboard and anomaly scoring | a robust z-score and an EWMA baseline evaluated per point on each tick, exposed as a detector plus a dashboard widget; no model files, no new dependency | it produces a visible feature on data already stored, and sets up forecasting |
-| Forecasting | a linear-trend and seasonal-naive forecast over the bucketed series the history page already queries, drawn on the trend | reuses `Store.series`, no new storage |
-| Data extraction: scheduled export bundles | one tar of history CSV, events CSV and the config JSON on the existing scheduled-report timer | the pieces exist; this is packaging them |
-| Data modelling: unit conversion and tag inheritance | a point-level `unit` conversion table and tags inherited from source/folder with point-level override | small, and makes dashboards and reports less repetitive |
-| Authentication: SSO/OIDC | an authorization-code flow with PKCE, meeting the same session and role model as passwords | largest remaining auth piece; needs a lab IdP to test |
-| Extensive input: OPC UA, BACnet, DNP3, SNMP, Sparkplug B | one driver at a time behind the existing `Source` interface; Sparkplug B first (it is MQTT, already shipped) | each is a new dependency and a new simulator to test against |
+| Sparkplug B source | wire `durian/sparkplug_codec.py` into a `Source` over the existing MQTT client: birth/death, sequence gaps as sentences, one point per node/device/metric | the hard part (the codec) is done and tested; this is the driver around it |
+| Forecasting, on the chart | draw the forecast band on the point's own trend page, not only on a dashboard widget | the endpoint and widget exist; this is the same data in the place an operator looks first |
+| Data extraction: scheduled bundles | an HTTP download for bundles the scheduler wrote, beside the one built on request | packaging is done; this is retrieval |
+| Architecture: A9 shared state | move sessions, lockout and confirms into the store so two processes could share them | the largest remaining blocker to HA; needs its own design pass |
+| Extensive input: OPC UA, BACnet, DNP3, SNMP | one driver at a time behind the existing `Source` interface, each with a simulator to test against | each is a new dependency and a new simulator |
 | Hardening continues | finish the open defects in §2 as they are found, each with its test | the failure model says a new failure gets a test before it gets a fix |
 | Rust real-time core | the crate stays an experiment until the Python detector layer stops being fast enough | not wired into the server; keep it zero-dependency and tested in CI |
 

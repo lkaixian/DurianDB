@@ -8,11 +8,8 @@ makes a claim untrue. **low** = cosmetic or documentation.
 
 ## 1. Correctness and silent failure
 
-| # | Debt | Where | Severity | Cost |
-|---|---|---|---|---|
-| C12 | A broken calc expression sets points BAD but raises no source-down alarm | `durian/calc.py` | medium | The fault is only a string in the source list |
-| C13 | `Auth.failures` overflow clears the whole dict | `durian/auth.py` | low | Drops live lockout state along with made-up names |
-| C14 | `Auth.sessions` keeps expired entries until they are next looked up | `durian/auth.py` | low | Memory grows with distinct expired tokens until restart |
+No open entries. C12, C13 and C14 were closed on 2026-10-27; what they cost is now covered by
+`test_calc_health.py` and `test_auth_state.py`.
 
 ## 1a. Fixed on 2026-10-27, kept for the record
 
@@ -22,17 +19,20 @@ the schema version, Modbus finiteness, the MQTT source-down reason and the engin
 `test_tick_health.py`, `test_output_health.py`, `test_event_buffer.py`, `test_config_rollback.py`,
 `test_envelope.py`, `test_modbus_finite.py`, `test_mqtt_health.py` and `test_engine_lock.py`.
 
+Later the same day, and from the same survey: C12 (a failed calculation now raises one source-down alarm,
+`test_calc_health.py`), C13 and C14 (lockout state survives a flood of made-up names, expired sessions are
+swept, `test_auth_state.py`), A7 and A8 (backups and source tests run on a worker, `test_jobs.py`), A11
+(one ISO formatter and one CSV writer, byte-identical output, `test_iso_csv.py`), the unbounded in-memory
+buffers (`test_bounded_state.py`), and D1, D2, D6, D7 with the README rewrite. E1 was already true when it
+was written: `requirements.txt` exists.
+
 ## 2. Documented claims that are not true
 
 | # | Claim | Reality | Severity |
 |---|---|---|---|
-| D1 | README says "the whole test suite passes on both" (SQLite and MariaDB) | CI runs SQLite only; MariaDB is opt-in and unverified in CI | medium |
-| D2 | README points at "`ponytail:` comments" in the plural | Exactly one exists (`durian/mqtt_source.py:92`) | low |
 | D3 | `docs/research/11` lists SMOOTHNESS/CUSUM as "Not built" and HTTP sender/Slack publishers as "Not built" | All are built | medium |
 | D4 | `docs/research/09` lists the drag-and-drop designer as "Not built" | It is built (`web/dashboards.js`) | medium |
 | D5 | `docs/research/10` presents its gap table as current | Many rows are done since 2026-10-20 | medium |
-| D6 | README says browser checks exist | No browser script runs in CI; only `node --check` | medium |
-| D7 | Out-of-service is described as "API only for now" in one place and as a console control elsewhere | The console control exists | low |
 | D8 | `graphify-out/` (148 generated files) is tracked in git | Generated output in VCS: noise in every diff that regenerates it | low |
 
 ## 3. Architecture
@@ -44,17 +44,14 @@ the schema version, Modbus finiteness, the MQTT source-down reason and the engin
 | A3 | `AuthError` → `ApiError` conversion repeated in 4 places, then to HTTP in a 5th | `durian/app.py`, `durian/server.py` | low | A new auth exception must be handled in each |
 | A4 | Two permission idioms: `can()` and inline `"superadmin" in ident["roles"]` (7 sites) | `durian/auth.py`, `durian/app.py` | medium | Role logic drifts between routes |
 | A5 | `if not isinstance(body, dict)` guard repeated 6 times (and missed in one place, C7) | `durian/app.py` | low | The one that was missed proved the pattern is fragile |
-| A7 | Backup runs synchronously on the request thread | `durian/app.py` → `durian/maintenance.py` | medium | An HTTP request can block for the whole copy |
-| A8 | `POST /api/test/source` opens live connections on the request thread | `durian/testsource.py` | low | A hanging device hangs a console request |
 | A9 | All state is in-process: sessions, lockout counters, reset codes, TOTP replay guard, confirm tokens, escalation set | `durian/auth.py`, `durian/app.py` | high | Two server processes would double-tick, double-purge and double-escalate, and accept a replayed TOTP code. This is why "no HA" is in the known limits |
-| A10 | `web/app.js` is 788 lines in one file | `web/app.js` | low | One page's change risks another's |
+| A10 | `web/app.js` is 854 lines in one file | `web/app.js` | low | One page's change risks another's |
 | A12 | SQLite and MySQL diverge through hand-written branches, including `cast(ts/? as int)` vs `floor(ts/?)` | `durian/store.py` | medium | The MySQL path is the least tested code in the repo |
 
 ## 4. Dependencies and environment
 
 | # | Debt | Severity | Cost |
 |---|---|---|---|
-| E1 | No `requirements.txt` or `pyproject.toml`; CI pip-installs by hand | medium | No pinned versions, no recorded dependency set |
 | E2 | `paho-mqtt` must be ≥ 2.0 (`CallbackAPIVersion.VERSION2`) and nothing says so | medium | An old install fails at runtime, not at install |
 | E3 | `pymysql` is a hidden runtime dependency for MySQL: unlisted, not in CI | medium | The MySQL path cannot fail in CI, only in production |
 | E4 | `pyserial` is an optional lazy import, not installed in CI | low | Serial Modbus tests cannot run there |
