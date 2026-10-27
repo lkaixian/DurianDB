@@ -32,7 +32,7 @@ from .store import ALL_ROLLUPS
 log = logging.getLogger("durian.app")
 
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance")
-ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import"}  # the routes below the superadmin guard
+ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import", "auth"}  # the routes below the superadmin guard
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
 
 

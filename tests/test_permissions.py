@@ -61,6 +61,9 @@ USERS_RESET = ("POST", "users", N, "reset")
 USERS = (W, "users", W, W)
 OUTPUTS = ("GET", "outputs", None, W)
 AUDIT = ("GET", "audit", W, W)
+SSO = ("GET", "auth", "sso", None)
+SSO_PUT = ("PUT", "auth", "sso", None)
+SSO_DELETE = ("DELETE", "auth", "sso", None)
 TOKENS = (W, "tokens", W, None)
 DATABASE = (W, "database", W, W)
 EXPORT_CONFIG = ("GET", "export", None, W)
@@ -261,6 +264,13 @@ ROWS = [
     R(USERS, "DELETE", "/api/users/probe-user", anon=401, viewer=403, ops=403, admin=200),
     R(OUTPUTS, "GET", "/api/outputs", anon=401, viewer=403, ops=403, admin=200),
     R(AUDIT, "GET", "/api/audit", anon=401, viewer=403, ops=403, admin=200),
+    # sign-in through a provider: the status is public (the sign-in page asks before anyone is signed in),
+    # but configuring it is administration and the block carries a client secret
+    R(SSO, "GET", "/api/auth/sso", anon=200, viewer=200, ops=200, admin=200),
+    R(SSO_PUT, "PUT", "/api/auth/sso", {"issuer": "https://idp.example.test", "client_id": "durian",
+                                        "redirect_uri": "https://durian.example.test/api/auth/sso/callback"},
+      anon=401, viewer=403, ops=403, admin=200),
+    R(SSO_DELETE, "DELETE", "/api/auth/sso", anon=401, viewer=403, ops=403, admin=200),
     R(TOKENS, "GET", "/api/tokens", anon=401, viewer=403, ops=403, admin=200),
     R(TOKENS, "POST", "/api/tokens", {"name": "probe-token", "scope": "read"},
       anon=401, viewer=403, ops=403, admin=201),
