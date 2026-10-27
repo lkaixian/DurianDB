@@ -13,6 +13,7 @@ import threading
 import time
 from collections import Counter
 from pathlib import Path
+from urllib.parse import unquote
 
 from .auth import Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from . import export, notes, pointcsv, units, windows
@@ -506,7 +507,9 @@ class App:
         m = ROUTE.match(path)
         if not m:
             raise ApiError(404, "not found")
-        a, b, c = m["a"], m["b"], m["c"]
+        # A point name may hold a slash (Sparkplug names one point per node/device/metric), so the console sends
+        # it percent-encoded; decode after the split so an encoded slash cannot become a new path segment.
+        a, b, c = (unquote(x) if x is not None else None for x in (m["a"], m["b"], m["c"]))
         if body is not None and not isinstance(body, (dict, str)):  # a JSON body is an object; imports arrive as text
             raise ApiError(400, "body must be a JSON object")
         admin = "superadmin" in ident["roles"]
