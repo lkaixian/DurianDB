@@ -647,7 +647,11 @@ def make_point(name, b, source_name):
 
 
 def build_engine(store):
-    """Engine from stored config. A source that fails to build is kept as an unhealthy stub, not fatal."""
+    """Engine from stored config. A source that fails to build is kept as an unhealthy stub, not fatal.
+
+    Sources that poll in a thread are only queued in `eng.startable`: the caller starts them with
+    `eng.start_sources()` once its own store work is done, so no first poll can race the call that built it.
+    """
     eng = Engine()
     points = store.list("point")
     held = {o["name"]: o["value"] for o in store.list("override")}  # values operators set and have not released
@@ -667,7 +671,7 @@ def build_engine(store):
                 src = (HttpJsonSource if s["type"] == "http_json" else SqlSource)(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
-                src.start()
+                eng.startable.append(src)
             elif s["type"] == "calc":
                 src = calc.CalcSource(s["name"])
                 src.engine = eng
@@ -682,7 +686,7 @@ def build_engine(store):
                 src = ModbusSource(s["name"], {k: v for k, v in s.items() if k in MODBUS_KEYS or k == "link"})
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
-                src.start()  # only after every point is added: the read plan is built once from them
+                eng.startable.append(src)  # only after every point is added: the read plan is built once from them
             elif s["type"] == "sparkplug":
                 auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create", True) else None
                 src = SparkplugSource(s["name"], load_creds(s["creds"]), s.get("group", "Plant"), auto)
@@ -692,22 +696,22 @@ def build_engine(store):
                 src = SnmpSource(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
-                src.start()
+                eng.startable.append(src)
             elif s["type"] == "dnp3":
                 src = Dnp3Source(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
-                src.start()
+                eng.startable.append(src)
             elif s["type"] == "bacnet":
                 src = BacnetSource(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
-                src.start()
+                eng.startable.append(src)
             elif s["type"] == "opcua":
                 src = OpcuaSource(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
-                src.start()
+                eng.startable.append(src)
             elif s["type"] == "system":
                 src = SystemSource(s["name"], s.get("path"))
                 names = ["sys-disk-free-bytes", "sys-process-cpu-seconds"]

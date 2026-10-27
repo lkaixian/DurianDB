@@ -532,6 +532,18 @@ class Engine:
         self.events_lost = 0  # alarms dropped past EVENT_MAX in one tick; the app announces the count
         self.down = {}  # source name -> its open source-down Event
         self.slow = {}  # source name -> its open poll-overrun Event
+        self.startable = []  # sources built but not started yet; see start_sources()
+
+    def start_sources(self):
+        """Start this engine's background pollers. build_engine leaves them unstarted so the caller can finish its
+        own store work first, and a second call does nothing: a source whose thread is already running must not get
+        a second one."""
+        sources, self.startable = self.startable, []
+        for s in sources:
+            try:
+                s.start()
+            except Exception as e:  # the same degradation build_engine gives a source that could not be built
+                s.error = f"cannot start: {sentence(e) or 'check its settings'}"
 
     def _event(self, ev: Event):
         self.events.append(ev)

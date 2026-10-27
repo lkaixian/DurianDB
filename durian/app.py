@@ -112,6 +112,7 @@ class App:
         self.internal_errors, self.last_internal_error = 0, None  # unhandled exceptions since start, and the latest
         self.internal_seen, self.internal_events = {}, {}  # route -> recent error times; route -> its one (system) alarm
         self.internal_routes_lost = 0  # live route histories forgotten past INTERNAL_ROUTES_MAX
+        self.deferred_start = False  # a config save starts its sources after writing its audit; see config()
         self.reload()
 
     # ---- runtime
@@ -135,6 +136,8 @@ class App:
             self.load_windows()
             for name, (p, _) in self.points().items():
                 p.in_service = self.holds.get(name, {}).get("kind") != "oos"
+            if not self.deferred_start:
+                self.engine.start_sources()
 
     def _degraded(self, ex):
         """One honest sentence when the state a second process must share cannot be read or written. The tick and
@@ -1528,9 +1531,13 @@ class App:
                 raise ApiError(422, "validation failed", errs)
             old = self.store.get(kind, name)
             self.store.put(kind, name, body)
+            # A source's first poll must not land before this save returns: hold the starts until the audit below
+            # has done its own store work, then release them. Other save paths audit before reloading instead.
+            self.deferred_start = True
             try:
                 self.load_windows() if kind == "maintenance" else self.reload()  # a window changes no engine object, so open alarms are left alone
             except Exception as ex:  # a config the server cannot run must not be left stored
+                self.deferred_start = False
                 if old is None:
                     self.store.delete(kind, name)
                 else:
@@ -1540,7 +1547,11 @@ class App:
                 except Exception:
                     log.exception("reload failed after rolling back %s/%s", kind, name)
                 raise ApiError(409, f"{kind} '{name}' was not saved: it could not be started ({sentence(ex) or 'check its settings'}). The previous version is still in place.")
-            self.store.audit(ident["name"], "config.put", f"{kind}/{name}" + _diff(old, body))
+            self.deferred_start = False
+            try:
+                self.store.audit(ident["name"], "config.put", f"{kind}/{name}" + _diff(old, body))
+            finally:  # the engine is built either way, so its pollers run even when the audit write fails
+                self.engine.start_sources()
             return 200, {"saved": name}
         if method == "DELETE":
             if kind == "source" and any(p.get("source") == name for p in self.store.list("point")):

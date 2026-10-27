@@ -74,9 +74,6 @@ class ModbusSource(Source):
 
     # ---- polling
     def _loop(self):
-        # ponytail: one GIL yield keeps the first poll after the build that created this source; a build slow
-        # enough to be preempted past it can still race, so start sources from a post-reload hook if that shows.
-        time.sleep(0)
         while not self._stop.is_set():
             started = time.monotonic()
             if time.time() >= self.next_try:
