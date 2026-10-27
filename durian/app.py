@@ -11,6 +11,7 @@ import json
 import math
 import re
 import secrets
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -68,6 +69,7 @@ class App:
         self.store, self.auth = store, Auth(store)
         self.maint = Maintenance(store, backup_dir or Path("backups"))
         self.engine, self.outputs, self.open_events = None, None, []
+        self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
         self.escalated = set()  # (handler, event id) already escalated
         self.confirms = {}  # token -> ((user, point, value), expiry) for writes waiting for their second step
         self.windows = []  # maintenance windows, see windows.py
@@ -81,7 +83,7 @@ class App:
     # ---- runtime
     def reload(self):
         """Rebuild the engine from stored config. Detector state is lost, so open events are closed."""
-        with self.store.lock:
+        with self.engine_lock:
             if self.outputs:
                 self.outputs.stop()
             for s in (self.engine.sources if self.engine else []):
@@ -133,7 +135,7 @@ class App:
         self._sys_alarm("tick_event", None if error is None else f"the poll loop is failing: {error}")
 
     def _tick(self, ts):
-        with self.store.lock:
+        with self.engine_lock:
             ts = ts or time.time()
             self.engine.tick(ts)
             self.pending.extend((p.name, t, v, q) for s in self.engine.sources for p in s.points.values() for t, v, q in p.take_unsaved())
@@ -184,7 +186,7 @@ class App:
     def perform_write(self, p, s, v, who, note=""):
         """The one place a value is written to a source: used by operators and by set-point handlers alike."""
         try:
-            with self.store.lock:
+            with self.engine_lock:
                 s.write(p.name, v)
         except RuntimeError as ex:
             raise ApiError(502, str(ex))
@@ -194,7 +196,7 @@ class App:
 
     def handler_write(self, point, v, who):
         """A set-point event handler's write. It meets the same rules as an operator's (settable, limits, step size) except the confirm step."""
-        with self.store.lock:
+        with self.engine_lock:
             p, s = self.points().get(point, (None, None))
             try:
                 if p is None or not p.meta.get("settable") or not hasattr(s, "write"):
@@ -649,7 +651,7 @@ class App:
                 h = {"kind": "oos", "user": ident["name"], "reason": reason, "created": now, "until": None}
         elif not cur or cur["kind"] != ("shelved" if action == "unshelve" else "oos"):
             raise ApiError(409, "nothing to release")
-        with self.store.lock:
+        with self.engine_lock:
             if action in ("shelve", "out-of-service"):
                 self.store.put("alarmhold", point, h)
                 self.holds[point] = {"name": point, **h}
@@ -784,7 +786,7 @@ class App:
         have = {p["name"] for p in self.store.list("point")}
         summary = {"created": sum(1 for n, _ in rows if n not in have), "updated": sum(1 for n, _ in rows if n in have)}
         if query.get("apply") == "1":
-            with self.store.lock:
+            with self.engine_lock:
                 for name, body in rows:
                     self.store.put("point", name, body)
                 self.store.audit(ident["name"], "points.import", json.dumps(summary))

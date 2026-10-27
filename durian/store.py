@@ -25,7 +25,7 @@ TYPES = {
 
 class Store:
     def __init__(self, url=":memory:"):
-        self.url, self.lock = url, threading.RLock()  # the lock also guards the engine's runtime objects, see app
+        self.url, self.lock = url, threading.RLock()  # guards this connection; engine state has its own lock in app
         self._tx = 0  # depth of an enclosing atomic() block; run() does not commit inside one
         if url.startswith("mysql://"):
             self.kind = "mysql"
