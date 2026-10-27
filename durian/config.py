@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from .core import Engine, Logging, Point, Source, make_detector
-from . import calc, http_source, sql_source, windows
+from . import calc, http_source, sql_source, units, windows
 from .http_source import HttpJsonSource
 from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
@@ -139,6 +139,37 @@ def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
+def _tags_ok(tags):
+    return isinstance(tags, dict) and len(tags) <= 20 and all(
+        isinstance(k, str) and isinstance(v, str) and 0 < len(k) <= 64 and len(v) <= 64 for k, v in tags.items())
+
+
+def _folder_ok(v):
+    return isinstance(v, str) and len(v) <= 200 and all(0 < len(x.strip()) <= 64 for x in v.split("/"))
+
+
+def resolve(tags, unit, folder, source, folder_defaults=None):
+    """The tags and unit a point is shown with, in one place so no two views can disagree.
+
+    A point's own value wins; a missing tag or an empty unit is inherited from the folder first, then the source.
+    `source` is the stored source config; `folder_defaults` maps a folder path to its own default object.
+    """
+    source = source if isinstance(source, dict) else {}
+    folders = source.get("folders") if isinstance(source.get("folders"), dict) else {}
+    try:
+        default = (folder_defaults or {}).get(folder or "") or folders.get(folder or "") or {}
+    except TypeError:  # an unhashable folder path cannot match anything
+        default = {}
+    default = default if isinstance(default, dict) else {}
+    raw = source.get("default_tags") if isinstance(source.get("default_tags"), dict) else source.get("tags")
+    out = dict(raw) if isinstance(raw, dict) else {}
+    ftags = default.get("tags") if isinstance(default.get("tags"), dict) else default.get("default_tags")
+    out.update(ftags if isinstance(ftags, dict) else {})
+    out.update(tags if isinstance(tags, dict) else {})
+    eff = unit or default.get("unit") or default.get("default_unit") or source.get("default_unit") or source.get("unit") or ""
+    return out, eff if isinstance(eff, str) else ""
+
+
 roles_ok = _roles_ok
 
 
@@ -166,6 +197,25 @@ def validate_source(name, b):
         add("heartbeat_seconds", "must be a number of seconds from 5 to 86400")
     if "down_after" in b and not (_num(b["down_after"]) and 0 <= b["down_after"] <= 3600):
         add("down_after", "must be a number of seconds from 0 to 3600")
+    if not _tags_ok(b.get("default_tags", {})):
+        add("default_tags", "must be up to 20 text key/value pairs")
+    if not (isinstance(b.get("default_unit", ""), str) and len(b.get("default_unit", "")) <= 16):
+        add("default_unit", "must be text, up to 16 characters")
+    folders = b.get("folders", {})
+    if not isinstance(folders, dict) or len(folders) > 200:
+        add("folders", "must be a map of folder paths to their defaults, at most 200")
+    else:
+        for path, fd in folders.items():
+            if not _folder_ok(path):
+                add(f"folders[{path}]", "must be a folder path such as Plant/Boiler")
+                continue
+            if not isinstance(fd, dict):
+                add(f"folders[{path}]", "must be {tags: {...}, unit: '...'}")
+                continue
+            if not _tags_ok(fd.get("tags", {})):
+                add(f"folders[{path}].tags", "must be up to 20 text key/value pairs")
+            if not (isinstance(fd.get("unit", ""), str) and len(fd.get("unit", "")) <= 16):
+                add(f"folders[{path}].unit", "must be text, up to 16 characters")
     if b.get("type") == "mqtt":
         try:
             load_creds(b.get("creds", ""))
@@ -210,11 +260,20 @@ def validate_point(name, b, store):
     if not (_num(b.get("tolerance", 0)) and b.get("tolerance", 0) >= 0):
         add("tolerance", "must be a number, zero or more")
     tags = b.get("tags", {})
-    if not (isinstance(tags, dict) and len(tags) <= 20 and all(isinstance(k, str) and isinstance(v, str)
-                                                                and 0 < len(k) <= 64 and len(v) <= 64 for k, v in tags.items())):
+    if not _tags_ok(tags):
         add("tags", "must be up to 20 text key/value pairs")
     if not (isinstance(b.get("unit", ""), str) and len(b.get("unit", "")) <= 16):
         add("unit", "must be text, up to 16 characters")
+    du, folder = b.get("display_unit", ""), b.get("folder") if isinstance(b.get("folder"), str) else ""
+    if not (isinstance(du, str) and len(du) <= 16):
+        add("display_unit", "must be text, up to 16 characters")
+    elif du:  # a display unit is checked against the unit the point will actually have, inherited or its own
+        got = store.get("folder", folder) if store is not None and folder else None
+        _, eff_unit = resolve({}, b.get("unit", ""), folder, src or {}, {folder: got} if got else None)
+        if not eff_unit:
+            add("display_unit", "a point with no unit cannot be shown in one; set unit first")
+        elif not units.compatible(eff_unit, du):
+            add("display_unit", f"cannot show {eff_unit} as {du}: different kinds of quantity")
     if not isinstance(b.get("settable", False), bool):
         add("settable", "must be true or false")
     r = b.get("retention_days")
@@ -264,7 +323,7 @@ def validate_point(name, b, store):
     if not b.get("settable") and any(k in b for k in ("set_min", "set_max", "max_step", "confirm", "require_reason")):
         add("settable", "set limits and confirmation only apply to a settable point")
     fo = b.get("folder")
-    if "folder" in b and not (isinstance(fo, str) and len(fo) <= 200 and all(0 < len(x.strip()) <= 64 for x in fo.split("/"))):
+    if "folder" in b and not _folder_ok(fo):
         add("folder", "must be a path such as Plant/Boiler: names separated by /, none empty, each up to 64 characters")
     st = b.get("states")
     if "states" in b and not (isinstance(st, dict) and 1 <= len(st) <= 50 and all(isinstance(k, str) and re.fullmatch(r"-?\d+", k) and isinstance(v, str) and 1 <= len(v) <= 40 for k, v in st.items())):
@@ -338,7 +397,8 @@ def make_point(name, b, source_name):
               interval=float(b.get("log_interval", 0)), interval_mode=b.get("log_mode", "instant"),
               tags=dict(b.get("tags", {})), detectors=[make_detector(d) for d in b.get("detectors", [])])
     p.text = b.get("datatype") == "text"
-    p.meta = {"source": source_name, "unit": b.get("unit", ""), "settable": bool(b.get("settable", False)),
+    p.meta = {"source": source_name, "unit": b.get("unit", ""), "display_unit": b.get("display_unit", ""),
+              "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
     for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
@@ -396,7 +456,9 @@ def build_engine(store):
         except Exception as ex:
             src = Source(s["name"])
             src.error = f"cannot start: {type(ex).__name__}"
-        src.meta = {"type": s.get("type"), "read_roles": s.get("read_roles", ["user"])}
+        src.meta = {"type": s.get("type"), "read_roles": s.get("read_roles", ["user"]),
+                    "default_tags": s.get("default_tags") or s.get("tags") or {},
+                    "default_unit": s.get("default_unit") or s.get("unit") or "", "folders": s.get("folders", {})}
         src.heartbeat, src.down_after = s.get("heartbeat_seconds"), s.get("down_after", 10.0)
         eng.sources.append(src)
     eng.sources.sort(key=lambda s: isinstance(s, calc.CalcSource))  # calculations run last, on this tick's fresh inputs
