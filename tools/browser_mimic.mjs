@@ -19,7 +19,7 @@ await send("Network.enable"); await send("Network.setCacheDisabled", {cacheDisab
 await ev(`(()=>{const f=document.querySelector('#login');f.username.value='admin';f.password.value=${JSON.stringify(process.env.DURIAN_ADMIN_PASSWORD)};f.requestSubmit()})()`); await sleep(2500);
 await go("#design/_new");
 await ev(`(()=>{const f=document.querySelector('#df');f.name.value='mm-test';f.title.value='Mimic test'})()`);
-await ev(`(()=>{const s=document.querySelector('#at');s.value='mimic';document.querySelector('#aw').click()})()`); await sleep(800);
+await ev(`document.querySelector('[data-add=mimic]').click()`); await sleep(800);
 const info = () => ev(`JSON.stringify({rows:document.querySelectorAll('.mm-ed [data-k]').length, json:JSON.parse(document.querySelector('[data-f=rest]').value).shapes.length, svgShapes:document.querySelectorAll('#pv svg.mimic > *').length})`);
 console.log("start:", await info());
 const first = () => ev(`(()=>{const r=document.querySelector('.mm-ed [data-k="0"]');return r.querySelector('[data-mf=x]').value})()`);
@@ -37,4 +37,4 @@ console.log("save:", await ev(`document.querySelector('#dm').innerText`));
 await shot("mimic-editor");
 console.log("unlabelled:", await ev(`[...document.querySelectorAll('.mm-ed input,.mm-ed select')].filter(e=>!e.closest('label')).length`));
 console.log("problems:", JSON.stringify(problems));
-process.exit(0);
+process.exit(problems.length ? 1 : 0);

@@ -138,4 +138,4 @@ await ev(`document.querySelector('#snd').click()`); await sleep(300);
 console.log("sound toggle:", await text('#snd'), await ev(`document.querySelector('#snd').getAttribute('aria-pressed')`));
 await ev(`document.querySelector('#snd').click()`);
 console.log("problems:", problems);
-process.exit(0);
+process.exit(problems.length ? 1 : 0);

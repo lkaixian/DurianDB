@@ -57,7 +57,7 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 |---|---|---|---|
 | U1 | Modbus TCP/RTU/ASCII | Simulator, and RTU only over a `socket://` URL — never a real COM port or device | medium |
 | U3 | Email, Slack, escalation delivery | A fake SMTP server; Slack only validates config | medium |
-| U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | Manual, headless Edge on port 9222 | medium |
+| U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | CI runs all 11 headlessly through `tools/browser_ci.mjs`, with a throwaway database and browser profile per check. Seven fail the job on an exception or console error; `modbus`, `admin`, `check` and `dashboard` only prove they ran, because their intentional 4xx requests are logged as errors, and `browser_dashboard`'s designer steps still use stale selectors | medium |
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
 | U8 | SNMP source | An in-process fake agent answers crafted datagrams; never a real device | low |
 | U9 | Sparkplug B source | Decoded payloads are fed directly; never a real broker or a real edge node | medium |

@@ -102,4 +102,4 @@ console.log("test result:", await ev(`document.querySelector('#test-out').textCo
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");
 console.log("problems:", problems);
-process.exit(0);
+process.exit(problems.length ? 1 : 0);

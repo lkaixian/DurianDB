@@ -58,4 +58,4 @@ await ev(`location.hash="#point/sp"`); await sleep(2500);
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true}); await sleep(600);
 console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("2-mobile");
 console.log("problems:", problems);
-process.exit(0);
+process.exit(problems.length ? 1 : 0);
