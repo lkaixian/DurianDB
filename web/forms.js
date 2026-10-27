@@ -62,6 +62,11 @@ const SOURCE_GROUPS = {
     F("dnp3.address", "Address", "text", {hint: "host:port of the outstation, for example 10.0.0.5:20000. The port is the outstation's TCP port, commonly 20000."}),
     F("dnp3.outstation", "Outstation link address", "int", {hint: "The link address the outstation answers on, 0 to 65535."}),
     F("period", "Poll every (seconds)", "number", {hint: "0.2 to 86400."}), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
+  opcua: () => [{title: "OPC UA server", fields: [
+    F("opcua.address", "Address", "text", {hint: "host:port of the server, for example 10.0.0.5:14360."}),
+    F("opcua.path", "Endpoint path", "text", {optional: true, hint: "Optional path of the endpoint URL, for example plant."}),
+    F("opcua.security_policy", "Security policy", "select", {optional: true, options: opts("None"), hint: "Only SecurityPolicy None is implemented; the connection is not encrypted."}),
+    F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
   http_json: () => [{title: "HTTP JSON document", fields: [
     F("url", "URL", "text", {hint: "http or https. Redirects are never followed."}),
     F("period", "Fetch every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number"),
@@ -110,6 +115,8 @@ const POINT_PARTS = {
   dnp3: {start: () => ({dnp3: {group: 30, index: 0}}), keys: ["dnp3"],
     fields: () => [F("dnp3.group", "Group", "select", {numeric: true, options: opts(1, 10, 20, 30, 40)}),
       F("dnp3.index", "Object index", "int", {hint: "The object's index in that group, 0 to 65535."})]},
+  opcua: {start: () => ({opcua: {node: "ns=2;i=85"}}), keys: ["opcua"],
+    fields: () => [F("opcua.node", "Node id", "text", {hint: "The node's id in string form, such as ns=2;i=85 or ns=2;s=Temperature."})]},
   http_json: {start: () => ({http: {path: ""}}), keys: ["http", "scale"],
     fields: () => [F("http.path", "Path in the JSON", "text", {hint: "For example sensors.temp or items[0].value."}),
       F("scale.multiplier", "Multiplier", "number", {optional: true}), F("scale.additive", "Add", "number", {optional: true})]},

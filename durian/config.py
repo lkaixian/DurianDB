@@ -18,14 +18,17 @@ from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
 from .modbus_source import DEFAULTS as MODBUS_KEYS, ModbusSource
 from .mqtt_source import MqttSource
+from .opcua_source import OpcuaError, OpcuaSource
+from .opcua_source import parse_address as parse_opcua_address
+from .opcua_source import parse_node_id as parse_opcua_node
 from .snmp_source import SnmpSource, encode_oid
 from .sparkplug_source import SparkplugSource
 from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
-SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "dnp3", "bacnet", "http_json", "sql",
-                "http_in", "calc")
+SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "dnp3", "bacnet", "opcua", "http_json",
+                "sql", "http_in", "calc")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -205,6 +208,45 @@ def _bacnet_point_errors(b, add):
         add("bacnet.property", f"must be one of {list(PROPERTIES)}")
 
 
+def _opcua_source_errors(b, add):
+    m = b.get("opcua")
+    if not isinstance(m, dict):
+        add("opcua", "an OPC UA source needs an opcua section with address")
+        return
+    try:
+        parse_opcua_address(m.get("address"))
+    except OpcuaError as e:
+        add("opcua.address", str(e))
+    if "path" in m and not (isinstance(m["path"], str) and len(m["path"]) <= 200
+                            and not any(c.isspace() for c in m["path"])):
+        add("opcua.path", "must be the endpoint URL path, up to 200 characters, such as plant")
+    policy = m.get("security_policy", "None")
+    if not (isinstance(policy, str) and policy.lower() == "none"):
+        add("opcua.security_policy", "only SecurityPolicy None is implemented; leave it None")
+    mode = m.get("security_mode", "None")
+    if not (isinstance(mode, str) and mode.lower() == "none"):
+        add("opcua.security_mode", "only SecurityMode None is implemented; leave it None")
+    if "timeout" in b and not (_num(b["timeout"]) and 1 <= b["timeout"] <= 30):
+        add("timeout", "must be a number of seconds from 1 to 30")
+    if "period" in b and not (_num(b["period"]) and 0.2 <= b["period"] <= 86400):
+        add("period", "must be a number of seconds from 0.2 to 86400")
+    if "backoff_max" in b and not (_num(b["backoff_max"]) and 1 <= b["backoff_max"] <= 86400):
+        add("backoff_max", "must be a number of seconds from 1 to 86400")
+    if "backoff_scale" in b and not (_num(b["backoff_scale"]) and 1 < b["backoff_scale"] <= 10):
+        add("backoff_scale", "must be greater than 1 and at most 10")
+
+
+def _opcua_point_errors(b, add):
+    m = b.get("opcua")
+    if not isinstance(m, dict):
+        add("opcua", "a point on an OPC UA source needs an opcua section naming its node")
+        return
+    try:
+        parse_opcua_node(m.get("node"))
+    except OpcuaError as e:
+        add("opcua.node", str(e))
+
+
 class Virtual(Source):
     """Generates values: random walk, sine wave, or constant. Settable points hold the value written."""
 
@@ -353,6 +395,8 @@ def validate_source(name, b):
         _dnp3_source_errors(b, add)
     elif b.get("type") == "bacnet":
         _bacnet_source_errors(b, add)
+    elif b.get("type") == "opcua":
+        _opcua_source_errors(b, add)
     elif b.get("type") == "http_json":
         http_source.validate_source(b, add)
     elif b.get("type") == "sql":
@@ -409,8 +453,8 @@ def validate_point(name, b, store):
         add("datatype", "must be number or text")
     text = text == "text"
     if text:
-        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug", "snmp", "bacnet"):
-            add("datatype", "text points are supported on virtual, http_in, mqtt, sparkplug, snmp and bacnet sources")
+        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug", "snmp", "bacnet", "opcua"):
+            add("datatype", "text points are supported on virtual, http_in, mqtt, sparkplug, snmp, bacnet and opcua sources")
         if b.get("logging") == "INTERVAL":
             add("logging", "a text point is logged on change or always, not at an interval")
     dets = b.get("detectors", [])
@@ -477,6 +521,8 @@ def validate_point(name, b, store):
         _dnp3_point_errors(b, add)
     elif src and src.get("type") == "bacnet":
         _bacnet_point_errors(b, add)
+    elif src and src.get("type") == "opcua":
+        _opcua_point_errors(b, add)
     elif src and src.get("type") == "http_json":
         http_source.validate_point(b, add)
     elif src and src.get("type") == "sql":
@@ -485,7 +531,8 @@ def validate_point(name, b, store):
     if src and src.get("type") in ("http_json", "sql") and not (
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
-    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp", "dnp3", "bacnet"):
+    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp", "dnp3",
+                                                         "bacnet", "opcua"):
         add("settable", "this source type is read-only")
     if src and src.get("type") == "calc":
         try:
@@ -529,8 +576,8 @@ def make_point(name, b, source_name):
               "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "snmp", "dnp3", "bacnet", "http", "sql", "scale", "suppress_when", "calc", "states",
-              "folder"):
+    for k in ("modbus", "snmp", "dnp3", "bacnet", "opcua", "http", "sql", "scale", "suppress_when", "calc",
+              "states", "folder"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason"):  # zero is a real value here
@@ -593,6 +640,11 @@ def build_engine(store):
                 src.start()
             elif s["type"] == "bacnet":
                 src = BacnetSource(s["name"], s)
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
+                src.start()
+            elif s["type"] == "opcua":
+                src = OpcuaSource(s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 src.start()
