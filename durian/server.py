@@ -36,6 +36,12 @@ app: App = None
 TLS = False  # set by main() when the server is given a certificate; the session cookie is then marked Secure
 
 
+def route_shape(method, path):
+    """Method plus the first two path segments: names a route, never the point or token in it (a counter must not
+    become a way to guess data)."""
+    return method + " /" + "/".join([p for p in path.split("/") if p][:2])
+
+
 def session_cookie(token, max_age):
     """The session cookie. Secure under HTTPS, so a browser never returns it over plain HTTP."""
     return f"{COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}" + ("; Secure" if TLS else "")
@@ -117,8 +123,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send(ex.status, {"error": str(ex)})
         except ApiError as ex:
             self.send(ex.status, {"error": str(ex), **({"errors": ex.errors} if ex.errors else {})})
-        except Exception:
+        except Exception as ex:
             log.exception("unhandled error")
+            app.record_internal_error(route_shape(method, url.path), ex)
             self.send(500, {"error": "internal error"})
 
     do_GET = lambda self: self.serve("GET")
@@ -144,6 +151,7 @@ def run_maintenance():
         time.sleep(60)
         try:
             app.maint.tick()
+            app.auth.sweep()
             app.send_reports()
             app.escalate()
         except Exception:

@@ -14,6 +14,8 @@ INHERIT = {"superadmin": {"superadmin", "user", "anonymous"}, "user": {"user", "
 MIN_PASSWORD = 10
 LOCK_AFTER, LOCK_SECONDS = 5, 300
 RESET_SECONDS = 3600  # an issued reset code works for one hour, once
+FAILURE_MAX = 10_000  # failed-sign-in entries kept before a prune
+SWEEP_SECONDS = 60  # expired sessions and lockouts are swept at most this often from the sign-in path
 
 
 def totp(secret, t=None, step=30):
@@ -68,6 +70,7 @@ class Auth:
         self.resets = {}  # user -> (sha256 of the code, expires)
         self.pending, self.last_step = {}, {}  # user -> secret not yet confirmed; user -> last accepted time step (a code works once)
         self.sessions, self.failures = {}, {}  # token -> (user, expires); user -> (count, locked_until)
+        self.swept = 0.0  # when sweep() last ran, so the sign-in path can cap how often it sweeps
         self._dummy = hash_password("not-a-real-password")
 
     def bootstrap(self, password=None):
@@ -102,6 +105,35 @@ class Auth:
         self.pending.pop(name)
         self.store.audit(name, "mfa.enable")
 
+    def _prune_failures(self):
+        """Before made-up names can grow `failures`, drop what cannot matter: names with no account and lockouts
+        whose window has passed. A real account's live lockout must survive a flood, so only then, and only while
+        still over the cap, are the oldest unlocked entries dropped (dict order is insertion order)."""
+        now, known = time.time(), {u["name"] for u in self.store.users()}
+        for name in list(self.failures):
+            user = name[6:] if isinstance(name, str) and name.startswith("reset:") else name
+            count, until = self.failures[name]
+            if not (isinstance(user, str) and user in known) or (until and until <= now):
+                del self.failures[name]
+        excess = len(self.failures) - FAILURE_MAX
+        if excess > 0:  # only real, still-live state is left: the oldest goes, never one that is locked out now
+            for name in list(self.failures):
+                if excess <= 0:
+                    break
+                if self.failures[name][1] <= now:
+                    del self.failures[name]
+                    excess -= 1
+
+    def sweep(self, now=None):
+        """Drop sessions and lockouts that have expired: otherwise they wait for a lookup to notice them.
+        Called once a minute by maintenance, and (capped by SWEEP_SECONDS) when a session is created."""
+        now = now or time.time()
+        for token in [t for t, (_, exp) in self.sessions.items() if exp <= now]:
+            del self.sessions[token]
+        for name in [n for n, (count, until) in self.failures.items() if until and until <= now]:
+            del self.failures[name]
+        self.swept = now
+
     def login(self, name, pw, code=None):
         count, until = self.failures.get(name, (0, 0))
         if until > time.time():
@@ -114,8 +146,8 @@ class Auth:
                 raise AuthError("authentication code required")
             ok = self.check_code(name, user["totp"], code)
         if not ok:
-            if len(self.failures) > 10_000:  # unknown names must not grow this without bound
-                self.failures.clear()
+            if len(self.failures) > FAILURE_MAX:  # unknown names must not grow this without bound
+                self._prune_failures()
             count += 1
             self.failures[name] = (count, time.time() + LOCK_SECONDS if count >= LOCK_AFTER else 0)
             if user:  # only real accounts are audited: a stream of made-up names must not fill the trail
@@ -125,6 +157,8 @@ class Auth:
         self.store.audit(name, "login")
         token = secrets.token_urlsafe(32)
         self.sessions[token] = (name, time.time() + self.ttl)
+        if time.time() - self.swept > SWEEP_SECONDS:  # cheap cap: at most one sweep a minute inline, no thread
+            self.sweep()
         return token
 
     def issue_reset(self, name):
