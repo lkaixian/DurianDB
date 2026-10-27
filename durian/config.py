@@ -15,12 +15,13 @@ from .ingest import HttpInSource
 from .modbus import RANGES, TYPES
 from .modbus_source import DEFAULTS as MODBUS_KEYS, ModbusSource
 from .mqtt_source import MqttSource
+from .snmp_source import SnmpSource, encode_oid
 from .sparkplug_source import SparkplugSource
 from .sql_source import SqlSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
-SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "http_json", "sql", "http_in", "calc")
+SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "http_json", "sql", "http_in", "calc")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 
@@ -97,6 +98,38 @@ def _modbus_point_errors(b, add):
         add("modbus.additive", "must be a number")
     if b.get("settable") and (rng not in ("coil", "holding") or (rng == "holding" and typ == "bool")):
         add("settable", "only coils and whole holding-register values can be written")
+
+
+def _snmp_source_errors(b, add):
+    if not (isinstance(b.get("host"), str) and 0 < len(b["host"]) <= 253):
+        add("host", "must be a host name or address")
+    if "port" in b and not _int(b["port"], 1, 65535):
+        add("port", "must be 1 to 65535")
+    if not (isinstance(b.get("community"), str) and 0 < len(b["community"]) <= 255):
+        add("community", "must be the v2c community text the device expects")
+    if "timeout" in b and not (_num(b["timeout"]) and 1 <= b["timeout"] <= 30):
+        add("timeout", "must be a number of seconds from 1 to 30")
+    if "period" in b and not (_num(b["period"]) and 0.2 <= b["period"] <= 86400):
+        add("period", "must be a number of seconds from 0.2 to 86400")
+    if "backoff_max" in b and not (_num(b["backoff_max"]) and 1 <= b["backoff_max"] <= 86400):
+        add("backoff_max", "must be a number of seconds from 1 to 86400")
+    if "backoff_scale" in b and not (_num(b["backoff_scale"]) and 1 < b["backoff_scale"] <= 10):
+        add("backoff_scale", "must be greater than 1 and at most 10")
+
+
+def _snmp_point_errors(b, add):
+    m = b.get("snmp")
+    if not isinstance(m, dict):
+        add("snmp", "a point on an SNMP source needs an snmp section naming the OID to read")
+        return
+    oid = m.get("address")
+    if not isinstance(oid, str):
+        add("snmp.address", "must be the numeric OID to read, such as 1.3.6.1.2.1.1.5.0")
+        return
+    try:
+        encode_oid(oid)
+    except ValueError:
+        add("snmp.address", "must be a numeric OID such as 1.3.6.1.2.1.1.5.0")
 
 
 class Virtual(Source):
@@ -241,6 +274,8 @@ def validate_source(name, b):
             add("auto_create", "must be true or false")
     if b.get("type") == "modbus":
         _modbus_source_errors(b, add)
+    elif b.get("type") == "snmp":
+        _snmp_source_errors(b, add)
     elif b.get("type") == "http_json":
         http_source.validate_source(b, add)
     elif b.get("type") == "sql":
@@ -297,8 +332,8 @@ def validate_point(name, b, store):
         add("datatype", "must be number or text")
     text = text == "text"
     if text:
-        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug"):
-            add("datatype", "text points are supported on virtual, http_in, mqtt and sparkplug sources")
+        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug", "snmp"):
+            add("datatype", "text points are supported on virtual, http_in, mqtt, sparkplug and snmp sources")
         if b.get("logging") == "INTERVAL":
             add("logging", "a text point is logged on change or always, not at an interval")
     dets = b.get("detectors", [])
@@ -359,6 +394,8 @@ def validate_point(name, b, store):
                 add("generator.period", "must be greater than zero")
     if src and src.get("type") == "modbus":
         _modbus_point_errors(b, add)
+    elif src and src.get("type") == "snmp":
+        _snmp_point_errors(b, add)
     elif src and src.get("type") == "http_json":
         http_source.validate_point(b, add)
     elif src and src.get("type") == "sql":
@@ -367,7 +404,7 @@ def validate_point(name, b, store):
     if src and src.get("type") in ("http_json", "sql") and not (
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
-    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc"):
+    if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp"):
         add("settable", "this source type is read-only")
     if src and src.get("type") == "calc":
         try:
@@ -411,7 +448,7 @@ def make_point(name, b, source_name):
               "settable": bool(b.get("settable", False)),
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
-    for k in ("modbus", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
+    for k in ("modbus", "snmp", "http", "sql", "scale", "suppress_when", "calc", "states", "folder"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason"):  # zero is a real value here
@@ -462,6 +499,11 @@ def build_engine(store):
                 src = SparkplugSource(s["name"], load_creds(s["creds"]), s.get("group", "Plant"), auto)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
+            elif s["type"] == "snmp":
+                src = SnmpSource(s["name"], s)
+                for n, p in mine.items():
+                    src.add(make_point(n, p, s["name"]))
+                src.start()
             else:
                 auto = (lambda n: make_point(n, {}, s["name"])) if s.get("auto_create", True) else None
                 src = MqttSource(s["name"], load_creds(s["creds"]), s.get("prefix", "durian/"),

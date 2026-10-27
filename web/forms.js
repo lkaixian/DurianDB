@@ -49,6 +49,11 @@ const SOURCE_GROUPS = {
     {title: "Polling", fields: [
       F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number"), F("retries", "Retries", "int"),
       F("monitor", "Add an online/offline point per device", "check")]}],
+  snmp: () => [{title: "SNMP agent", fields: [
+    F("host", "Host", "text", {hint: "IP address or name of the device."}),
+    F("port", "Port", "int", {optional: true, hint: "Usually 161."}),
+    F("community", "Community", "text", {hint: "The v2c community text the device expects, for example public."}),
+    F("period", "Poll every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number", {hint: "1 to 30."})]}],
   http_json: () => [{title: "HTTP JSON document", fields: [
     F("url", "URL", "text", {hint: "http or https. Redirects are never followed."}),
     F("period", "Fetch every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number"),
@@ -88,6 +93,8 @@ const POINT_PARTS = {
           F("modbus.word_order", "Word order", "select", {optional: true, options: opts(["", "big"], "big", "little"), hint: "little = word-swapped, common for float32 on some devices."}),
           F("modbus.multiplier", "Multiplier", "number", {optional: true}), F("modbus.additive", "Add", "number", {optional: true, hint: "value = raw x multiplier + add"})] : [])];
     }},
+  snmp: {start: () => ({snmp: {address: "1.3.6.1.2.1.1.5.0"}}), keys: ["snmp"],
+    fields: () => [F("snmp.address", "OID", "text", {hint: "The numeric OID to read, such as 1.3.6.1.2.1.1.5.0."})]},
   http_json: {start: () => ({http: {path: ""}}), keys: ["http", "scale"],
     fields: () => [F("http.path", "Path in the JSON", "text", {hint: "For example sensors.temp or items[0].value."}),
       F("scale.multiplier", "Multiplier", "number", {optional: true}), F("scale.additive", "Add", "number", {optional: true})]},

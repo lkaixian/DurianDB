@@ -42,6 +42,10 @@ class PolledSource(Source):
         """Return ({point name: number}, [rejection messages]). Raise on any failure of the whole fetch."""
         raise NotImplementedError
 
+    def failure_text(self, e):
+        """The health message for a failed cycle. A source whose errors are already sentences can drop the class name."""
+        return f"{type(e).__name__}: {e}"
+
     def start(self):
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -66,7 +70,7 @@ class PolledSource(Source):
             self.fails += 1
             wait = min(self.period * self.backoff_scale ** self.fails, self.backoff_max)
             self.next_try = time.time() + wait
-            self.error, self.connected = f"{type(e).__name__}: {e} (retry in {wait:.0f}s)", False
+            self.error, self.connected = f"{self.failure_text(e)} (retry in {wait:.0f}s)", False
             with self._lock:
                 self._latest.update({n: (None, time.time(), Quality.BAD) for n in self.points})
             return
