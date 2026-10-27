@@ -92,6 +92,14 @@ class Detector:
         self.event = self.since = self.ok_since = None
 
     def check(self, point, value, ts) -> Optional[Event]:  # a value arrived
+        # A non-finite reading is unknown, not evidence of normal: it proves neither that the condition
+        # still holds nor that it has returned. Letting it reach a `value > limit` test reads as false and
+        # clears a live alarm, which the next good value raises again (RTN/re-raise chatter). Hold state.
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return self._check(point, value, ts)
+
+    def _check(self, point, value, ts) -> Optional[Event]:
         return None
 
     def tick(self, point, ts) -> Optional[Event]:  # time passed, maybe with no value
@@ -108,7 +116,7 @@ class _Latch(Detector):
     def evaluate(self, point, value, ts) -> Optional[str]:
         raise NotImplementedError
 
-    def check(self, point, value, ts):
+    def _check(self, point, value, ts):
         msg = self.evaluate(point, value, ts)
         if msg is None:
             if self.event and self.off_delay:
@@ -176,7 +184,7 @@ class NoUpdate(Detector):
     def __init__(self, seconds, level=Level.WARNING):
         self.seconds, self.level, self.event = seconds, level, None
 
-    def check(self, point, value, ts):
+    def _check(self, point, value, ts):
         if self.event:
             self.event.cleared_ts, self.event = ts, None
 
@@ -246,7 +254,7 @@ class ChangeDetector(Detector):
     def reset(self):
         self.prev = None
 
-    def check(self, point, value, ts):
+    def _check(self, point, value, ts):
         prev, self.prev = self.prev, value
         if prev is not None and ((prev != value) if isinstance(value, str) else abs(value - prev) > self.tolerance):
             return Event(point.name, self.level, f"changed from {state_label(point, prev)} to {state_label(point, value)}", ts, cleared_ts=ts)
@@ -263,7 +271,7 @@ class NoChange(Detector):
     def reset(self):
         self.ref = self.changed = self.event = None
 
-    def check(self, point, value, ts):
+    def _check(self, point, value, ts):
         if self.ref is None or abs(value - self.ref) > self.tolerance:
             self.ref, self.changed = value, ts
             if self.event:
