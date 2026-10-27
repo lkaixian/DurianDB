@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -137,19 +138,44 @@ for _ in range(50):
 import email  # noqa: E402
 csv_part = email.message_from_string(reports()[0]["body"]).get_payload()[1]
 assert len(reports()) == 2 and csv_part.get_filename() == "report.csv" and csv_part.get_payload(decode=True).startswith(b"point,unit,description"), MAIL
-# ---- slack: a webhook with {text}
+# ---- slack: a real POST of {text} to the incoming-webhook URL
+SLACK = []
+
+
+class Slack(BaseHTTPRequestHandler):
+    def do_POST(self):
+        SLACK.append({"path": self.path, "type": self.headers.get("Content-Type"),
+                      "body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))})
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *a):
+        pass
+
+
+slack_srv = HTTPServer(("127.0.0.1", 0), Slack)
+threading.Thread(target=slack_srv.serve_forever, daemon=True).start()
+SLACK_URL = f"http://127.0.0.1:{slack_srv.server_port}/services/T000/B000/XXXX"
 assert call("PUT", "/api/config/handler/sl", {"type": "slack", "url": "ftp://x"})[0] == 422
-assert call("PUT", "/api/config/handler/sl", {"type": "slack", "url": "http://127.0.0.1:9/x", "min_level": "URGENT"})[0] == 200
-sent = []
-app.outputs._put = lambda item, target=None: sent.append(item)
+assert call("PUT", "/api/config/handler/sl", {"type": "slack", "url": SLACK_URL, "min_level": "URGENT", "on_clear": True})[0] == 200
 from durian.core import Event, Level  # noqa: E402
 app.outputs.on_event(Event(point="hot", level=Level.URGENT, message="95 > 90", ts=1.0), "raised")
-assert [i[2]["text"] for i in sent if i[0] == "webhook" and "text" in i[2]] == ["[URGENT] hot: 95 > 90"], sent
+app.outputs.on_event(Event(point="hot", level=Level.URGENT, message="95 > 90", ts=2.0, cleared_ts=3.0), "cleared")
+for _ in range(50):
+    if len(SLACK) >= 2:
+        break
+    time.sleep(0.1)
+assert len(SLACK) == 2, SLACK
+assert all(s["path"] == "/services/T000/B000/XXXX" and s["type"] == "application/json" for s in SLACK), SLACK
+assert SLACK[0]["body"] == {"text": "[URGENT] hot: 95 > 90"}, SLACK  # exactly the sentence a shift reads, no extra keys
+assert SLACK[1]["body"] == {"text": "Back to normal: [URGENT] hot: 95 > 90"}, SLACK
+assert app.outputs.status["sl"]["failed"] == 0 and app.outputs.status["sl"]["last_ok"], app.outputs.status
 # ---- escalation: once, only while unacknowledged
 assert call("PUT", "/api/config/handler/esc", {**MAIL_H, "escalate_after": 0, "escalate_to": ["boss@example.com"]})[0] == 422
 assert call("PUT", "/api/config/handler/esc", {**MAIL_H, "escalate_after": 5, "escalate_to": ["boss"]})[0] == 422
 assert call("PUT", "/api/config/handler/esc", {**MAIL_H, "scope": {"points": ["hot"]}, "escalate_after": 5, "escalate_to": ["boss@example.com"]})[0] == 200
-sent.clear()
+sent = []
 app.outputs._put = lambda item, target=None: sent.append(item)  # a config save rebuilt the outputs
 now = time.time()
 app.tick(now)
