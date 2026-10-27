@@ -1,0 +1,21 @@
+name: CI / rust
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rust:
+    name: real-time core (experimental)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test the detector core
+        working-directory: rust
+        run: cargo test --locked
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy --locked -- -D warnings

@@ -1,20 +1,25 @@
 # DurianDB
 
-[![CI](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml)
+[![tests (3.12–3.14)](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-tests.yml?branch=main&label=tests%20%283.12%E2%80%933.14%29)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-tests.yml)
+[![browser checks](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci.yml?branch=main&label=browser%20checks)](https://github.com/lkaixian/DurianDB/actions/workflows/ci.yml)
+[![MariaDB tests](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-mysql.yml?branch=main&label=MariaDB%20tests)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-mysql.yml)
+[![rust core](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-rust.yml?branch=main&label=rust%20core)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-rust.yml)
 
-The badge covers the whole workflow, which runs these jobs on every push to `main`:
+Each badge covers one workflow, and each workflow holds exactly one job, all triggered on every push to `main`:
 
 | Job | What it proves |
 |---|---|
 | `tests on 3.12 / ubuntu-latest` | the suite on the oldest Python CI supports, on Linux |
 | `tests on 3.12 / windows-latest` | the same on Windows, where paths and line endings differ |
-| `tests on 3.13 / ubuntu-latest` | the newest Python CI supports, on Linux |
+| `tests on 3.13 / ubuntu-latest` | the middle Python CI supports, on Linux |
 | `tests on 3.13 / windows-latest` | the same on Windows |
+| `tests on 3.14 / ubuntu-latest` | the newest Python CI supports, and the version development runs, on Linux |
+| `tests on 3.14 / windows-latest` | the same on Windows |
 | `tests on MariaDB` | the suite on the MySQL/MariaDB backend, against a MariaDB 11.4 service container |
-| `browser checks (headless Chromium)` | all 11 console checks, each against a throwaway database and browser profile |
+| `browser checks (headless Chromium)` | all 12 console checks, each against a throwaway database and browser profile |
 | `real-time core (experimental)` | the Rust detector crate's tests and clippy |
 
-GitHub shows badges per workflow, not per job; the link above opens the job list with each job's own result.
+GitHub shows badges per workflow, not per job; since each job above has its own workflow file, each badge is that job's own result.
 
 DurianDB is an original, clean-room educational reference for a SCADA / IoT data-acquisition platform, written in
 Python. It studies how such a platform fits together from public documentation and the black-box behaviour of
