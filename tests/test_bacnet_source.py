@@ -226,7 +226,20 @@ for name, (section, datatype) in POINTS.items():
 
 src = next(s for s in app.engine.sources if s.name == "poll")
 assert isinstance(src, B.BacnetSource)
-time.sleep(0.4)  # let the background thread's first cycle finish before driving one ourselves
+deadline = time.monotonic() + 5
+while src.connected is None and time.monotonic() < deadline:  # the background thread's first cycle
+    time.sleep(0.02)
+
+
+def acks(n=3, timeout=3.0):
+    """The SegmentACKs the device has read. They travel on the same socket as the reply, so the poll can return
+    before the device thread has read them: wait for them instead of assuming they arrived."""
+    deadline = time.monotonic() + timeout
+    while True:
+        got = [m for m in device.requests if m["kind"] == "segment-ack"]
+        if len(got) >= n or time.monotonic() >= deadline:
+            return got
+        time.sleep(0.01)
 
 
 def good_poll():
@@ -258,8 +271,8 @@ device.mode = "segmented"
 src._peer, device.requests = None, []
 src.cycle()
 app.tick(time.time() + 1)
-acks = [m for m in device.requests if m["kind"] == "segment-ack"]
-assert len(acks) == 3, ("each segment is acknowledged", acks)
+got = acks()
+assert len(got) == 3, ("each segment is acknowledged", got)
 values = last()
 assert values["ai-temp"] == 21.5 and values["ai-name"] == "Supply air" and values["ms-state"] == 3.0, values
 assert src.connected is True and src.error is None, src.error
