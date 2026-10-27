@@ -1,0 +1,93 @@
+# DurianDB: where we are, what is left, what comes next
+
+Written 2026-10-27. Measured from the tree, not estimated. `PROGRESS.md` records what exists,
+`TECHNICAL_DEBT.md` what is still wrong, `docs/12-error-handling.md` how a failure reaches an operator.
+This file is the plan that reads the three together.
+
+```
+python tests/run_all.py     # all suites, SQLite in memory
+python -m durian.server     # console on http://localhost:8080
+```
+
+## 1. What we have done
+
+| Measure | Value |
+|---|---|
+| Commits on `main` | 96, at the time of writing |
+| Python modules in `durian/` | 25, 5,301 lines |
+| Test suites in `tests/` | 39, 3,369 lines, all passing |
+| Console | 2,036 lines of JS/CSS/HTML in `web/` |
+| Data source types | 6: virtual, MQTT over TLS, Modbus (TCP/RTU/ASCII), HTTP JSON, SQL, HTTP ingest |
+| Alarm detectors | 11, with on/off delay, deadband and ISA-18.2 states |
+| Open debt entries | 48 (see `TECHNICAL_DEBT.md`) |
+
+Built and covered by tests: authentication (scrypt, sessions, roles, lockout, TOTP, reset, disable, scoped
+machine tokens), safe control (limits, step, two-step confirm, audit), alarms and shelving, maintenance
+windows, calculated points, reports and scheduled email, dashboards and the designer, mimics, history with
+rollups, retention and backups, SQLite and MySQL storage, TLS serving, and CI on four Python jobs plus the
+Rust crate.
+
+### The failure work of 2026-10-27, gap by gap
+
+`docs/12-error-handling.md` §2 listed eleven ways the system could fail without telling an operator.
+All eleven are now closed, each with a test that fails if it reopens:
+
+| # | Gap | Closed by | Test |
+|---|---|---|---|
+| 1 | A failing tick loop was invisible | three consecutive failures raise one URGENT `(system)` alarm naming the exception; a good tick clears it | `test_tick_health.py` |
+| 2 | Handler delivery failures were invisible | per-target failed/last-error/last-ok, `/api/outputs`, a Delivery column | `test_output_health.py` |
+| 3 | Publishers that never start were invisible | they are held as faults with their reason, on the same surface | `test_output_health.py` |
+| 4 | Event retry could grow without bound | capped at 5,000 with a count, and one announcement of what the outage cost | `test_event_buffer.py` |
+| 5 | The source-down alarm dropped the real reason | MQTT connect/disconnect reasons are carried into the alarm | `test_mqtt_health.py` |
+| 6 | Config import had no rollback | one transaction around the whole apply | `test_config_rollback.py` |
+| 7 | A config saved before it could start stayed saved | a failed reload is rolled back to the previous body, and says so | `test_config_rollback.py` |
+| 8 | A non-object JSON body became a 500 | one envelope guard; login and reset too | `test_envelope.py` |
+| 9 | A corrupt schema version replayed every migration | "no table" and "unreadable table" are now different answers | `test_envelope.py` |
+| 10 | NaN from Modbus entered history | non-finite readings, including scaling overflow, are rejected points | `test_modbus_finite.py` |
+| 11 | A weak first-run password crashed with a traceback | it exits with a sentence | `test_tls.py` (same path) |
+
+One architecture item is also closed: the engine and the database no longer share one lock, so a slow tick
+does not stall the console (`test_engine_lock.py`).
+
+## 2. What we need to do
+
+Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these is a feature.
+
+| Item | Why it matters | Size |
+|---|---|---|
+| C12: a broken calc expression sets points BAD but raises no source-down alarm | a calculated point silently stops updating | small |
+| A7: backup runs on the request thread | one HTTP request can block for the whole copy | small |
+| A8: `POST /api/test/source` opens live connections on the request thread | a hanging device hangs a console request | small |
+| C13/C14: lockout dict overflow clears cell state; expired sessions linger until read | small leaks and a lost lockout in a burst | small |
+| A9: all state in-process (sessions, lockout, TOTP replay guard, confirms, escalation) | blocks any second server process; this is the "no HA" limit | large |
+| U1–U8: untested paths | real COM ports, a real broker, MariaDB in CI, the browser checks, the reset CLI | medium each |
+| D1–D8: documented claims that are not true | README and research notes drift from the tree | small each |
+| E5: CI tests 3.12/3.13, local is 3.14 | the version most used is untested | small |
+| A1/A10: one 1,000-line `App` and one 700-line `app.js` | every new route widens the same function | medium |
+
+Also: `PROGRESS.md`, `docs/progress.html` and `TECHNICAL_DEBT.md` still quote 31 suites and 48 open entries
+after this work; they need the recount.
+
+## 3. What we plan to do
+
+The owner's feature list, kept in the order it can actually be finished. Each item is one commit or a small
+run of commits, pushed as it lands.
+
+| Item | Next concrete step | Why in this order |
+|---|---|---|
+| AI/ML dashboard and anomaly scoring | a robust z-score and an EWMA baseline evaluated per point on each tick, exposed as a detector plus a dashboard widget; no model files, no new dependency | it produces a visible feature on data already stored, and sets up forecasting |
+| Forecasting | a linear-trend and seasonal-naive forecast over the bucketed series the history page already queries, drawn on the trend | reuses `Store.series`, no new storage |
+| Data extraction: scheduled export bundles | one tar of history CSV, events CSV and the config JSON on the existing scheduled-report timer | the pieces exist; this is packaging them |
+| Data modelling: unit conversion and tag inheritance | a point-level `unit` conversion table and tags inherited from source/folder with point-level override | small, and makes dashboards and reports less repetitive |
+| Authentication: SSO/OIDC | an authorization-code flow with PKCE, meeting the same session and role model as passwords | largest remaining auth piece; needs a lab IdP to test |
+| Extensive input: OPC UA, BACnet, DNP3, SNMP, Sparkplug B | one driver at a time behind the existing `Source` interface; Sparkplug B first (it is MQTT, already shipped) | each is a new dependency and a new simulator to test against |
+| Hardening continues | finish the open defects in §2 as they are found, each with its test | the failure model says a new failure gets a test before it gets a fix |
+| Rust real-time core | the crate stays an experiment until the Python detector layer stops being fast enough | not wired into the server; keep it zero-dependency and tested in CI |
+
+## 4. How work lands
+
+- One feature or fix per commit, pushed immediately; the message says what failed and what an operator sees.
+- Every non-trivial change leaves one runnable check in `tests/`; the full suite must pass before the push.
+- Python is done here; `rust/` changes go through a subagent and its own commit.
+- `docs/12-error-handling.md` §3 decides where a new failure belongs before any code is written.
+- Never read vendor jars or source; vendor folders stay out of git; `.claude/` is never committed.
