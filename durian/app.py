@@ -46,6 +46,8 @@ PENDING_MAX = 200_000
 EVENT_PENDING_MAX = 5_000  # alarms waiting for a database that failed: a storm during an outage must not exhaust memory
 CONFIRM_SECONDS = 30
 TICK_ALARM_AFTER = 3  # consecutive failed polls before a (system) alarm is raised: one blip is not news
+INTERNAL_ALARM_AFTER = 10  # more unhandled errors than this on one route inside the window is a programming fault
+INTERNAL_ALARM_SECONDS = 600  # the window: ten minutes
 
 
 
@@ -81,6 +83,8 @@ class App:
         self.events_lost = 0  # alarms dropped because the database refused writes for too long; announced when it recovers
         self.tick_failures, self.tick_error, self.tick_ok_ts = 0, None, None  # the poll loop failing is otherwise invisible
         self.tick_event = None  # id of the (system) alarm that says the loop is failing
+        self.internal_errors, self.last_internal_error = 0, None  # unhandled exceptions since start, and the latest
+        self.internal_seen, self.internal_events = {}, {}  # route -> recent error times; route -> its one (system) alarm
         self.reload()
 
     # ---- runtime
@@ -118,25 +122,51 @@ class App:
             raise
         self.tick_failures, self.tick_error, self.tick_ok_ts = 0, None, ts or time.time()
         self._tick_alarm(None)
+        self._internal_healthy(ts or time.time())
+
+    def _raise_or_clear(self, event_id, message):
+        """One (system) URGENT alarm per slot: raise it once, keep it while the fault lasts, clear it when `message`
+        is None. Returns the id to keep (-1 when even the database refused, so /api/health still says so)."""
+        try:
+            if message is None:
+                if event_id is not None and event_id > 0:
+                    self.store.clear_event(event_id, time.time())
+                return None
+            return event_id if event_id is not None else self.store.add_event(Event(SYSTEM, Level.URGENT, message, time.time()))
+        except Exception:
+            return None if message is None else -1
 
     def _sys_alarm(self, attr, message):
         """Raise or clear one (system) alarm, kept on `attr` (its event id). Raising again while it is up does nothing."""
-        try:
-            if message is None:
-                ev = getattr(self, attr)
-                if ev is not None:
-                    if ev > 0:
-                        self.store.clear_event(ev, time.time())
-                    setattr(self, attr, None)
-                return
-            if getattr(self, attr) is None:
-                setattr(self, attr, self.store.add_event(Event(SYSTEM, Level.URGENT, message, time.time())))
-        except Exception:
-            setattr(self, attr, None if message is None else -1)  # the database is down too; /api/health still says so
+        setattr(self, attr, self._raise_or_clear(getattr(self, attr), message))
 
     def _tick_alarm(self, error):
         """Raise, keep, or clear the (system) alarm that says the poll loop is failing."""
         self._sys_alarm("tick_event", None if error is None else f"the poll loop is failing: {error}")
+
+    def record_internal_error(self, route, ex, now=None):
+        """A request hit an exception the code did not expect. Count it, keep one sanitised sentence for the console
+        (the class name stays in the log), and after too many on one route raise that route's one (system) alarm."""
+        now = now or time.time()
+        message = " ".join(str(ex).split())[:200] or "the request failed"  # one line, never the class name
+        self.internal_errors += 1
+        self.last_internal_error = {"route": route, "message": message, "ts": now}
+        times = self.internal_seen.get(route, []) + [now]
+        self.internal_seen[route] = times = [t for t in times if t > now - INTERNAL_ALARM_SECONDS]
+        if len(times) > INTERNAL_ALARM_AFTER:
+            self._route_alarm(route, f"{route} keeps returning internal errors: {len(times)} in ten minutes")
+
+    def _route_alarm(self, route, message):
+        """The same shape as `_sys_alarm`, one alarm per route, kept in `internal_events`."""
+        self.internal_events[route] = self._raise_or_clear(self.internal_events.get(route), message)
+
+    def _internal_healthy(self, now):
+        """A tick with no recent error on a route clears that route's alarm, so a fixed fault stops alarming."""
+        for route in list(self.internal_events):
+            seen = self.internal_seen.get(route, [])
+            if not seen or seen[-1] < now - INTERNAL_ALARM_SECONDS:
+                self._route_alarm(route, None)
+                self.internal_seen.pop(route, None)
 
     def _tick(self, ts):
         with self.engine_lock:
@@ -447,6 +477,7 @@ class App:
             return 200, {"ok": self.tick_failures == 0 and not faults, "tick_failures": self.tick_failures, "tick_error": self.tick_error,
                          "tick_ok_ts": self.tick_ok_ts, "buffered_samples": len(self.pending), "lost_samples": self.lost,
                          "unstored_events": len(self.unstored), "events_lost": self.events_lost, "failed_deliveries": self.outputs.failed if self.outputs else 0,
+                         "internal_errors": self.internal_errors, "last_internal_error": self.last_internal_error,
                          "faults": faults}
         if (method, a, c) == ("GET", "jobs", None) and b:
             rec = self.jobs.get(int(b) if b.isdigit() else -1)
