@@ -45,8 +45,9 @@ the network in clear.
 
 ## What it can do
 
-- **Sources.** Virtual generator, MQTT over TLS, Modbus over TCP, RTU and ASCII, HTTP JSON, read-only SQL, and
-  HTTP ingest push. Calculated points use a small checked expression language, not `eval`.
+- **Sources.** Virtual generator, MQTT over TLS, Sparkplug B over MQTT, Modbus over TCP, RTU and ASCII, SNMP
+  v2c, HTTP JSON, read-only SQL, and HTTP ingest push. Calculated points use a small checked expression
+  language, not `eval`.
 - **History and quality.** SQLite by default, or MySQL/MariaDB. Time-series history, rollups, interval logging,
   `good`/`uncertain`/`bad` quality, CSV export and import, retention with scheduled purge, and backups.
 - **Alarms.** High/low limits, rate of change, no update, no change, change, state, range, smoothness, CUSUM,
