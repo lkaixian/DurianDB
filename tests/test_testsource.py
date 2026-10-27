@@ -66,7 +66,7 @@ admin = app.auth.identity(app.auth.login("admin", "admin-password-123"))
 store.add_user("op", hash_password("viewer-password-1"), ["user"])
 op = app.auth.identity(app.auth.login("op", "viewer-password-1"))
 body = {"type": "http_json", "url": f"http://127.0.0.1:{web.server_port}/", "timeout": 2}
-assert app.handle("POST", "/api/test/source", {}, body, admin)[1]["ok"]
+assert app.handle("POST", "/api/test/source", {"wait": "1"}, body, admin)[1]["ok"]
 try:
     app.handle("POST", "/api/test/source", {}, body, op)
     raise AssertionError("a non-admin must not be able to make the server connect anywhere")

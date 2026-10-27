@@ -105,7 +105,12 @@ async function viewDatabase() {
       try { const r = await api("POST", "/api/database/purge", {}); await draw(); $("#dbm").textContent = `Purged ${r.deleted} samples${r.complete ? "" : " (stopped early, run it again)"}.`; } catch (e) { msg(e.message, true); }
     });
     $("#backup").addEventListener("click", async () => {
-      try { const r = await api("POST", "/api/database/backup", {}); await draw(); $("#dbm").textContent = `Backup ${r.name} written (${bytes(r.bytes)}).`; } catch (e) { msg(e.message, true); }
+      try {
+        const r0 = await api("POST", "/api/database/backup", {}), j = r0.job ? await waitJob(r0.job) : r0;
+        if (j.state === "error") { msg(j.error, true); return; }
+        const r = j.state === "done" ? j.result : j;
+        await draw(); $("#dbm").textContent = `Backup ${r.name} written (${bytes(r.bytes)}).`;
+      } catch (e) { msg(e.message, true); }
     });
     $("#imp").addEventListener("change", async ev => {
       const out = $("#impout"), file = ev.target.files[0], mode = $("#impmode").value;

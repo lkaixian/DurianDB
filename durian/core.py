@@ -449,6 +449,7 @@ class Source:
     points: dict = field(default_factory=dict)
     error: Optional[str] = None  # last poll failure, None when healthy
     manages_error: bool = False  # True for sources that poll in a thread and set `error` themselves
+    error_is_down: bool = False  # a managing source whose `error` is a real fault, not just a note on the points
     meta: dict = field(default_factory=dict)  # type and read roles, filled by config.build_engine
     heartbeat: Optional[float] = None  # seconds of silence (no good value from any point) after which the source counts as down
     down_after: float = 10.0  # a failure must last this long before the source-down alarm, so a start-up or a blip does not alarm
@@ -493,7 +494,7 @@ class Engine:
         if s.last_data is None:
             s.last_data = ts
         reason = None
-        if getattr(s, "connected", None) is False or (s.error and not s.manages_error):
+        if getattr(s, "connected", None) is False or (s.error and (not s.manages_error or getattr(s, "error_is_down", False))):
             reason = s.error or "not connected"
         elif s.heartbeat and ts - s.last_data > s.heartbeat:
             reason = f"no data for {ts - s.last_data:.0f}s (heartbeat {s.heartbeat:g}s)"
@@ -509,10 +510,13 @@ class Engine:
         if ts - s._down_since >= s.down_after:
             s.down_reason = reason
             if ev is None:
-                self.down[s.name] = ev = Event(SOURCE + s.name, Level.URGENT, f"source down: {reason}", ts)
+                # A source whose error is its fault already said it in the operator's language; do not wrap it.
+                own_error = getattr(s, "error_is_down", False) and bool(s.error)
+                self.down[s.name] = ev = Event(SOURCE + s.name, Level.URGENT, reason if own_error else f"source down: {reason}", ts)
                 self._event(ev)
-                for p in s.points.values():  # what we hold is no longer being refreshed
-                    p.update(None, ts, self._event, Quality.BAD)
+                if not own_error:  # such a source already marked its points BAD when it failed
+                    for p in s.points.values():  # what we hold is no longer being refreshed
+                        p.update(None, ts, self._event, Quality.BAD)
 
     def tick(self, ts):
         for s in self.sources:

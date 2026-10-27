@@ -64,10 +64,10 @@ s, raw = c("GET", f"/api/database/backups/{listed[0]}")
 assert s == 200 and isinstance(raw, Raw) and raw.data[:15] == b"SQLite format 3" and raw.filename == listed[0]
 for evil in ("../../etc/passwd", "durian-20200101-000000.db/../x", "x.db", "durian-1.db", ".."):
     assert c("GET", f"/api/database/backups/{evil}")[0] == 404, evil
-assert app.maint.backup_file("../a.db") is None and c("POST", "/api/database/backup")[1]["name"].startswith("durian-")
+assert app.maint.backup_file("../a.db") is None and c("POST", "/api/database/backup", wait="1")[1]["name"].startswith("durian-")
 mem = App(Store())
 mem.auth.bootstrap("admin-password-123")
-assert call(mem, mem.auth.identity(mem.auth.login("admin", "admin-password-123")), "POST", "/api/database/backup")[0] == 501
+assert call(mem, mem.auth.identity(mem.auth.login("admin", "admin-password-123")), "POST", "/api/database/backup", wait="1")[0] == 501
 
 # ---- schedule: each job runs once per day, at or after its hour; a failure is not retried every minute
 import datetime as dt  # noqa: E402

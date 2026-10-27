@@ -21,6 +21,14 @@ async function api(method, path, body, type) {  // `type` sends `body` as it is,
   return data;
 }
 
+async function waitJob(id, ms = 500) {  // poll a background job until it is done or has an error sentence
+  for (;;) {
+    const j = await api("GET", `/api/jobs/${id}`);
+    if (j.state !== "running") return j;
+    await new Promise(r => setTimeout(r, ms));
+  }
+}
+
 function stopTimers() { timers.forEach(clearInterval); timers = []; }
 function every(fn, ms) {
   const run = async () => { try { await fn(); } catch (e) { if (e.status === 401 && me.name) { me = {name: null, roles: ["anonymous"]}; route(); } else showErr(e); } };
@@ -621,7 +629,10 @@ async function viewConfig(kind = "source", name) {
     const out = $("#test-out"), b = ev.target;
     b.disabled = true; out.className = "status"; out.textContent = "Testing...";
     try {
-      const r = await api("POST", "/api/test/source", editor.body());
+      const r0 = await api("POST", "/api/test/source", editor.body());
+      const j = r0.job ? await waitJob(r0.job) : r0;
+      if (j.state === "error") throw new Error(j.error);
+      const r = j.state === "done" ? j.result : j;
       out.className = r.ok ? "" : "err";
       out.innerHTML = `<p>${esc(r.ok ? "Passed. " + r.message : "Failed. " + r.message)}</p>` + (r.found.length ? `<table class="stack"><thead><tr><th>Path or key</th><th>Value</th></tr></thead><tbody>${r.found.map(f => `<tr><td data-label="Path or key"><code>${esc(f.name)}</code></td><td class="num" data-label="Value">${esc(String(f.value))}</td></tr>`).join("")}</tbody></table>` : "");
     } catch (e) { out.className = "err"; out.textContent = e.message; }

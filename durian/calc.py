@@ -87,7 +87,8 @@ class CalcSource(Source):
 
     def __init__(self, name):
         super().__init__(name)
-        self.manages_error = True  # a bad expression is reported on the point and in the error text, it does not make the source "down"
+        self.manages_error = True  # a bad expression is reported on the point and in the error text
+        self.error_is_down = True  # ... and a calculation that cannot run is a real fault: the point silently stops updating
         self.engine, self.trees = None, {}
 
     def add(self, point):
