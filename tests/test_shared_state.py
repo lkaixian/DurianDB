@@ -165,6 +165,13 @@ finally:
 warnings = [r.getMessage() for r in records if r.levelno == logging.WARNING]
 assert len(warnings) == 1 and "tick lease" in warnings[0] and "not polling" in warnings[0], warnings
 
+# a slow tick gets a lease covering three of them, or a second process could take over between renewals
+a3.tick_seconds = 20
+a3.tick(time.time() + 1)
+assert sa3.lease()["owner"] == a3.lease_owner
+assert sa3.lease()["expires"] > time.time() + 55, sa3.lease()
+a3.tick_seconds = 2.0
+
 # ---- a dead owner's lease expires, so the survivor takes over without waiting for it to return
 sa3.run("update tick_lease set expires=? where id=1", (time.time() - 1,))
 b3.tick(time.time())

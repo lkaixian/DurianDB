@@ -77,6 +77,7 @@ class App:
         self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
         self.escalated = set()  # fallback only: escalations live in the store, so any process escalates an alarm once
         self.lease_owner = secrets.token_hex(8)  # this process's identity in the tick lease
+        self.tick_seconds = 2.0  # how often this process polls; the lease outlives a few missed renewals
         self.lease_held = False  # set by the last tick: True when this process owns polling and the scheduled work
         self.lease_warned = False  # the one sentence that another process owns the tick
         self.state_warned = False  # the one sentence that the shared tick lease and escalation guard are unavailable
@@ -125,11 +126,16 @@ class App:
                         "restore the database to share them again")
             log.debug("shared engine state is unavailable: %s", ex)
 
+    def lease_seconds(self):
+        """How long the lease lasts without a renewal. A slow tick must not let a second process take over between
+        renewals, so the lease always covers three of them; the floor keeps a fast tick from expiring a live lease."""
+        return max(TICK_LEASE_SECONDS, 3 * self.tick_seconds)
+
     def _take_lease(self):
         """Claim or renew the tick lease. False means another process owns the tick; True when there is no store to
         ask, because a degraded database must not stop a single server from polling."""
         try:
-            return self.store.take_lease(self.lease_owner, TICK_LEASE_SECONDS)
+            return self.store.take_lease(self.lease_owner, self.lease_seconds())
         except Exception as ex:
             self._degraded(ex)
             return True

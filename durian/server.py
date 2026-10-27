@@ -198,7 +198,9 @@ def main():
         print(f"First run: log in as 'admin' with password {pw} (shown once; change it after logging in).")
     if seeded:
         print("Seeded demo configuration. Edit it under Config in the console.")
-    threading.Thread(target=run_ticks, args=(float(os.environ.get("DURIAN_TICK", 2)),), daemon=True).start()
+    tick = float(os.environ.get("DURIAN_TICK", 2))
+    app.tick_seconds = tick  # the lease outlives three ticks, so a slow poll does not hand the tick to a second process
+    threading.Thread(target=run_ticks, args=(tick,), daemon=True).start()
     threading.Thread(target=run_maintenance, daemon=True).start()
     port = int(os.environ.get("DURIAN_PORT", 8765))
     httpd = make_server(host, port, cert, key)
