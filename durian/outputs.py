@@ -30,11 +30,32 @@ ADDRESS = re.compile(r"^[^@\s<>,;]{1,64}@[^@\s<>,;]{1,255}$")
 HANDLER_TYPES = ("webhook", "email", "setpoint", "report", "slack")
 SECURITY = ("none", "starttls", "ssl")
 PUBLISHER_TYPES = ("mqtt", "http")
+DELIVERY_TIMEOUT = 5
 
 
 def _http_url(u):
     u = urllib.parse.urlparse(u) if isinstance(u, str) else None
     return bool(u and u.scheme in ("http", "https") and u.hostname)
+
+
+def _reason(ex, timeout=DELIVERY_TIMEOUT):
+    """The sentence an operator reads when a delivery did not work, never an exception class name."""
+    if isinstance(ex, urllib.error.HTTPError):
+        return f"the receiver answered {ex.code} {ex.reason}".rstrip()
+    if isinstance(ex, urllib.error.URLError):
+        r = ex.reason
+        if isinstance(r, TimeoutError):
+            return f"the receiver did not answer within {timeout}s"
+        if isinstance(r, ConnectionRefusedError):
+            return "the connection was refused"
+        return f"the request failed: {r}"
+    if isinstance(ex, TimeoutError):
+        return f"the receiver did not answer within {timeout}s"
+    if isinstance(ex, ConnectionRefusedError):
+        return "the connection was refused"
+    if isinstance(ex, smtplib.SMTPException):
+        return f"the mail server refused it: {ex}"
+    return str(ex) or "delivery failed"
 
 
 def _num(v):
@@ -151,7 +172,7 @@ class Outputs:
                     tok = json.loads(Path(p["creds"]).read_text())["token"] if p.get("creds") else None
                 except (OSError, ValueError, KeyError) as ex:
                     log.warning("publisher %s not started: unreadable credentials", p["name"])
-                    self._note(p["name"], "publisher", ex)
+                    self._note(p["name"], "publisher", f"the credentials file could not be read: {ex}")
                     continue
                 self.senders.append({"name": p["name"], "url": p["url"], "names": set(p["points"]), "resend": p.get("resend", 60), "sent": {},
                                      "headers": {"Authorization": "Bearer " + tok} if tok else {}})
@@ -164,7 +185,7 @@ class Outputs:
                 self.publishers.append((cl, p["prefix"], set(p["points"])))
             except Exception as ex:
                 log.warning("publisher %s not started: %s", p["name"], type(ex).__name__)
-                self._note(p["name"], "publisher", ex)
+                self._note(p["name"], "publisher", f"the publisher could not start: {ex}")
         self.worker = threading.Thread(target=self._work, daemon=True)
         self.worker.start()
 
@@ -189,8 +210,8 @@ class Outputs:
         tags, source = self.resolve(ev.point)
         return windows.covers({"scope": sc}, ev.point, tags, source)
 
-    def _note(self, name, kind, ex=None, ok=False):
-        """Remember how one handler or publisher is doing, so a route that has been dead for a week is visible."""
+    def _note(self, name, kind, error=None, ok=False):
+        """Remember how one handler or publisher is doing, so a route that has been dead for a week is visible. `error` is the sentence the operator reads."""
         st = self.status.setdefault(name, {"kind": kind, "failed": 0, "failing": 0, "last_error": None, "last_ok": None, "since": None})
         if ok:
             st["last_ok"], st["failing"], st["last_error"], st["since"] = time.time(), 0, None, None
@@ -198,7 +219,7 @@ class Outputs:
         self.failed += 1
         st["failed"] += 1
         st["failing"] += 1
-        st["last_error"] = f"{type(ex).__name__}: {ex}"[:300]
+        st["last_error"] = (error or "delivery failed")[:300]
         st["since"] = st["since"] or time.time()
 
     def faults(self):
@@ -209,7 +230,7 @@ class Outputs:
         try:
             self.q.put_nowait((target, item))
         except queue.Full:
-            self._note(target or item[0], "output", queue.Full("the delivery queue is full"))
+            self._note(target or item[0], "output", "the delivery queue is full")
             log.warning("output queue full, dropping %s", item[0])
 
     def on_event(self, ev, kind):
@@ -275,16 +296,16 @@ class Outputs:
                     return
                 if item[0] == "webhook":
                     _, url, body, *extra = item
-                    opener.open(urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", **(extra[0] if extra else {})}), timeout=5).read(1024)
+                    opener.open(urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", **(extra[0] if extra else {})}), timeout=DELIVERY_TIMEOUT).read(1024)
                 elif item[0] == "mail":
                     self._send_mail(*item[1:])
                 elif item[0] == "set":
                     self.setter(*item[1:])
             except (urllib.error.URLError, OSError, ValueError, smtplib.SMTPException) as ex:
-                self._note(target or item[0], "output", ex)
+                self._note(target or item[0], "output", _reason(ex))
                 log.warning("%s delivery failed: %s", item[0], type(ex).__name__)
             except Exception as ex:  # a handler bug must not stop the worker
-                self._note(target or item[0], "output", ex)
+                self._note(target or item[0], "output", f"the delivery crashed: {ex}")
                 log.warning("%s delivery crashed: %s", item[0], type(ex).__name__)
             else:
                 if target:

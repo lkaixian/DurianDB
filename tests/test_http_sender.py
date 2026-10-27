@@ -16,10 +16,13 @@ GOT = []
 
 
 class Sink(BaseHTTPRequestHandler):
+    STATUS = 200
+
     def do_POST(self):
         GOT.append((self.headers.get("Authorization"), json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
-        self.send_response(200)
+        self.send_response(self.STATUS)
         self.end_headers()
+        self.wfile.write(b"ok")
 
     def log_message(self, *a):
         pass
@@ -72,4 +75,40 @@ for _ in range(50):
         break
     time.sleep(0.05)
 assert len(GOT) == 2 and GOT[1][1]["value"] == 55, GOT  # a changed value goes at once
+
+# ---- a 500 marks the publisher failed with a sentence; the next good send clears it
+Sink.STATUS = 500
+assert app.handle("POST", "/api/points/pump-setpoint/set", {}, {"value": 56}, admin)[0] == 200
+app.tick(t + 3)
+deadline = time.time() + 10
+while time.time() < deadline and not app.outputs.status.get("p", {}).get("failed"):
+    time.sleep(0.05)
+st = app.outputs.status.get("p", {})
+assert st.get("failed") == 1 and st.get("last_error") == "the receiver answered 500 Internal Server Error", st
+assert app.outputs.failed == 1, app.outputs.failed
+assert [f["name"] for f in app.outputs.faults()] == ["p"], app.outputs.faults()
+
+ok_before = st["last_ok"]
+Sink.STATUS = 200
+assert app.handle("POST", "/api/points/pump-setpoint/set", {}, {"value": 57}, admin)[0] == 200
+app.tick(t + 4)
+deadline = time.time() + 10
+while time.time() < deadline and not (app.outputs.status.get("p", {}).get("failing") == 0 and app.outputs.status["p"]["last_ok"] > ok_before):
+    time.sleep(0.05)
+st = app.outputs.status["p"]
+assert st["last_ok"] > ok_before and st["failing"] == 0 and st["last_error"] is None, st
+assert app.outputs.faults() == [], app.outputs.faults()
+assert GOT[-1][1]["value"] == 57, GOT
+
+# ---- a refused connection marks the publisher failed with the same sentence and counts the value
+assert put("p", {"type": "http", "url": "http://127.0.0.1:1/in", "creds": str(creds), "points": ["pump-setpoint"], "resend": 3600})[0] == 200
+app.reload()
+assert app.handle("POST", "/api/points/pump-setpoint/set", {}, {"value": 58}, admin)[0] == 200
+app.tick(t + 5)
+deadline = time.time() + 10
+while time.time() < deadline and not app.outputs.status.get("p", {}).get("failed"):
+    time.sleep(0.05)
+st = app.outputs.status.get("p", {})
+assert st.get("failed") == 1 and st.get("last_error") == "the connection was refused", st
+assert app.outputs.failed == 1, app.outputs.failed
 print("ok")
