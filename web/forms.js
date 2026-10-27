@@ -219,11 +219,15 @@ const GROUPS = {
       F("scope.points", "Points", "list", {optional: true, hint: "Leave all three empty for every alarm."}),
       F("scope.tags", "Tags", "tags", {optional: true, hint: "Points with all of these tags, for example area:boiler."}),
       F("scope.sources", "Sources", "list", {optional: true})]}],
-  publisher: body => [{title: body.type === "http" ? "HTTP sender" : "MQTT publisher", fields: [
+  publisher: body => [{title: {http: "HTTP sender", sparkplug: "Sparkplug B publisher"}[body.type] || "MQTT publisher", fields: [
     F("enabled", "Enabled", "check"),
     ...(body.type === "http" ? [F("url", "URL", "text", {hint: "Each value is posted here as {point, value, ts, quality}, the body another DurianDB's /api/ingest takes."}),
       F("creds", "Token file", "text", {optional: true, hint: "A JSON file with a token, sent as a Bearer token."}),
       F("resend", "Resend an unchanged value every (seconds)", "number", {optional: true, hint: "Empty = 60. A changed value is always sent at once."})]
+      : body.type === "sparkplug" ? [F("creds", "Credentials file", "text", {hint: "Path to the JSON file with host, port, user, password and CA."}),
+        F("group", "Group ID", "text", {hint: "One topic level: 1 to 64 letters, digits or underscores, without '/', '+' or '#'."}),
+        F("node", "Node ID", "text", {hint: "One topic level: 1 to 64 letters, digits or underscores, without '/', '+' or '#'."}),
+        F("device", "Device ID", "text", {optional: true, hint: "Empty publishes node messages only. One topic level, 1 to 64 letters, digits or underscores, without '/', '+' or '#'."})]
       : [F("creds", "Credentials file", "text"), F("prefix", "Topic prefix", "text", {hint: "Must end with / and not overlap a source's prefix."})]),
     F("points", "Points to publish", "list", {hint: "Point names, comma separated, or * for all."})]}],
   watchlist: () => [{title: "Watch list", fields: [

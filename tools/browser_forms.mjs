@@ -118,6 +118,26 @@ const resolved = await ev(`fetch('/api/points?watchlist=plant-boiler').then(r=>r
 console.log("points by watch list:", resolved);
 if (JSON.stringify(wlCfg?.query) !== JSON.stringify({folder: "plant/boiler"})) { console.log("FAIL: the saved watch list did not keep its query"); process.exit(1); }
 if (!String(resolved).includes("zone-fan") || String(resolved).includes("zone-pump")) { console.log("FAIL: the watch list query did not resolve the folder subtree at read time"); process.exit(1); }
+// 11. a Sparkplug B publisher: the group/node/device ids are on the form, saved, and read back (durian/outputs.py validate_publisher)
+const seeded = await putCfg("publisher/spark-line", {type: "sparkplug", enabled: true, creds: "lab/mqtt/creds.json", group: "Plant", node: "edge-1", points: ["*"]});
+console.log("sparkplug seed:", seeded);
+if (seeded < 200 || seeded >= 300) { console.log("FAIL: the server would not take a Sparkplug publisher to open in the form"); process.exit(1); }
+await go("#config/publisher/spark-line");
+console.log("publisher fields:", await ev(`[...document.querySelectorAll('#fe-fields [data-path]')].map(e=>e.dataset.path).join()`));
+const sg = await set("group", "Plant-2"), sn = await set("node", "edge-2"), sd = await set("device", "plc-7");
+console.log("sparkplug id fields:", sg, sn, sd);
+if ([sg, sn, sd].some(x => x !== "ok")) { console.log("FAIL: the publisher form has no Sparkplug group/node/device fields"); process.exit(1); }
+await shot("7-sparkplug");
+await save();
+const spCfg = await ev(`fetch('/api/config/publisher/spark-line').then(r=>r.json())`);
+console.log("stored sparkplug:", JSON.stringify({type: spCfg?.type, group: spCfg?.group, node: spCfg?.node, device: spCfg?.device}));
+if (spCfg?.type !== "sparkplug" || spCfg?.group !== "Plant-2" || spCfg?.node !== "edge-2" || spCfg?.device !== "plc-7") { console.log("FAIL: the saved Sparkplug publisher did not keep the id fields typed into the form"); process.exit(1); }
+// a group id that would split the topic is refused on its own field
+await go("#config/publisher"); await go("#config/publisher/spark-line");   // settle the mount after the save above re-rendered it
+await set("group", "Plan/t"); await save();
+const badGroup = await ev(`document.querySelector('[data-err="group"]')?.textContent`);
+console.log("sparkplug bad group:", badGroup);
+if (!badGroup) { console.log("FAIL: a Sparkplug group id with '/' was not refused on its field"); process.exit(1); }
 // mobile
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");
