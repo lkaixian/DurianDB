@@ -260,9 +260,9 @@
   </header>
 
   <div class="figures">
-    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">9,791</div><div class="n">lines, 36 modules</div></div>
-    <div class="fig"><div class="k">Tests</div><div class="v">7,272</div><div class="n">lines, 62 suites, all passing</div></div>
-    <div class="fig"><div class="k">Commits</div><div class="v">170</div><div class="n">across 9 calendar days</div></div>
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">10,859</div><div class="n">lines, 37 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">7,857</div><div class="n">lines, 63 suites, all passing</div></div>
+    <div class="fig"><div class="k">Commits</div><div class="v">182</div><div class="n">across 9 calendar days</div></div>
     <div class="fig"><div class="k">Open debt</div><div class="v">14</div><div class="n">entries, none high severity</div></div>
   </div>
 
@@ -271,7 +271,7 @@
     <div class="charts">
       <div class="card">
         <h3>Code in the tree</h3>
-        <div class="summary">Server 9,791 lines · tests 7,272 lines</div>
+        <div class="summary">Server 10,859 lines · tests 7,857 lines</div>
         <div class="legend">
           <span><i class="swatch"></i>server</span>
           <span><i class="swatch dashed"></i>tests</span>
@@ -280,7 +280,7 @@
       </div>
       <div class="card">
         <h3>Test suites</h3>
-        <div class="summary">62 suites · one process each, <code>run_all.py</code></div>
+        <div class="summary">63 suites · one process each, <code>run_all.py</code></div>
         <div class="chart-wrap" id="wrap-suites"></div>
       </div>
     </div>
@@ -394,7 +394,7 @@
           <tr><td class="name">Data extraction</td><td><span class="pill part">partial</span></td><td class="name">Reports, CSV in and out, history CSV, SQL source and REST done. Scheduled export bundles not started.</td></tr>
           <tr><td class="name">Data modelling</td><td><span class="pill part">partial</span></td><td class="name">Calculated points, engineering ranges and multistate labels done. Unit conversion and tag inheritance not started.</td></tr>
           <tr><td class="name">AI and machine learning</td><td><span class="pill none">not started</span></td><td class="name">No model, no anomaly scoring, no forecasting.</td></tr>
-          <tr><td class="name">Data input</td><td><span class="pill part">partial</span></td><td class="name">Eleven source types, three of them device protocols read-only. OPC UA not started.</td></tr>
+          <tr><td class="name">Data input</td><td><span class="pill part">partial</span></td><td class="name">Twelve source types, four of them device protocols read-only. OPC UA is SecurityPolicy None only.</td></tr>
           <tr><td class="name">Rust real-time core</td><td><span class="pill part">experiment</span></td><td class="name">Detector layer ported, 19 tests. Not wired into the server.</td></tr>
           <tr><td class="name">Progress tracking</td><td><span class="pill done">done</span></td><td class="name">This page and <code>PROGRESS.md</code>.</td></tr>
         </tbody>
@@ -414,11 +414,11 @@
 
   var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27"];
   var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"];
-  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 170];
-  var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 36];
-  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 62];
-  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 9791];
-  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 7272];
+  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 182];
+  var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 37];
+  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 63];
+  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 10859];
+  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 7857];
 
   var NS = "http://www.w3.org/2000/svg";
   var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
@@ -523,12 +523,12 @@
   }
 
   build("wrap-code", [
-    { name: "Server lines", short: "9,791", values: SERVER },
-    { name: "Test lines", short: "7,272", values: TESTS, dashed: true }
+    { name: "Server lines", short: "10,859", values: SERVER },
+    { name: "Test lines", short: "7,857", values: TESTS, dashed: true }
   ], { label: "Lines of code in durian and tests, 19 to 27 October" });
 
   build("wrap-suites", [
-    { name: "Test suites", short: "62", values: SUITES }
+    { name: "Test suites", short: "63", values: SUITES }
   ], { label: "Number of test suites, 19 to 27 October" });
 
   // daily table

@@ -10,17 +10,17 @@ Numbers below were measured from the tree on 2026-10-27, not estimated.
 
 | Measure | Value |
 |---|---|
-| Commits | 170 at the time of writing; every fix and feature is its own commit |
-| Python modules in `durian/` | 36 |
-| Lines of Python in `durian/` | 9,791 |
-| Test suites in `tests/` | 62 (`python tests/run_all.py`, all passing) |
-| Lines of test code | 7,272 |
-| Console: JS, CSS, HTML in `web/` | 1,964 lines across 14 files |
+| Commits | 182 at the time of writing; every fix and feature is its own commit |
+| Python modules in `durian/` | 37 |
+| Lines of Python in `durian/` | 10,859 |
+| Test suites in `tests/` | 63 (`python tests/run_all.py`, all passing) |
+| Lines of test code | 7,857 |
+| Console: JS, CSS, HTML in `web/` | 2,230 lines across 14 files |
 | Browser checks in `tools/` | 11 scripts (manual, not in CI) |
-| Data source types | 11 — virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c (GET and GETNEXT walk), DNP3 over TCP, BACnet/IP, HTTP JSON, SQL (SQLite), HTTP ingest push, calculated |
+| Data source types | 12 — virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c (GET and GETNEXT walk), DNP3 over TCP, BACnet/IP, OPC UA, HTTP JSON, SQL (SQLite), HTTP ingest push, calculated |
 | Alarm detectors | 12 — HIGH_LIMIT, LOW_LIMIT, RATE_OF_CHANGE, NO_UPDATE, NO_CHANGE, CHANGE, STATE, RANGE, SMOOTHNESS, CUSUM, ANOMALY, TEXT |
 | Event handlers and publishers | webhook, email, Slack, set-point, scheduled report; MQTT publisher, HTTP sender |
-| Open debt entries | 14 (0 correctness, 0 untrue claims, 3 architecture, 3 dependencies, 8 untested paths) |
+| Open debt entries | 14 (0 correctness, 0 untrue claims, 2 architecture, 3 dependencies, 9 untested paths) |
 | Research notes | 13 in `docs/research/` plus the clean-room policy and the failure model |
 
 ## History by day
@@ -32,7 +32,7 @@ Every point is the state of the tree at the last commit of that UTC day, recompu
 | 2026-10-19 | 19 | 9 | 4 | 1,241 | 274 | clean-room policy, research on the vendor's public behaviour, core model, HTTP shell, SQLite history, first console, MQTT over TLS source, Modbus client and simulator |
 | 2026-10-20 | 79 | 24 | 27 | 5,048 | 2,702 | authentication and roles, dashboards and the designer, quality and source timestamps, ISA-18.2 alarm states, shelving and suppression, KPIs, safe control, calculated points, reports, mimics, Modbus/HTTP/SQL drivers, ingest and machine tokens, MySQL backend, maintenance |
 | 2026-10-21 to 10-26 | 0 | 24 | 27 | 5,048 | 2,702 | no work; the tree was unchanged |
-| 2026-10-27 | 170 | 36 | 62 | 9,791 | 7,272 | HTTPS and binding beyond localhost, account disable, operator notes, CI workflow, failure model, debt register, rate-of-change defect fix, dependencies in CI, progress tracker and history page, every gap in the failure model closed with a test, engine lock split, MQTT source-down reason, Modbus finiteness, Rust and Python ANOMALY detectors, unit conversion and tag inheritance, forecast and baseline endpoints, a prediction dashboard widget, export bundles, background jobs, SSO sign-in, a permission matrix, bounded in-memory state, the Sparkplug B codec, README rewrite with CI badges, a Sparkplug B source, an SNMP v2c source with a GETNEXT walk, a DNP3 source, a BACnet/IP source, retrieval of scheduled export bundles, the forecast on a point's own trend page, baseline drift, tests for the offline admin reset, percent-decoded route names, sign-in state in the store, one home per API rule, the `web/app.js` split by page, MariaDB in CI, a real TLS handshake test, and corrections to the research notes |
+| 2026-10-27 | 182 | 37 | 63 | 10,859 | 7,857 | HTTPS and binding beyond localhost, account disable, operator notes, CI workflow, failure model, debt register, rate-of-change defect fix, dependencies in CI, progress tracker and history page, every gap in the failure model closed with a test, engine lock split, MQTT source-down reason, Modbus finiteness, Rust and Python ANOMALY detectors, unit conversion and tag inheritance, forecast and baseline endpoints, a prediction dashboard widget, export bundles, background jobs, SSO sign-in, a permission matrix, bounded in-memory state, the Sparkplug B codec, README rewrite with CI badges, a Sparkplug B source, an SNMP v2c source with a GETNEXT walk, a DNP3 source, a BACnet/IP source, retrieval of scheduled export bundles, the forecast on a point's own trend page, baseline drift, tests for the offline admin reset, percent-decoded route names, sign-in state in the store, one home per API rule, the `web/app.js` split by page, MariaDB in CI, a real TLS handshake test, corrections to the research notes, an OPC UA source, the tick lease and the escalation guard in the store, a DNP3 console form, delivery tests against a local receiver, and a source template per driver |
 
 ## Built and verified
 
@@ -41,7 +41,7 @@ Every point is the state of the tree at the last commit of that UTC day, recompu
 
 | Area | What is built | Where |
 |---|---|---|
-| Data in | Virtual, MQTT TLS, Sparkplug B (births, deaths, aliases, sequence gaps), Modbus TCP/RTU/ASCII, SNMP v2c GET and a bounded GETNEXT walk, DNP3 over TCP (classes 0–3, flags as quality), BACnet/IP (Who-Is binding, ReadPropertyMultiple), HTTP JSON poll, read-only SQL, HTTP push with scoped tokens | `tests/test_modbus*.py`, `test_pull_sources.py`, `test_ingest.py`, `test_sparkplug_source.py`, `test_snmp_source.py`, `test_dnp3_source.py`, `test_bacnet_source.py` |
+| Data in | Virtual, MQTT TLS, Sparkplug B (births, deaths, aliases, sequence gaps), Modbus TCP/RTU/ASCII, SNMP v2c GET and a bounded GETNEXT walk, DNP3 over TCP (classes 0–3, flags as quality), BACnet/IP (Who-Is binding, ReadPropertyMultiple), OPC UA (SecurityPolicy None, one Read per poll), HTTP JSON poll, read-only SQL, HTTP push with scoped tokens | `tests/test_modbus*.py`, `test_pull_sources.py`, `test_ingest.py`, `test_sparkplug_source.py`, `test_snmp_source.py`, `test_dnp3_source.py`, `test_bacnet_source.py`, `test_opcua_source.py` |
 | Data model | Numeric and text points, engineering range, units, decimals, binary/multistate labels, folders, tags, descriptions | `tests/test_app.py`, `test_text_points.py` |
 | Quality and time | GOOD / UNCERTAIN / BAD per value, source timestamps, future-clock and stale rules, out-of-order drop | `tests/test_quality.py` |
 | Alarms | 12 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all | `tests/test_core.py`, `test_holds.py`, `test_maintenance.py`, `test_journal.py` |
@@ -134,6 +134,6 @@ plus the work the owner asked for on 2026-10-27:
 | Data extraction | Reports, CSV in and out, history CSV, SQL source, REST, one-click and scheduled export bundles done |
 | Data modelling | Calculated points, engineering ranges, unit conversion and tag inheritance done |
 | AI and machine learning | ANOMALY detector, EWMA baseline, robust-z score, short-horizon forecast and the prediction widget done; no learned model, by choice |
-| Extensive data input | 11 source types done, including DNP3 and BACnet/IP (both read-only); the Sparkplug B codec and source are written and tested; OPC UA is not started |
+| Extensive data input | 12 source types done, including DNP3, BACnet/IP and OPC UA (all read-only); the Sparkplug B codec and source are written and tested |
 | Rust real-time core | Experimental port of the detector layer plus the ANOMALY detector and bounded Summary statistics, 28 tests; not wired into the server |
 | Progress tracking | this file, and `docs/progress.html` |

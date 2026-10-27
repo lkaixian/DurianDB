@@ -67,11 +67,9 @@ Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these i
 
 | Item | Why it matters | Size |
 |---|---|---|
-| A9 (remaining): the escalation set, reset codes, pending TOTP secrets and the engine's own tick stay per process | two processes still double-tick and double-escalate; scheduling, not security | medium |
-| U1, U3, U6, U10, U11: untested paths | a real COM port, real email/Slack delivery, the browser checks, a real DNP3 outstation, a real BACnet device | medium each |
 | A12: the SQLite and MySQL paths diverge through hand-written branches | MySQL now runs in CI, but the two dialects still differ by hand | medium |
+| U1, U3, U6, U8–U12: untested paths | a real COM port, real external email/Slack delivery, the browser checks, and every device protocol against real hardware | medium each |
 | E4–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested | small |
-| A13: a DNP3 source has no console form | an operator can only add one through JSON | small |
 
 ## 3. What we plan to do
 
@@ -80,13 +78,17 @@ run of commits, pushed as it lands.
 
 | Item | Next concrete step | Why in this order |
 |---|---|---|
-| Extensive input: OPC UA | the next driver behind the same `Source` interface, with a fake server in its test; read-only, stdlib only | the one protocol an operator will ask for that is still missing |
-| A9 (remaining) | move the escalation set and the tick lease into the store, so a second process neither double-ticks nor double-escalates | the last piece of "two processes cannot disagree" |
 | Hardening continues | finish the open defects in §2 as they are found, each with its test | the failure model says a new failure gets a test before it gets a fix |
-| Console forms | a DNP3 form, then the out-of-service and off-delay controls noted in the roadmap | a driver an operator cannot configure is half a driver |
+| Console forms | the out-of-service and off-delay controls noted in the roadmap | a driver an operator cannot configure is half a driver |
+| Device protocols against hardware | point one driver at a real device on the lab network and record what it reads | every protocol so far is proven against an in-process fake |
 | Rust real-time core | the crate stays an experiment until the Python detector layer stops being fast enough | not wired into the server; keep it zero-dependency and tested in CI |
 
-Done in this pass, so no longer planned: the DNP3 source (`durian/dnp3_source.py`), the BACnet/IP source
+Done in this pass: the OPC UA source (`durian/opcua_source.py`), the tick lease and the escalation guard in the
+store (so a second process neither double-ticks nor double-escalates), a DNP3 console form, delivery tests
+that reach a local receiver for Slack, the webhook and the HTTP sender, a source template for every driver,
+and a one-sentence error for a failed delivery.
+
+Done in the previous pass: the DNP3 source (`durian/dnp3_source.py`), the BACnet/IP source
 (`durian/bacnet_source.py`), the SNMP GETNEXT walk, sign-in state in the store, one home per API rule, the
 `web/app.js` split by page, MariaDB in CI, and a real TLS handshake test.
 

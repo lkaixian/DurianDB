@@ -29,6 +29,11 @@ was written: `requirements.txt` exists.
 In the same pass, A2–A5 and A10: the unknown-point 404, the `AuthError` translation, the role check and the
 JSON-body rule each became one function every route calls (`test_envelope.py`, `test_permissions.py`), and
 `web/app.js` was split into one script per page. A9's security half moved into the store (`test_shared_state.py`).
+A fifth pass closed the rest of A13 (a DNP3 console form) and A9's scheduling: the tick lease and the
+escalation guard are in the store too, so a second process neither double-ticks nor double-escalates. The
+delivery tests narrowed U3 (Slack, the webhook and the HTTP sender now reach a local receiver instead of only
+being validated) and found that a failed delivery showed the operator an exception class name, which is now a
+sentence (`durian/outputs.py`).
 
 ## 2. Documented claims that are not true
 
@@ -39,9 +44,8 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 
 | # | Debt | Where | Severity | Cost |
 |---|---|---|---|---|
-| A9 | What is left of the in-process state: the escalation set, password-reset codes, pending TOTP setup secrets, OIDC pending sign-ins, and the engine's own tick and purge. Sign-ins, lockout, the TOTP replay guard and confirm tokens now live in the store | `durian/auth.py`, `durian/core.py` | medium | Two processes still double-tick and double-escalate; the security decisions are shared, the scheduling is not |
+| A9 | What is still per process: password-reset codes, pending TOTP setup secrets and OIDC pending sign-ins. Sessions, lockout, the TOTP replay guard, confirm tokens, escalation and the tick lease are in the store | `durian/auth.py` | low | These already expire on restart by design; nothing security-relevant is shared by accident |
 | A12 | SQLite and MySQL diverge through hand-written branches, including `cast(ts/? as int)` vs `floor(ts/?)` | `durian/store.py` | medium | The MySQL path is the least tested code in the repo |
-| A13 | A DNP3 source has no console form, so it is configurable through the JSON view or the API only | `web/forms.js` | low | An operator cannot add one without writing JSON |
 
 ## 4. Dependencies and environment
 
@@ -56,13 +60,14 @@ No open entries. D3, D4, D5 and D8 were closed on 2026-10-27: the research notes
 | # | Path | How it is tested now | Severity |
 |---|---|---|---|
 | U1 | Modbus TCP/RTU/ASCII | Simulator, and RTU only over a `socket://` URL — never a real COM port or device | medium |
-| U3 | Email, Slack, escalation delivery | A fake SMTP server; Slack only validates config | medium |
+| U3 | Email, Slack, escalation delivery | A fake SMTP server, and a local HTTP receiver for Slack, the webhook and the HTTP sender; never a real external server | medium |
 | U6 | Every browser check (`tools/browser_*.mjs`, 11 scripts) | Manual, headless Edge on port 9222 | medium |
 | U7 | Newer console work (2FA screen, report handler form) | `node --check` and unit tests only | low |
 | U8 | SNMP source | An in-process fake agent answers crafted datagrams; never a real device | low |
 | U9 | Sparkplug B source | Decoded payloads are fed directly; never a real broker or a real edge node | medium |
 | U10 | DNP3 source | An in-process fake outstation on a socket; never a real outstation | medium |
 | U11 | BACnet/IP source | An in-process fake device on a UDP socket; never a real device | medium |
+| U12 | OPC UA source | An in-process fake server; never a real server, and only SecurityPolicy None is implemented | medium |
 
 ## 6. Deliberate, not debt
 
@@ -72,8 +77,9 @@ These are choices, recorded so nobody "fixes" them by accident:
 - One value per point per MQTT poll (the latest), not every message (`durian/mqtt_source.py:92`).
 - Pulled values carry the tick time, not the read time.
 - No process or script event handlers: they would run arbitrary code on the server.
-- No OPC UA driver. SNMP is v2c GET and a bounded GETNEXT walk (no v3, no traps, no table model); DNP3 is a
-  read-only master over TCP; BACnet/IP is read-only. None of the three writes to a device.
+- No OPC UA encryption: only `SecurityPolicy None`, no Browse and no subscriptions. SNMP is v2c GET and a
+  bounded GETNEXT walk (no v3, no traps, no table model); DNP3 is a read-only master over TCP; BACnet/IP is
+  read-only. None of the four writes to a device.
 - The Sparkplug B source is read-only: no command topics, no STATE topic and no rebirth request, so a point cannot be written over it.
 - Plain HTTP on localhost; anything else needs a certificate.
 - Reset codes and TOTP pending secrets live in memory, so a restart voids them.
