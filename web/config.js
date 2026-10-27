@@ -28,6 +28,11 @@ const TEMPLATES = {
     "HTTP JSON document": {type: "http_json", enabled: true, read_roles: ["user"], url: "http://127.0.0.1:8000/data", period: 10, timeout: 5},
     "Calculated points": {type: "calc", enabled: true, read_roles: ["user"]},
     "SQL query (SQLite file, read-only)": {type: "sql", enabled: true, read_roles: ["user"], path: "plant.db", query: "select name, value from readings", period: 10},
+    "SNMP agent": {type: "snmp", enabled: true, read_roles: ["user"], snmp: {address: "1.3.6.1.2.1.1.5.0"}, period: 15, timeout: 2},
+    "Sparkplug B edge node": {type: "sparkplug", enabled: true, read_roles: ["user"], creds: "lab/mqtt/creds.json", group: "Plant"},
+    "DNP3 outstation": {type: "dnp3", enabled: true, read_roles: ["user"], dnp3: {address: "127.0.0.1:20000", outstation: 1}, period: 5, timeout: 2},
+    "BACnet/IP device": {type: "bacnet", enabled: true, read_roles: ["user"], bacnet: {address: "127.0.0.1:47808", device: 1001}, period: 10, timeout: 2},
+    "OPC UA server": {type: "opcua", enabled: true, read_roles: ["user"], opcua: {address: "127.0.0.1:14360", path: ""}, period: 5, timeout: 2},
   },
   point: {
     "Virtual walk": {source: "demo", ...POINT_BASE, generator: {kind: "walk", start: 50, min: 0, max: 100, step: 1}, detectors: [{kind: "HIGH_LIMIT", limit: 80, level: "WARNING", duration: 0}]},
