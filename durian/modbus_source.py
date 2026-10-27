@@ -3,13 +3,16 @@
 Failure handling follows the studied behavior: per-request timeout and retries, a device that rejects a read
 only loses those points, and a dead link backs off (period x scale^failures, capped) instead of hammering.
 """
+import logging
 import math
 import threading
 import time
 
-from .core import Logging, Point, Quality, Source
+from .core import Logging, Point, Quality, Source, sentence
 from .modbus import (LIMITS, RANGES, TYPES, ModbusClient, ModbusError, ModbusException, SerialLink, TcpLink,
                      decode, encode, plan_batches)
+
+log = logging.getLogger("durian.modbus_source")
 
 DEFAULTS = {"framing": None, "timeout": 0.5, "retries": 2, "period": 5.0, "persistent": True, "contiguous_only": True,
             "multiple_writes_only": False, "max_read_bits": 2000, "max_read_regs": 125, "max_write_regs": 120,
@@ -77,7 +80,8 @@ class ModbusSource(Source):
                 try:
                     self.cycle()
                 except Exception as e:  # a bug here must not silently kill polling
-                    self.error = f"internal error: {type(e).__name__}: {e}"
+                    log.exception("modbus source %s cycle bug", self.name)
+                    self.error = f"internal error: {sentence(e) or 'the source loop failed'}"
                 self.poll_ms = (time.monotonic() - started) * 1000
             wait = max(0.05, self.cfg["period"] - (time.monotonic() - started))  # a slow cycle shortens the wait, not the schedule
             self._stop.wait(max(wait, self.next_try - time.time()))
@@ -95,7 +99,7 @@ class ModbusSource(Source):
                         try:
                             raw = self._read(unit, rng, start, count)
                         except ModbusException as e:  # the device said no: only these points are affected
-                            rejected += [f"{n}: {e}" for n, _, _ in members]
+                            rejected += [f"{n}: {sentence(e)}" for n, _, _ in members]
                             online[unit] = True
                             continue
                         online[unit] = True
@@ -103,13 +107,13 @@ class ModbusSource(Source):
                             try:
                                 values[name] = self._convert(self.points[name], raw[addr - start:addr - start + n])
                             except (ValueError, ModbusError) as e:
-                                rejected.append(f"{name}: {e}")
+                                rejected.append(f"{name}: {sentence(e)}")
                 self.client.end_cycle()
         except ModbusError as e:  # transport failure: nothing more can be read this cycle
             self.fails += 1
             wait = min(self.cfg["period"] * self.cfg["backoff_scale"] ** self.fails, self.cfg["backoff_max"])
             self.next_try = time.time() + wait
-            self.error, self.connected = f"{type(e).__name__}: {e} (retry in {wait:.0f}s)", False
+            self.error, self.connected = f"{sentence(e) or 'the device did not answer'} (retry in {wait:.0f}s)", False
             values = {}
             online = {u: False for u in online or {u for u, *_ in self._plan}}
         else:
@@ -171,8 +175,8 @@ class ModbusSource(Source):
                      else self.client.write_regs(m["unit"], m["address"], regs))
                 self.client.end_cycle()
         except ModbusException as e:
-            raise RuntimeError(f"device refused the write: {e}")
+            raise RuntimeError(f"device refused the write: {sentence(e)}")
         except (ModbusError, ValueError) as e:
-            raise RuntimeError(f"write failed: {e}")
+            raise RuntimeError(f"write failed: {sentence(e)}")
         with self._lock:
             self._latest[name] = float(value)

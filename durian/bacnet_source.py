@@ -24,6 +24,7 @@ import socket
 import struct
 import time
 
+from .core import sentence
 from .polled import PolledSource
 
 MAX_OBJECTS = 20  # objects one poll reads, so one tick and one request stay bounded
@@ -600,8 +601,8 @@ class BacnetSource(PolledSource):
         return self._invoke
 
     def failure_text(self, e):
-        """BACnet failures are already sentences, so the operator never sees an exception class name."""
-        return str(e)
+        """BACnet failures are already sentences; sentence() also strips any errno tag a wrapped OS error brings."""
+        return sentence(e)
 
     def _specs(self):
         """([(point, object type, instance, property id)], rejection sentences for bad point config)."""
@@ -661,7 +662,7 @@ class BacnetSource(PolledSource):
                 try:
                     values[p.name] = _point_value(p, PROPERTY_NAMES.get(prop), value, object_type, instance)
                 except BacnetError as e:
-                    rejected.append(f"{p.name}: {e}")
+                    rejected.append(f"{p.name}: {sentence(e)}")
         return values, rejected
 
     def _bind(self, sock):
@@ -704,7 +705,7 @@ class BacnetSource(PolledSource):
             try:
                 return decode_rpm_ack(msg["body"])
             except BacnetError as e:
-                raise BacnetError(f"the ReadPropertyMultiple reply could not be read: {e}") from None
+                raise BacnetError(f"the ReadPropertyMultiple reply could not be read: {sentence(e)}") from None
         if msg["kind"] in ("reject", "error"):
             raise _Unsupported()
         if msg["kind"] == "abort":
@@ -727,7 +728,7 @@ class BacnetSource(PolledSource):
                     try:
                         value, _ = _app_value(msg["body"], 0)
                     except BacnetError as e:
-                        results[key] = ("error", str(e))
+                        results[key] = ("error", sentence(e))
                     else:
                         results[key] = ("value", value)
                 elif msg["kind"] == "error":
@@ -792,7 +793,7 @@ class BacnetSource(PolledSource):
             except socket.timeout:
                 continue
             except OSError as e:
-                raise BacnetError(f"cannot read from {self.host}:{self.port}: {e}") from None
+                raise BacnetError(f"cannot read from {self.host}:{self.port}: {sentence(e)}") from None
             try:
                 msg = decode_datagram(data)
             except BacnetError:
@@ -812,4 +813,4 @@ class BacnetSource(PolledSource):
         except socket.gaierror:
             raise BacnetError(f"cannot resolve the BACnet host name '{self.host}'") from None
         except OSError as e:
-            raise BacnetError(f"cannot send to {self.host}:{self.port}: {e}") from None
+            raise BacnetError(f"cannot send to {self.host}:{self.port}: {sentence(e)}") from None

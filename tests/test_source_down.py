@@ -51,7 +51,7 @@ assert e.events[0].cleared_ts == 9.0 and s.down_reason is None and s.points["a"]
 e, s = mk(down_after=0.0)
 s.fail = True
 e.tick(1.0)
-assert "OSError" in e.events[0].message
+assert "OSError" not in e.events[0].message and e.events[0].message, e.events[0].message  # a sentence, not a class name
 s.fail = False
 e.tick(2.0)
 assert e.events[0].cleared_ts == 2.0

@@ -18,7 +18,7 @@ from urllib.parse import unquote
 from .auth import ApiError, Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from . import export, notes, pointcsv, units, windows
 from .config import (build_engine, resolve, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
-from .core import SOURCE, Event, Level, Quality, alarm_state, state_label
+from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_label
 from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, drift as baseline_drift, forecast as forecast_series
@@ -154,7 +154,7 @@ class App:
             self.lease_held = True
             self._tick(ts)
         except Exception as e:
-            self.tick_error = f"{type(e).__name__}: {e}"
+            self.tick_error = sentence(e) or "the poll loop stopped working"
             self.tick_failures += 1
             if self.tick_failures >= TICK_ALARM_AFTER:
                 self._tick_alarm(self.tick_error)
@@ -206,7 +206,7 @@ class App:
         """A request hit an exception the code did not expect. Count it, keep one sanitised sentence for the console
         (the class name stays in the log), and after too many on one route raise that route's one (system) alarm."""
         now = now or time.time()
-        message = " ".join(str(ex).split())[:200] or "the request failed"  # one line, never the class name
+        message = sentence(ex) or "the request failed"  # one line, never the class name, errno or path
         self.internal_errors += 1
         self.last_internal_error = {"route": route, "message": message, "ts": now}
         times = self.internal_seen.get(route, []) + [now]
@@ -297,7 +297,7 @@ class App:
             with self.engine_lock:
                 s.write(p.name, v)
         except RuntimeError as ex:
-            raise ApiError(502, str(ex))
+            raise ApiError(502, sentence(ex))
         if hasattr(s, "override"):  # keep held values across engine rebuilds and restarts
             self.store.put("override", p.name, {"value": v}) if v is not None else self.store.delete("override", p.name)
         self.store.audit(who, "set", f"{p.name}: {p.last} -> {v}{note}")
@@ -312,7 +312,7 @@ class App:
                 self.check_setpoint(p, v)
                 self.perform_write(p, s, v, who)
             except ApiError as e:
-                self.store.audit(who, "set.refused", f"{point}: {e}")
+                self.store.audit(who, "set.refused", f"{point}: {sentence(e)}")
 
     def scope_of(self, name):
         p, s = self.points().get(name, (None, None))
@@ -422,7 +422,7 @@ class App:
                 del self.pending[:len(self.pending) - PENDING_MAX]
             if self.sys_event is None:
                 try:
-                    self.sys_event = self.store.add_event(Event(SYSTEM, Level.URGENT, f"history is not being saved: {type(e).__name__}", ts))
+                    self.sys_event = self.store.add_event(Event(SYSTEM, Level.URGENT, f"history is not being saved: {sentence(e) or 'the database did not answer'}", ts))
                 except Exception:
                     self.sys_event = -1  # cannot even record it; the database page still shows the buffer
             return
@@ -510,7 +510,7 @@ class App:
         try:
             base = ewma_baseline(pairs, 0.3)
         except ValueError as e:  # too little history is an answer with a note, not an error
-            return 200, {"point": point, "window": window, "baseline": None, "note": str(e)}
+            return 200, {"point": point, "window": window, "baseline": None, "note": sentence(e)}
         return 200, {"point": point, "window": window, "baseline": base}
 
     def drift_view(self, ident, point, q):
@@ -571,7 +571,7 @@ class App:
         try:
             return self.oidc.authorize_url(cfg)
         except OIDCError as ex:
-            raise ApiError(ex.status, str(ex))
+            raise ApiError(ex.status, sentence(ex))
 
     def sso_callback(self, query):
         """Complete a sign-in and return the session token. State is checked before the token endpoint is touched."""
@@ -583,7 +583,7 @@ class App:
             name = local_identity(self.store, cfg, claims)
             token = self.auth.login_sso(name)
         except OIDCError as ex:
-            raise ApiError(ex.status, str(ex))
+            raise ApiError(ex.status, sentence(ex))
         self.store.audit(name, "login.sso", f"provider {cfg['issuer']}")  # never the state, nonce or code
         return token
 
@@ -964,7 +964,7 @@ class App:
         try:
             candidates = parse_payload(body if method == "POST" else None, query)
         except ValueError as e:
-            raise ApiError(400, str(e))
+            raise ApiError(400, sentence(e))
         accepted, rejected = s.submit(candidates)
         return (200 if accepted else 422), {"accepted": accepted, "rejected": rejected}
 
@@ -1146,7 +1146,7 @@ class App:
                 try:
                     r = self.maint.backup()
                 except NotImplementedError as e:
-                    raise ApiError(501, str(e))
+                    raise ApiError(501, sentence(e))
                 self.store.audit(ident["name"], "database.backup", r["name"])
                 return 200, r
             jid = self.jobs.submit("backup", lambda: self._backup(ident["name"]), ident["name"])
@@ -1290,7 +1290,7 @@ class App:
                 self.outputs.send_report(h, self.report_summary(self.SYSTEM, q)[1].data, q["hours"])
                 sent.append(h["name"])
             except ApiError as e:
-                self.store.audit("system", "report.failed", f"{h['name']}: {e}")
+                self.store.audit("system", "report.failed", f"{h['name']}: {sentence(e)}")
         return sent
 
     def report_summary(self, ident, query):
@@ -1351,7 +1351,7 @@ class App:
         try:
             data, name, _ = export.build(self.store, **self._export_args(query))
         except export.ExportError as e:
-            raise ApiError(422, str(e))
+            raise ApiError(422, sentence(e))
         self.store.audit(ident["name"], "export.bundle", f"{name}: {len(data)} bytes")
         return 200, Raw(data, "application/zip", name)
 
@@ -1369,7 +1369,7 @@ class App:
         try:
             return 200, export.preview(self.store, **self._export_args(query))
         except export.ExportError as e:
-            raise ApiError(422, str(e))
+            raise ApiError(422, sentence(e))
 
     def import_history(self, query, text, ident):
         point = query.get("point")
@@ -1484,7 +1484,7 @@ class App:
                     self.reload()
                 except Exception:
                     log.exception("reload failed after rolling back %s/%s", kind, name)
-                raise ApiError(409, f"{kind} '{name}' was not saved: it could not be started ({type(ex).__name__}: {ex}). The previous version is still in place.")
+                raise ApiError(409, f"{kind} '{name}' was not saved: it could not be started ({sentence(ex) or 'check its settings'}). The previous version is still in place.")
             self.store.audit(ident["name"], "config.put", f"{kind}/{name}" + _diff(old, body))
             return 200, {"saved": name}
         if method == "DELETE":
@@ -1570,4 +1570,4 @@ class App:
         try:
             check_password_strength(pw)
         except AuthError as ex:
-            raise ApiError(422, "validation failed", [{"property": "password", "message": str(ex)}])
+            raise ApiError(422, "validation failed", [{"property": "password", "message": sentence(ex)}])

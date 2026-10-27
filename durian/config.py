@@ -8,7 +8,7 @@ import random
 import re
 from pathlib import Path
 
-from .core import Engine, Logging, Point, Source, make_detector
+from .core import Engine, Logging, Point, Source, make_detector, sentence
 from . import calc, http_source, sql_source, units, windows
 from .dnp3_source import POINT_GROUPS, Dnp3Source, parse_address
 from .bacnet_source import (MAX_INSTANCE, OBJECT_TYPES, PROPERTIES, BacnetError, BacnetSource,
@@ -170,7 +170,7 @@ def _bacnet_source_errors(b, add):
     try:
         parse_address(m.get("address"))
     except BacnetError as e:
-        add("bacnet.address", str(e))
+        add("bacnet.address", sentence(e))
     if not _int(m.get("device"), 0, MAX_INSTANCE):
         add("bacnet.device", f"must be the device instance, a whole number from 0 to {MAX_INSTANCE}")
     if "timeout" in b and not (_num(b["timeout"]) and 1 <= b["timeout"] <= 30):
@@ -216,7 +216,7 @@ def _opcua_source_errors(b, add):
     try:
         parse_opcua_address(m.get("address"))
     except OpcuaError as e:
-        add("opcua.address", str(e))
+        add("opcua.address", sentence(e))
     if "path" in m and not (isinstance(m["path"], str) and len(m["path"]) <= 200
                             and not any(c.isspace() for c in m["path"])):
         add("opcua.path", "must be the endpoint URL path, up to 200 characters, such as plant")
@@ -244,7 +244,7 @@ def _opcua_point_errors(b, add):
     try:
         parse_opcua_node(m.get("node"))
     except OpcuaError as e:
-        add("opcua.node", str(e))
+        add("opcua.node", sentence(e))
 
 
 class Virtual(Source):
@@ -369,7 +369,7 @@ def validate_source(name, b):
         try:
             load_creds(b.get("creds", ""))
         except (OSError, ValueError, TypeError) as ex:
-            add("creds", f"cannot use credentials file: {type(ex).__name__}")
+            add("creds", f"cannot use credentials file: {sentence(ex) or 'it could not be read'}")
         pre, cmd = b.get("prefix", "durian/"), b.get("cmd_prefix", "durian-cmd/")
         for prop, v in (("prefix", pre), ("cmd_prefix", cmd)):
             if not isinstance(v, str) or not v.endswith("/") or "#" in v or "+" in v:
@@ -468,7 +468,7 @@ def validate_point(name, b, store):
                     raise ValueError("a text point takes TEXT, CHANGE or NO_UPDATE alarms" if text else "the TEXT alarm needs datatype text")
                 make_detector(d)
             except (ValueError, TypeError, AttributeError) as ex:
-                add(f"detectors[{i}]", str(ex))
+                add(f"detectors[{i}]", sentence(ex) or "the detector settings do not fit together")
     if not (isinstance(b.get("description", ""), str) and len(b.get("description", "")) <= 200):
         add("description", "must be text, up to 200 characters")
     for k in ("eu_low", "eu_high", "set_min", "set_max"):
@@ -540,7 +540,7 @@ def validate_point(name, b, store):
             if name in calc.refs(tree):
                 add("calc.expression", "a point cannot read itself")
         except ValueError as ex:
-            add("calc.expression", str(ex))
+            add("calc.expression", sentence(ex) or "the expression could not be read")
     return e
 
 
@@ -656,7 +656,7 @@ def build_engine(store):
                     src.add(make_point(n, p, s["name"]))
         except Exception as ex:
             src = Source(s["name"])
-            src.error = f"cannot start: {type(ex).__name__}"
+            src.error = f"cannot start: {sentence(ex) or 'check its settings'}"
         src.meta = {"type": s.get("type"), "read_roles": s.get("read_roles", ["user"]),
                     "default_tags": s.get("default_tags") or s.get("tags") or {},
                     "default_unit": s.get("default_unit") or s.get("unit") or "", "folders": s.get("folders", {})}

@@ -19,7 +19,7 @@ from pathlib import Path
 
 from . import windows
 from .config import load_creds
-from .core import SOURCE, Level, Quality
+from .core import SOURCE, Level, Quality, sentence
 from .mqtt_source import tls_client
 from .polled import NoRedirect
 
@@ -39,7 +39,8 @@ def _http_url(u):
 
 
 def _reason(ex, timeout=DELIVERY_TIMEOUT):
-    """The sentence an operator reads when a delivery did not work, never an exception class name."""
+    """The sentence an operator reads when a delivery did not work, never an exception class name,
+    an errno tag or a file path (docs/12 section 4)."""
     if isinstance(ex, urllib.error.HTTPError):
         return f"the receiver answered {ex.code} {ex.reason}".rstrip()
     if isinstance(ex, urllib.error.URLError):
@@ -48,14 +49,18 @@ def _reason(ex, timeout=DELIVERY_TIMEOUT):
             return f"the receiver did not answer within {timeout}s"
         if isinstance(r, ConnectionRefusedError):
             return "the connection was refused"
-        return f"the request failed: {r}"
+        return sentence(r) or "the receiver could not be reached"
     if isinstance(ex, TimeoutError):
         return f"the receiver did not answer within {timeout}s"
     if isinstance(ex, ConnectionRefusedError):
         return "the connection was refused"
+    if isinstance(ex, smtplib.SMTPResponseException):  # the server's own text can be bytes and full of codes
+        return f"the mail server answered {ex.smtp_code}"
     if isinstance(ex, smtplib.SMTPException):
-        return f"the mail server refused it: {ex}"
-    return str(ex) or "delivery failed"
+        return sentence(ex) or "the mail server did not take the message"
+    if isinstance(ex, OSError):
+        return sentence(ex) or "the connection failed"
+    return sentence(ex) or "delivery failed"
 
 
 def _num(v):
@@ -136,7 +141,8 @@ def validate_publisher(name, b, store):
         try:
             load_creds(b.get("creds", ""))
         except (OSError, ValueError, TypeError) as ex:
-            add("creds", f"cannot use credentials file: {type(ex).__name__}")
+            log.warning("publisher credentials file %s rejected: %s", b.get("creds"), ex)
+            add("creds", f"cannot use credentials file: {sentence(ex) or 'it could not be read'}")
         pre = b.get("prefix", "durian-out/")
         if not isinstance(pre, str) or not pre.endswith("/") or "#" in pre or "+" in pre:
             add("prefix", "must be a topic prefix ending in '/', without wildcards")
@@ -171,8 +177,8 @@ class Outputs:
                 try:
                     tok = json.loads(Path(p["creds"]).read_text())["token"] if p.get("creds") else None
                 except (OSError, ValueError, KeyError) as ex:
-                    log.warning("publisher %s not started: unreadable credentials", p["name"])
-                    self._note(p["name"], "publisher", f"the credentials file could not be read: {ex}")
+                    log.warning("publisher %s not started: unreadable credentials: %s", p["name"], ex)
+                    self._note(p["name"], "publisher", "the credentials file could not be read; it must be a JSON file holding a token")
                     continue
                 self.senders.append({"name": p["name"], "url": p["url"], "names": set(p["points"]), "resend": p.get("resend", 60), "sent": {},
                                      "headers": {"Authorization": "Bearer " + tok} if tok else {}})
@@ -184,8 +190,8 @@ class Outputs:
                 cl.loop_start()
                 self.publishers.append((cl, p["prefix"], set(p["points"])))
             except Exception as ex:
-                log.warning("publisher %s not started: %s", p["name"], type(ex).__name__)
-                self._note(p["name"], "publisher", f"the publisher could not start: {ex}")
+                log.warning("publisher %s not started: %s: %s", p["name"], type(ex).__name__, ex)
+                self._note(p["name"], "publisher", f"the publisher could not start: {sentence(ex) or 'check the broker address and credentials'}")
         self.worker = threading.Thread(target=self._work, daemon=True)
         self.worker.start()
 
@@ -303,10 +309,10 @@ class Outputs:
                     self.setter(*item[1:])
             except (urllib.error.URLError, OSError, ValueError, smtplib.SMTPException) as ex:
                 self._note(target or item[0], "output", _reason(ex))
-                log.warning("%s delivery failed: %s", item[0], type(ex).__name__)
+                log.warning("%s delivery failed: %s: %s", item[0], type(ex).__name__, ex)
             except Exception as ex:  # a handler bug must not stop the worker
-                self._note(target or item[0], "output", f"the delivery crashed: {ex}")
-                log.warning("%s delivery crashed: %s", item[0], type(ex).__name__)
+                self._note(target or item[0], "output", f"the delivery crashed: {sentence(ex) or 'the handler could not run'}")
+                log.warning("%s delivery crashed: %s: %s", item[0], type(ex).__name__, ex)
             else:
                 if target:
                     self._note(target, "output", ok=True)

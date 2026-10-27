@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .app import ApiError, App
+from .core import sentence
 from .auth import AuthError
 from .config import seed
 from .maintenance import Raw
@@ -135,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
             status, payload = app.handle(method, url.path, query, body, ident)
             self.send(status, payload)
         except ApiError as ex:  # includes AuthError: a credential failure already speaks the same language
-            self.send(ex.status, {"error": str(ex), **({"errors": ex.errors} if ex.errors else {})})
+            self.send(ex.status, {"error": sentence(ex), **({"errors": ex.errors} if ex.errors else {})})
         except Exception as ex:
             log.exception("unhandled error")
             app.record_internal_error(route_shape(method, url.path), ex)
@@ -193,7 +194,7 @@ def main():
     try:
         pw = app.auth.bootstrap(os.environ.get("DURIAN_ADMIN_PASSWORD"))
     except AuthError as ex:  # a weak DURIAN_ADMIN_PASSWORD is a sentence, not a stack trace
-        raise SystemExit(f"cannot create the first administrator: {ex}")
+        raise SystemExit(f"cannot create the first administrator: {sentence(ex)}")
     if pw:
         print(f"First run: log in as 'admin' with password {pw} (shown once; change it after logging in).")
     if seeded:

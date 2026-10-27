@@ -23,6 +23,7 @@ cannot use is reported per point and counted, while the rest of the poll still u
 """
 import socket
 
+from .core import sentence
 from .polled import PolledSource
 
 MAX_VARBINDS = 10_000  # a reply is one UDP datagram; this only stops a hostile length from looping
@@ -376,8 +377,8 @@ class SnmpSource(PolledSource):
         return self._request_id
 
     def failure_text(self, e):
-        """SNMP failures are already sentences, so the operator never sees an exception class name."""
-        return str(e)
+        """SNMP failures are already sentences; sentence() also strips any errno tag a wrapped OS error brings."""
+        return sentence(e)
 
     def fetch(self):
         wanted, walks = [], []
@@ -409,7 +410,7 @@ class SnmpSource(PolledSource):
                     try:
                         values[p.name] = _point_value(p, oid, tag, value)
                     except ValueError as e:
-                        rejected.append(f"{p.name}: {e}")
+                        rejected.append(f"{p.name}: {sentence(e)}")
         for p, base in walks:
             binds, note = self._walk(base)
             if note:
@@ -419,7 +420,7 @@ class SnmpSource(PolledSource):
                 try:
                     result = _point_value(p, oid, tag, value)
                 except ValueError as e:
-                    first_error = first_error or str(e)
+                    first_error = first_error or sentence(e)
                     continue
                 values[p.name] = result
                 found = True
@@ -461,7 +462,7 @@ class SnmpSource(PolledSource):
             except SnmpError as e:
                 if not binds:
                     raise
-                return binds, str(e)
+                return binds, sentence(e)
 
     def _exchange(self, packet):
         """One request datagram, with at most one retry after a timeout. Other failures fail at once."""
@@ -474,11 +475,11 @@ class SnmpSource(PolledSource):
                     except socket.gaierror:
                         raise SnmpError(f"cannot resolve the SNMP host name '{self.host}'") from None
                     except OSError as e:
-                        raise SnmpError(f"cannot send to {self.host}:{self.port}: {e}") from None
+                        raise SnmpError(f"cannot send to {self.host}:{self.port}: {sentence(e)}") from None
                     data, _ = s.recvfrom(65535)
                     return data
             except socket.timeout:
                 continue
             except OSError as e:
-                raise SnmpError(f"cannot reach {self.host}:{self.port}: {e}") from None
+                raise SnmpError(f"cannot reach {self.host}:{self.port}: {sentence(e)}") from None
         raise SnmpError(f"the device at {self.host}:{self.port} did not answer within {self.timeout:g}s")
