@@ -294,6 +294,7 @@ async function viewPoint(name) {
     <div class="pd-grid">
       <section aria-labelledby="pd-t"><h3 id="pd-t">Trend</h3>
         <form class="row" id="pd-win"><label>Window <select id="pd-hours"><option value="3600">1 hour</option><option value="21600">6 hours</option><option value="86400" selected>24 hours</option><option value="604800">7 days</option></select></label><button type="button" id="pd-fc" aria-pressed="${forecastOn}">Forecast: ${forecastOn ? "on" : "off"}</button></form>
+        <p class="note" id="pd-drift" hidden></p>
         <div id="pd-chart" class="status">Loading trend...</div></section>
       <section aria-labelledby="pd-a"><h3 id="pd-a">Alarms on this point</h3><div id="pd-alarms" class="status" data-live>Loading alarms...</div></section>
       <section id="pd-control-box" aria-labelledby="pd-c" hidden><h3 id="pd-c">Set the value</h3><div id="pd-control"></div></section>
@@ -402,6 +403,19 @@ async function viewPoint(name) {
     $("#pd-fc").textContent = "Forecast: " + (forecastOn ? "on" : "off");
     chart(true).catch(e => showErr(e, $("#pd-chart")));
   });
+  // One quiet line, fetched once: whether this point's own baseline moved since the preceding day.
+  const driftLine = async () => {
+    try {
+      const r = await api("GET", `/api/points/${q}/drift?hours=24&compare=24`);
+      if (mine !== pointViewSeq) return;
+      const note = r.note ? " " + r.note.charAt(0).toUpperCase() + r.note.slice(1) : "";
+      const box = $("#pd-drift");
+      box.hidden = false;
+      box.textContent = r.verdict === "unknown" ? `Baseline: ${r.note.charAt(0).toUpperCase() + r.note.slice(1)}`
+        : `Baseline ${r.verdict === "steady" ? "steady" : `drifting ${r.direction}${r.z == null ? "" : ` ${r.z.toFixed(1)}σ`}`} over the last ${r.hours} h.${note}`;
+    } catch { /* the trend and the forecast still stand without this line */ }
+  };
+  driftLine();
   every(refresh, 2000);
   every(chart, 6000);
 }

@@ -34,6 +34,7 @@ JOBS = ("GET", "jobs", N, None)
 POINTS = ("GET", "points", None, W)
 FORECAST = ("GET", "points", N, "forecast")
 BASELINE = ("GET", "points", N, "baseline")
+DRIFT = ("GET", "points", N, "drift")
 POINT = ("GET", "points", N, None)
 NOTES = (("GET", "POST"), "notes", N, None)
 REPORTS = ("GET", "reports", "summary", W)
@@ -192,6 +193,8 @@ ROWS = [
     R(FORECAST, "GET", "/api/points/boiler-temp/forecast", anon=404, viewer=200, ops=404, admin=200),
     R(FORECAST, "GET", "/api/points/status-text/forecast", anon=404, viewer=404, ops=400, admin=400),
     R(BASELINE, "GET", "/api/points/boiler-temp/baseline", anon=404, viewer=200, ops=404, admin=200),
+    R(DRIFT, "GET", "/api/points/boiler-temp/drift", anon=404, viewer=200, ops=404, admin=200),
+    R(DRIFT, "GET", "/api/points/status-text/drift", anon=404, viewer=404, ops=400, admin=400),
     R(POINTS, "GET", "/api/points", anon=200, viewer=200, ops=200, admin=200, anon_empty=True),
     # me is asked before sign-in (the console needs the anonymous identity); health is the public liveness probe
     R(ME, "GET", "/api/me", anon=200, viewer=200, ops=200, admin=200),
