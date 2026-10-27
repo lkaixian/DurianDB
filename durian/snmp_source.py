@@ -1,21 +1,32 @@
-"""SNMP v2c data source: one GET per poll over UDP, decoded by a small BER reader kept in this module.
+"""SNMP v2c data source: exact-OID GETs and a bounded GETNEXT walk, decoded by a small BER reader kept here.
 
-SNMP is the oldest way plant equipment exposes readings, and a driver for it needs no dependency: a v2c GET
-is a BER-encoded datagram, which this module builds and parses with the standard library alone. Only the GET
-operation is implemented. A point names the OID to read in its `snmp.address` field, the same way a Modbus
-point names its register in `modbus.address`, so the config editor and the point importer keep their shape.
+SNMP is the oldest way plant equipment exposes readings, and a driver for it needs no dependency: a v2c
+request is a BER-encoded datagram, which this module builds and parses with the standard library alone.
+A point names either one OID in its `snmp.address` field, read with GET, or a numeric subtree in its
+`snmp.walk` field, read with GETNEXT until the answer leaves the subtree. Either field keeps the shape of
+a Modbus point's `modbus.address`, so the config editor and the point importer need no new form.
 
-A poll carries every configured OID in one request. A timeout is retried once; any transport, protocol or
-request-id failure becomes the source's health sentence instead of an exception escaping into the engine.
-Values stay typed: numeric points take INTEGER, Counter32, Gauge32 and TimeTicks, text points take an OCTET
-STRING (or any other value rendered as text). An OID the device refuses, does not return, or answers with a
-type this point cannot use is reported per point and counted, while the rest of the poll still updates.
+A walk has no table model: one point still holds one value, so it keeps the first varbind under the
+subtree that its datatype can store (a number point takes the first numeric leaf, a text point any
+scalar) and reports the point when none fits. A walk stops when the device answers endOfMibView, steps
+outside the subtree, stops advancing, or reaches WALK_LIMIT varbinds, so a device with a huge tree cannot
+hold a tick open; reaching the cap is a sentence on the source, not a silent truncation. A device that
+ends a subtree early is normal, not an error. A walk that times out mid-way keeps the values already read
+and reports the timeout the same way.
+
+A GET carries every configured exact OID in one request, and each walk point costs one walk of one
+request per step. A timeout is retried once; any transport, protocol or request-id failure becomes the
+source's health sentence instead of an exception escaping into the engine. Values stay typed: numeric
+points take INTEGER, Counter32, Gauge32 and TimeTicks, text points take an OCTET STRING (or any other
+value rendered as text). An OID the device refuses, does not return, or answers with a type this point
+cannot use is reported per point and counted, while the rest of the poll still updates.
 """
 import socket
 
 from .polled import PolledSource
 
 MAX_VARBINDS = 10_000  # a reply is one UDP datagram; this only stops a hostile length from looping
+WALK_LIMIT = 1000  # varbinds one walk point reads per poll, so a huge subtree cannot hold a tick open
 
 INTEGER = 0x02
 OCTET_STRING = 0x04
@@ -27,6 +38,7 @@ COUNTER32 = 0x41
 GAUGE32 = 0x42
 TIMETICKS = 0x43
 GET_REQUEST = 0xA0
+GET_NEXT = 0xA1
 GET_RESPONSE = 0xA2
 
 NO_SUCH_OBJECT = 0x80
@@ -282,12 +294,32 @@ def decode_response(data):
     return request_id, error_status, error_index, _varbinds(raw)
 
 
-def encode_get(request_id, community, oids):
-    """A complete SNMP v2c GET datagram for a list of dotted OIDs."""
+def _encode_request(request_id, community, tag, oids):
+    """A complete SNMP v2c request datagram of the given PDU type for a list of dotted OIDs."""
     binds = b"".join(_tlv(SEQUENCE, _tlv(OBJECT_ID, encode_oid(o)) + _tlv(NULL, b"")) for o in oids)
-    pdu = _tlv(GET_REQUEST, _tlv(INTEGER, _int(request_id)) + _tlv(INTEGER, _int(0)) + _tlv(INTEGER, _int(0))
+    pdu = _tlv(tag, _tlv(INTEGER, _int(request_id)) + _tlv(INTEGER, _int(0)) + _tlv(INTEGER, _int(0))
                + _tlv(SEQUENCE, binds))
     return _tlv(SEQUENCE, _tlv(INTEGER, _int(1)) + _tlv(OCTET_STRING, community.encode("utf-8")) + pdu)
+
+
+def encode_get(request_id, community, oids):
+    """A complete SNMP v2c GET datagram for a list of dotted OIDs."""
+    return _encode_request(request_id, community, GET_REQUEST, oids)
+
+
+def encode_getnext(request_id, community, oid):
+    """A complete SNMP v2c GETNEXT datagram asking for the OID that follows `oid`."""
+    return _encode_request(request_id, community, GET_NEXT, [oid])
+
+
+def _oid_key(oid):
+    """A dotted OID as a tuple, so it compares in OID order and not in text order."""
+    return tuple(int(n) for n in oid.split("."))
+
+
+def _in_subtree(oid, base):
+    """True when `oid` is the subtree root or a descendant of it."""
+    return oid == base or oid.startswith(base + ".")
 
 
 def _kind(tag):
@@ -328,7 +360,7 @@ def _point_value(point, oid, tag, value):
 
 
 class SnmpSource(PolledSource):
-    """Read a list of OIDs with SNMP v2c GET, one small request per cycle."""
+    """Read exact OIDs with SNMP v2c GET and subtrees with a bounded GETNEXT walk, one request at a time."""
 
     def __init__(self, name, cfg):
         super().__init__(name, cfg.get("period", 5.0), cfg.get("backoff_scale", 1.5), cfg.get("backoff_max", 300.0))
@@ -338,40 +370,98 @@ class SnmpSource(PolledSource):
         self.timeout = float(cfg.get("timeout", 2.0))
         self._request_id = 0
 
+    def _next_id(self):
+        """A fresh positive request id for the next datagram."""
+        self._request_id = self._request_id % 0x7FFFFFFF + 1
+        return self._request_id
+
     def failure_text(self, e):
         """SNMP failures are already sentences, so the operator never sees an exception class name."""
         return str(e)
 
     def fetch(self):
-        wanted = []
+        wanted, walks = [], []
         for p in self.points.values():
-            oid = (p.meta.get("snmp") or {}).get("address")
-            if isinstance(oid, str):
-                wanted.append((p, oid))
-        if not wanted:
-            return {}, []
-        oids = list(dict.fromkeys(oid for _, oid in wanted))  # one index per OID, however many points read it
-        self._request_id = self._request_id % 0x7FFFFFFF + 1
-        data = self._exchange(encode_get(self._request_id, self.community, oids))
-        request_id, status, index, binds = decode_response(data)
-        if request_id != self._request_id:
-            raise SnmpError(f"the device answered request {request_id} while request {self._request_id} was sent; "
-                            "another agent may be answering this address")
-        if status:
-            what = ERRORS.get(status, f"the device reported error {status}")
-            return {}, [f"{p.name} ({oid}): {what}" for p, oid in wanted]
-        by_oid = {oid: (tag, value) for oid, tag, value in binds}
+            snmp = p.meta.get("snmp") or {}
+            if isinstance(snmp.get("address"), str):
+                wanted.append((p, snmp["address"]))
+            elif isinstance(snmp.get("walk"), str):
+                walks.append((p, snmp["walk"]))
         values, rejected = {}, []
-        for p, oid in wanted:
-            if oid not in by_oid:
-                rejected.append(f"{p.name}: the device did not return {oid}")
-                continue
-            tag, value = by_oid[oid]
-            try:
-                values[p.name] = _point_value(p, oid, tag, value)
-            except ValueError as e:
-                rejected.append(f"{p.name}: {e}")
+        if wanted:
+            oids = list(dict.fromkeys(oid for _, oid in wanted))  # one index per OID, however many points read it
+            request_id = self._next_id()
+            data = self._exchange(encode_get(request_id, self.community, oids))
+            got_id, status, _, binds = decode_response(data)
+            if got_id != request_id:
+                raise SnmpError(f"the device answered request {got_id} while request {request_id} was sent; "
+                                "another agent may be answering this address")
+            if status:
+                what = ERRORS.get(status, f"the device reported error {status}")
+                rejected.extend(f"{p.name} ({oid}): {what}" for p, oid in wanted)
+            else:
+                by_oid = {oid: (tag, value) for oid, tag, value in binds}
+                for p, oid in wanted:
+                    if oid not in by_oid:
+                        rejected.append(f"{p.name}: the device did not return {oid}")
+                        continue
+                    tag, value = by_oid[oid]
+                    try:
+                        values[p.name] = _point_value(p, oid, tag, value)
+                    except ValueError as e:
+                        rejected.append(f"{p.name}: {e}")
+        for p, base in walks:
+            binds, note = self._walk(base)
+            if note:
+                rejected.append(f"{p.name}: {note}")
+            first_error, found = None, False
+            for oid, tag, value in binds:
+                try:
+                    result = _point_value(p, oid, tag, value)
+                except ValueError as e:
+                    first_error = first_error or str(e)
+                    continue
+                values[p.name] = result
+                found = True
+                break
+            if not found and not note:  # a timeout already explains why the point has no value
+                rejected.append(f"{p.name}: {first_error or f'the device returned no value under {base}'}")
         return values, rejected
+
+    def _walk(self, base):
+        """([(oid, tag, value)], sentence or None) from GETNEXT steps that stay under `base`.
+
+        One request and response per step, each with its own request id. A failure before anything was
+        read raises, so the poll retries and backs off as it does for an exact GET; a failure after some
+        values were read returns them with a sentence, so those values still reach their points.
+        """
+        binds, current = [], base
+        while True:
+            request_id = self._next_id()
+            try:
+                data = self._exchange(encode_getnext(request_id, self.community, current))
+                got_id, status, _, step = decode_response(data)
+                if got_id != request_id:
+                    raise SnmpError(f"the device answered request {got_id} while request {request_id} was sent; "
+                                    "another agent may be answering this address")
+                if status:
+                    raise SnmpError(ERRORS.get(status, f"the device reported error {status}"))
+                if not step:
+                    return binds, None
+                for oid, tag, value in step:
+                    if tag in MISSING or not _in_subtree(oid, base):  # the subtree ended: normal, not an error
+                        return binds, None
+                    if _oid_key(oid) <= _oid_key(current):
+                        return binds, f"the device returned {oid} after {current}, so the walk could not advance"
+                    binds.append((oid, tag, value))
+                    current = oid
+                    if len(binds) >= WALK_LIMIT:
+                        return binds, (f"the walk from {base} stopped at the {WALK_LIMIT}-varbind cap, "
+                                       "so the subtree may be larger than one poll should read")
+            except SnmpError as e:
+                if not binds:
+                    raise
+                return binds, str(e)
 
     def _exchange(self, packet):
         """One request datagram, with at most one retry after a timeout. Other failures fail at once."""
