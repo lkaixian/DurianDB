@@ -12,6 +12,16 @@ import paho.mqtt.client as mqtt
 from .core import Point, Quality, Source
 
 
+def _require_api_v2(mod):
+    """paho-mqtt 1.x has no CallbackAPIVersion, so refuse it here with a sentence instead of an AttributeError later."""
+    if not hasattr(mod, "CallbackAPIVersion"):
+        raise ImportError("DurianDB needs paho-mqtt 2.0 or newer for its MQTT source and publisher; "
+                          "upgrade with 'pip install --upgrade \"paho-mqtt>=2.0\"' and restart the server")
+
+
+_require_api_v2(mqtt)  # a machine without paho still fails at the import above, with its usual message
+
+
 def parse(payload: bytes):
     """Accept a bare number or {"value": number}. Anything else is dropped (untrusted input)."""
     try:
@@ -73,19 +83,21 @@ def tls_client(c: dict, client_id=""):
 class MqttSource(Source):
     QUEUE_MAX = 10_000  # ponytail: one cap for the source; the engine drains it every tick
 
-    def __init__(self, name, creds, prefix="durian/", cmd_prefix="durian-cmd/", factory=None):
-        """`factory(name)` builds a Point for a topic seen for the first time; None drops unknown topics."""
+    def __init__(self, name, creds=None, prefix="durian/", cmd_prefix="durian-cmd/", factory=None, client=None):
+        """`factory(name)` builds a Point for a topic seen for the first time; None drops unknown topics.
+        `client` replaces the paho client, so a test needs no broker."""
         super().__init__(name)
         self.prefix, self.cmd_prefix, self.factory = prefix, cmd_prefix, factory
         self.manages_error = True  # the paho callbacks report the link state, so a tick must not clear it
         self.q, self.dropped, self.connected = queue.Queue(maxsize=self.QUEUE_MAX), 0, False
-        self.error = f"not connected to {creds['host']}:{creds['port']} yet"
-        self.client = tls_client(creds)
+        self.error = f"not connected to {creds['host']}:{creds['port']} yet" if creds else None
+        self.client = client or tls_client(creds)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
-        self.client.connect_async(creds["host"], creds["port"])
-        self.client.loop_start()
+        if creds is not None:
+            self.client.connect_async(creds["host"], creds["port"])
+            self.client.loop_start()
 
     def _on_message(self, c, u, m):
         """The broker's thread: never block it. A full queue drops the message and counts it on the source health table."""
@@ -127,7 +139,7 @@ class MqttSource(Source):
     def write(self, name, value):
         info = self.client.publish(self.cmd_prefix + name, json.dumps({"value": value}), qos=1)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
-            raise RuntimeError(f"publish failed ({info.rc})")
+            raise RuntimeError(f"could not publish {name} to the broker (error {info.rc}); the command was not sent")
 
     def stop(self):
         self.client.loop_stop()
