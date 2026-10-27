@@ -548,11 +548,40 @@ def validate_maintenance(name, b):
     return windows.validate(name, b, NAME)
 
 
+QUERY_KEYS = ("folder", "tags", "source", "name_like")
+
+
+def _query_ok(q, add):
+    """A read-time query is any non-empty subset of folder (with its subtree), tag pairs, source and a name substring."""
+    if not isinstance(q, dict):
+        add("query", "must be an object with folder, tags, source or name_like")
+        return
+    for k in q:
+        if k not in QUERY_KEYS:
+            add(f"query.{k}", "unknown query field; use folder, tags, source or name_like")
+    if "folder" in q and not _folder_ok(q["folder"]):
+        add("query.folder", "must be a folder path")
+    if "source" in q and not (isinstance(q["source"], str) and 0 < len(q["source"]) <= 64):
+        add("query.source", "must be 1 to 64 characters")
+    if "name_like" in q and not (isinstance(q["name_like"], str) and 0 < len(q["name_like"]) <= 64):
+        add("query.name_like", "must be 1 to 64 characters")
+    if "tags" in q:
+        pairs = q["tags"]
+        if not (isinstance(pairs, list) and len(pairs) <= 20 and all(
+                isinstance(t, str) and 0 < len(t.partition(":")[0]) <= 64 and len(t.partition(":")[2]) <= 64
+                and ":" in t for t in pairs)):
+            add("query.tags", "must be a list of key:value pairs")
+    if not (any(k in q for k in ("folder", "source", "name_like")) or q.get("tags")):
+        add("query", "give folder, tags, source or name_like to match")
+
+
 def validate_watchlist(name, b):
     e, add = [], lambda p, m: e.append({"property": p, "message": m})
     if not NAME.match(str(name)):
         add("name", "use 1 to 64 letters, digits, dot, dash or underscore")
-    tags, pts = b.get("tags", {}), b.get("points", [])
+    tags, pts, q = b.get("tags", {}), b.get("points", []), b.get("query")
+    if q is not None:
+        _query_ok(q, add)
     if not (isinstance(tags, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in tags.items())):
         add("tags", "must be text key/value pairs")
     if not (isinstance(pts, list) and all(isinstance(p, str) for p in pts)):
@@ -560,7 +589,7 @@ def validate_watchlist(name, b):
     for k in ("name_like", "text_like"):  # a query list: a point name pattern (* and ?) and/or text in the description
         if k in b and not (isinstance(b[k], str) and 0 < len(b[k]) <= 64):
             add(k, "must be 1 to 64 characters")
-    if not tags and not pts and "name_like" not in b and "text_like" not in b:
+    if not tags and not pts and not q and "name_like" not in b and "text_like" not in b:
         add("tags", "give tags to match, a list of points, or a name or description query")
     if not _roles_ok(b.get("read_roles", ["user"])):
         add("read_roles", "must be a list of role names")

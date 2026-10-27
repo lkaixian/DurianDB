@@ -60,6 +60,21 @@ def watch_match(w, name, tags, description=""):
             and (not w.get("text_like") or w["text_like"].lower() in description.lower()))
 
 
+def query_match(q, name, tags, folder, source):
+    """Does a saved query select this point? Every part given must hold. Folder includes its subtree."""
+    if not isinstance(q, dict) or not (q.get("folder") or q.get("tags") or q.get("source") or q.get("name_like")):
+        return False
+    if "folder" in q and not ((folder or "") + "/").startswith(q["folder"].strip("/") + "/"):
+        return False
+    if "tags" in q and not all(tags.get(k) == v for k, _, v in (t.partition(":") for t in q["tags"])):
+        return False
+    if "source" in q and source != q["source"]:
+        return False
+    if "name_like" in q and q["name_like"].lower() not in name.lower():
+        return False
+    return True
+
+
 def _diff(old, new):
     """What a config save changed, as 'key: before -> after' (a new object is just 'created'). Config holds credential file paths, never secrets."""
     if old is None:
@@ -1220,12 +1235,17 @@ class App:
             self.store.delete("watchlist", name)
             return 200, {"deleted": name}
         body = self._body(body)
-        errs = validate_watchlist(name, {"tags": body.get("tags", {}), "points": body.get("points", [])})
+        saved = {"tags": body.get("tags", {}), "points": body.get("points", [])}
+        if "query" in body:
+            saved["query"] = body["query"]
+        errs = validate_watchlist(name, saved)
         if errs:
             raise ApiError(422, "invalid watch list", errs)
         if old is None and sum(w.get("owner") == ident["name"] for w in self.store.list("watchlist")) >= self.MAX_MY_LISTS:
             raise ApiError(409, f"at most {self.MAX_MY_LISTS} personal watch lists")
-        self.store.put("watchlist", name, {"owner": ident["name"], "read_roles": [], "tags": body.get("tags", {}), "points": body.get("points", [])[:500]})
+        self.store.put("watchlist", name, {"owner": ident["name"], "read_roles": [],
+                                           "tags": saved["tags"], "points": saved["points"][:500],
+                                           **({"query": saved["query"]} if "query" in saved else {})})
         return 200, {"saved": name}
 
     def select_points(self, ident, query):
@@ -1238,8 +1258,12 @@ class App:
             w = self.store.get("watchlist", wl)
             if not w or not self.watch_visible(ident, w):
                 raise ApiError(404, "unknown watch list")
+            # ponytail: a query is answered over every visible point on every read (O(visible points) per list per
+            # request). Fine for a config-sized point tree; index folder/tag/source only if a request ever gets slow.
             pts = {n: ps for n, ps in pts.items() if n in w.get("points", [])
-                   or watch_match(w, n, self.resolve_point(ps[0], ps[1])[0], ps[0].meta.get("description", ""))}
+                   or watch_match(w, n, self.resolve_point(ps[0], ps[1])[0], ps[0].meta.get("description", ""))
+                   or query_match(w.get("query"), n, self.resolve_point(ps[0], ps[1])[0],
+                                  ps[0].meta.get("folder", ""), ps[1].name)}
         if tag:
             k, _, v = tag.partition(":")
             pts = {n: ps for n, ps in pts.items() if self.resolve_point(ps[0], ps[1])[0].get(k) == v}
