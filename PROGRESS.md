@@ -10,17 +10,17 @@ Numbers below were measured from the tree on 2026-10-27, not estimated.
 
 | Measure | Value |
 |---|---|
-| Commits | 182 at the time of writing; every fix and feature is its own commit |
+| Commits | 195 at the time of writing; every fix and feature is its own commit |
 | Python modules in `durian/` | 37 |
-| Lines of Python in `durian/` | 10,859 |
-| Test suites in `tests/` | 63 (`python tests/run_all.py`, all passing) |
-| Lines of test code | 7,857 |
+| Lines of Python in `durian/` | 10,928 |
+| Test suites in `tests/` | 65 (`python tests/run_all.py`, all passing) |
+| Lines of test code | 8,048 |
 | Console: JS, CSS, HTML in `web/` | 2,230 lines across 14 files |
-| Browser checks in `tools/` | 11 scripts (manual, not in CI) |
+| Browser checks in `tools/` | 11 scripts, all run in CI headlessly (`tools/browser_ci.mjs`) |
 | Data source types | 12 — virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus (TCP/RTU/ASCII), SNMP v2c (GET and GETNEXT walk), DNP3 over TCP, BACnet/IP, OPC UA, HTTP JSON, SQL (SQLite), HTTP ingest push, calculated |
 | Alarm detectors | 12 — HIGH_LIMIT, LOW_LIMIT, RATE_OF_CHANGE, NO_UPDATE, NO_CHANGE, CHANGE, STATE, RANGE, SMOOTHNESS, CUSUM, ANOMALY, TEXT |
 | Event handlers and publishers | webhook, email, Slack, set-point, scheduled report; MQTT publisher, HTTP sender |
-| Open debt entries | 14 (0 correctness, 0 untrue claims, 2 architecture, 3 dependencies, 9 untested paths) |
+| Open debt entries | 13 (0 correctness, 0 untrue claims, 1 architecture, 3 dependencies, 9 untested paths) |
 | Research notes | 13 in `docs/research/` plus the clean-room policy and the failure model |
 
 ## History by day
@@ -32,7 +32,7 @@ Every point is the state of the tree at the last commit of that UTC day, recompu
 | 2026-10-19 | 19 | 9 | 4 | 1,241 | 274 | clean-room policy, research on the vendor's public behaviour, core model, HTTP shell, SQLite history, first console, MQTT over TLS source, Modbus client and simulator |
 | 2026-10-20 | 79 | 24 | 27 | 5,048 | 2,702 | authentication and roles, dashboards and the designer, quality and source timestamps, ISA-18.2 alarm states, shelving and suppression, KPIs, safe control, calculated points, reports, mimics, Modbus/HTTP/SQL drivers, ingest and machine tokens, MySQL backend, maintenance |
 | 2026-10-21 to 10-26 | 0 | 24 | 27 | 5,048 | 2,702 | no work; the tree was unchanged |
-| 2026-10-27 | 182 | 37 | 63 | 10,859 | 7,857 | HTTPS and binding beyond localhost, account disable, operator notes, CI workflow, failure model, debt register, rate-of-change defect fix, dependencies in CI, progress tracker and history page, every gap in the failure model closed with a test, engine lock split, MQTT source-down reason, Modbus finiteness, Rust and Python ANOMALY detectors, unit conversion and tag inheritance, forecast and baseline endpoints, a prediction dashboard widget, export bundles, background jobs, SSO sign-in, a permission matrix, bounded in-memory state, the Sparkplug B codec, README rewrite with CI badges, a Sparkplug B source, an SNMP v2c source with a GETNEXT walk, a DNP3 source, a BACnet/IP source, retrieval of scheduled export bundles, the forecast on a point's own trend page, baseline drift, tests for the offline admin reset, percent-decoded route names, sign-in state in the store, one home per API rule, the `web/app.js` split by page, MariaDB in CI, a real TLS handshake test, corrections to the research notes, an OPC UA source, the tick lease and the escalation guard in the store, a DNP3 console form, delivery tests against a local receiver, and a source template per driver |
+| 2026-10-27 | 195 | 37 | 65 | 10,928 | 8,048 | HTTPS and binding beyond localhost, account disable, operator notes, CI workflow, failure model, debt register, rate-of-change defect fix, dependencies in CI, progress tracker and history page, every gap in the failure model closed with a test, engine lock split, MQTT source-down reason, Modbus finiteness, Rust and Python ANOMALY detectors, unit conversion and tag inheritance, forecast and baseline endpoints, a prediction dashboard widget, export bundles, background jobs, SSO sign-in, a permission matrix, bounded in-memory state, the Sparkplug B codec, README rewrite with CI badges, a Sparkplug B source, an SNMP v2c source with a GETNEXT walk, a DNP3 source, a BACnet/IP source, retrieval of scheduled export bundles, the forecast on a point's own trend page, baseline drift, tests for the offline admin reset, percent-decoded route names, sign-in state in the store, one home per API rule, the `web/app.js` split by page, MariaDB in CI, a real TLS handshake test, corrections to the research notes, an OPC UA source, the tick lease and the escalation guard in the store, a DNP3 console form, delivery tests against a local receiver, a source template per driver, one statement path for both store backends, a route authorization map suite, the browser checks in CI, and an operator-facing sentence for every caught exception |
 
 ## Built and verified
 
@@ -56,7 +56,8 @@ Every point is the state of the tree at the last commit of that UTC day, recompu
 | Storage | SQLite or MySQL/MariaDB, versioned migrations, rollups (avg, min, max, last, count, first, sum, delta), retention, backups, buffered writes with a system alarm | `tests/test_store.py`, `test_series.py`, `test_maintenance.py` |
 | Transport security | TLS 1.2+ HTTPS with HSTS and `Secure` cookies when a certificate is given; refuses plain HTTP off localhost | `tests/test_tls.py` |
 | Integration | Node-RED flows, guide and end-to-end check; REST for values, sets, alarms | `tools/nodered_check.py` |
-| CI | Python 3.12/3.13 on Ubuntu and Windows, plus `cargo test` and `clippy` for the Rust experiment | `.github/workflows/ci.yml` |
+| API contract | One JSON error envelope, one role check, one unknown-point 404; a route-map suite fails if a route loses its access rule; every caught exception reaches an operator as a sentence | `tests/test_envelope.py`, `test_permissions.py`, `test_route_map.py`, `test_error_sentences.py` |
+| CI | Python 3.12/3.13 on Ubuntu and Windows, MariaDB 11.4, the 11 browser checks headlessly in Chromium, and `cargo test` plus `clippy` for the Rust experiment | `.github/workflows/ci.yml` |
 
 ## Security work, in the order it was done
 

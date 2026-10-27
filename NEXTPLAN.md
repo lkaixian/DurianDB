@@ -67,7 +67,8 @@ Open defects, in the order that hurts. From `TECHNICAL_DEBT.md`; none of these i
 
 | Item | Why it matters | Size |
 |---|---|---|
-| U1, U3, U6, U8–U12: untested paths | a real COM port, real external email/Slack delivery, the browser checks, and every device protocol against real hardware | medium each |
+| U6: the browser checks run in CI, but four of them only prove they ran, and `browser_dashboard`'s designer steps still use selectors the console no longer has | a green job does not yet mean every console flow is exercised | small |
+| U1, U3, U8–U12: untested paths | a real COM port, real external email/Slack delivery, and every device protocol against real hardware | medium each |
 | E4–E6: dependency claims and the 3.12/3.13-only CI | local is 3.14, the version most used is untested | small |
 
 ## 3. What we plan to do
@@ -78,14 +79,22 @@ run of commits, pushed as it lands.
 | Item | Next concrete step | Why in this order |
 |---|---|---|
 | Hardening continues | finish the open defects in §2 as they are found, each with its test | the failure model says a new failure gets a test before it gets a fix |
-| Console forms | the out-of-service and off-delay controls noted in the roadmap | a driver an operator cannot configure is half a driver |
+| Console forms | the out-of-service and off-delay controls noted in the roadmap, and the 2FA and report-handler screens that only `node --check` covers (U7) | a driver an operator cannot configure is half a driver |
+| Browser checks that assert | repair `browser_dashboard`'s designer section and make its four observational checks fail on a console error they did not provoke | the job should be able to go red for the right reason |
 | Device protocols against hardware | point one driver at a real device on the lab network and record what it reads | every protocol so far is proven against an in-process fake |
 | Rust real-time core | the crate stays an experiment until the Python detector layer stops being fast enough | not wired into the server; keep it zero-dependency and tested in CI |
 
-Done in this pass: the OPC UA source (`durian/opcua_source.py`), the tick lease and the escalation guard in the
-store (so a second process neither double-ticks nor double-escalates), a DNP3 console form, delivery tests
-that reach a local receiver for Slack, the webhook and the HTTP sender, a source template for every driver,
-and a one-sentence error for a failed delivery.
+Done in this pass: one statement path for both store backends (A12 closed: `_exec`, `_upsert` and `_int_div`
+are shared, and each branch that still differs says why), a route authorization map suite
+(`tests/test_route_map.py`), the 11 browser checks running headlessly in CI (`tools/browser_ci.mjs`, with
+`browser_modbus` and `browser_mimic` repaired after the console changed under them), `core.sentence()` so every
+caught exception reaches an operator as a sentence (`tests/test_error_sentences.py`), and four more SMOOTHNESS
+tests in the Rust crate.
+
+Done in the pass before: the OPC UA source (`durian/opcua_source.py`), the tick lease and the escalation guard
+in the store (so a second process neither double-ticks nor double-escalates), a DNP3 console form, delivery
+tests that reach a local receiver for Slack, the webhook and the HTTP sender, a source template for every
+driver, and a one-sentence error for a failed delivery.
 
 Done in the previous pass: the DNP3 source (`durian/dnp3_source.py`), the BACnet/IP source
 (`durian/bacnet_source.py`), the SNMP GETNEXT walk, sign-in state in the store, one home per API rule, the

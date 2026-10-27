@@ -11,6 +11,7 @@ The badge covers the whole workflow, which runs these jobs on every push to `mai
 | `tests on 3.13 / ubuntu-latest` | the newest Python CI supports, on Linux |
 | `tests on 3.13 / windows-latest` | the same on Windows |
 | `tests on MariaDB` | the suite on the MySQL/MariaDB backend, against a MariaDB 11.4 service container |
+| `browser checks (headless Chromium)` | all 11 console checks, each against a throwaway database and browser profile |
 | `real-time core (experimental)` | the Rust detector crate's tests and clippy |
 
 GitHub shows badges per workflow, not per job; the link above opens the job list with each job's own result.
@@ -26,7 +27,7 @@ control points, forwards events, and serves a browser console with dashboards yo
 
 ```sh
 python -m durian.server      # http://127.0.0.1:8765
-python tests/run_all.py      # 63 suites, all passing
+python tests/run_all.py      # 65 suites, all passing
 ```
 
 To run the suite on the MySQL/MariaDB backend, start a throwaway MariaDB and point the two test URLs at it
@@ -90,7 +91,7 @@ the network in clear.
 | `durian/` | The server: sources, engine, history store, alarms, outputs, API and HTTP shell |
 | `web/` | The browser console: overview, dashboards, history, config, users, audit and account |
 | `tests/` | `python tests/run_all.py` runs every suite, each in its own process |
-| `tools/` | Certificate maker, MQTT lab, sensor simulator, Modbus slave and manual browser checks |
+| `tools/` | Certificate maker, MQTT lab, sensor simulator, Modbus slave, and the browser checks CI runs |
 | `integrations/node-red/` | Example flows and a step-by-step Node-RED guide |
 | `docs/` | Clean-room policy, research notes, the failure model and the progress page |
 | `rust/` | Experimental port of the detector core; not wired into the server |

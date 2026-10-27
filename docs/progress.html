@@ -260,10 +260,10 @@
   </header>
 
   <div class="figures">
-    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">10,859</div><div class="n">lines, 37 modules</div></div>
-    <div class="fig"><div class="k">Tests</div><div class="v">7,857</div><div class="n">lines, 63 suites, all passing</div></div>
-    <div class="fig"><div class="k">Commits</div><div class="v">182</div><div class="n">across 9 calendar days</div></div>
-    <div class="fig"><div class="k">Open debt</div><div class="v">14</div><div class="n">entries, none high severity</div></div>
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">10,928</div><div class="n">lines, 37 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">8,048</div><div class="n">lines, 65 suites, all passing</div></div>
+    <div class="fig"><div class="k">Commits</div><div class="v">195</div><div class="n">across 9 calendar days</div></div>
+    <div class="fig"><div class="k">Open debt</div><div class="v">13</div><div class="n">entries, none high severity</div></div>
   </div>
 
   <section>
@@ -271,7 +271,7 @@
     <div class="charts">
       <div class="card">
         <h3>Code in the tree</h3>
-        <div class="summary">Server 10,859 lines · tests 7,857 lines</div>
+        <div class="summary">Server 10,928 lines · tests 8,048 lines</div>
         <div class="legend">
           <span><i class="swatch"></i>server</span>
           <span><i class="swatch dashed"></i>tests</span>
@@ -280,7 +280,7 @@
       </div>
       <div class="card">
         <h3>Test suites</h3>
-        <div class="summary">63 suites · one process each, <code>run_all.py</code></div>
+        <div class="summary">65 suites · one process each, <code>run_all.py</code></div>
         <div class="chart-wrap" id="wrap-suites"></div>
       </div>
     </div>
@@ -321,7 +321,7 @@
           <tr><td class="name">Alarms</td><td class="name">12 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all</td><td class="name"><code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
           <tr><td class="name">Control</td><td class="name">Permissioned writes, engineering limits, max step, two-step confirm, reason required, audit with old and new value</td><td class="name"><code>test_safe_control</code></td></tr>
           <tr><td class="name">Outbound</td><td class="name">Webhook, email, Slack, escalation, set-point handler, scheduled reports, MQTT publisher, HTTP sender</td><td class="name"><code>test_handlers</code>, <code>test_http_sender</code></td></tr>
-          <tr><td class="name">HMI</td><td class="name">Overview, point page with trend, forecast and logbook, history comparison, dashboards with 10 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>, <code>test_prediction_widget</code>; 11 browser scripts</td></tr>
+          <tr><td class="name">HMI</td><td class="name">Overview, point page with trend, forecast and logbook, history comparison, dashboards with 10 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>, <code>test_prediction_widget</code>; 11 browser scripts, all in CI</td></tr>
           <tr><td class="name">Accounts</td><td class="name">scrypt passwords, sessions, role inheritance, lockout, TOTP second factor, reset by one-time code, account disable, offline admin reset, scoped machine tokens</td><td class="name"><code>test_auth</code>, <code>test_mfa</code>, <code>test_disabled</code>, <code>test_reset</code></td></tr>
           <tr><td class="name">Storage</td><td class="name">SQLite or MySQL/MariaDB, versioned migrations, eight rollups, retention, backups, buffered writes with a system alarm</td><td class="name"><code>test_store</code>, <code>test_series</code>, <code>test_maintenance</code></td></tr>
           <tr><td class="name">Transport</td><td class="name">TLS 1.2+ with HSTS and Secure cookies when a certificate is given; plain HTTP refuses any non-local address</td><td class="name"><code>test_tls</code></td></tr>
@@ -414,11 +414,11 @@
 
   var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27"];
   var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"];
-  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 182];
+  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 195];
   var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 37];
-  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 63];
-  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 10859];
-  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 7857];
+  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 65];
+  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 10928];
+  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 8048];
 
   var NS = "http://www.w3.org/2000/svg";
   var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
@@ -523,12 +523,12 @@
   }
 
   build("wrap-code", [
-    { name: "Server lines", short: "10,859", values: SERVER },
-    { name: "Test lines", short: "7,857", values: TESTS, dashed: true }
+    { name: "Server lines", short: "10,928", values: SERVER },
+    { name: "Test lines", short: "8,048", values: TESTS, dashed: true }
   ], { label: "Lines of code in durian and tests, 19 to 27 October" });
 
   build("wrap-suites", [
-    { name: "Test suites", short: "63", values: SUITES }
+    { name: "Test suites", short: "65", values: SUITES }
   ], { label: "Number of test suites, 19 to 27 October" });
 
   // daily table

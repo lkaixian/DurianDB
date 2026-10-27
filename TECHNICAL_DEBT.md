@@ -40,7 +40,10 @@ batched statements on either driver, one `_upsert` sits behind settings, config 
 `_int_div` spells the integer-second buckets rollups use. A branch survives only where the databases genuinely
 differ — their table catalogs, `DELETE ... LIMIT`, conflict clauses MySQL has no `where` for, sizes and
 descriptions — and each says why. `test_store.py` checks the shared path, the bucketing on uneven edges and a
-failed statement on every backend.
+failed statement on every backend. The same pass put the 11 browser checks in CI (`browser_ci.mjs`, which also
+repaired `browser_modbus` and `browser_mimic`), added `tests/test_route_map.py` so a route cannot lose its
+access rule, and replaced the last raw exception text an operator could see with `core.sentence()`
+(`tests/test_error_sentences.py`).
 
 ## 2. Documented claims that are not true
 
