@@ -28,12 +28,12 @@ from .jobs import Jobs
 from .oidc import OIDC, OIDCError, local_identity, validate_sso
 from .maintenance import Maintenance, Raw
 from .testsource import test_source
-from .outputs import Outputs, validate_handler, validate_publisher
+from .outputs import Outputs, validate_emailgroup, validate_handler, validate_publisher
 from .store import ALL_ROLLUPS
 
 log = logging.getLogger("durian.app")
 
-KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance")
+KINDS = ("source", "point", "handler", "publisher", "watchlist", "emailgroup", "maintenance")
 ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import", "auth"}  # the routes below the superadmin guard
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
 
@@ -1169,8 +1169,9 @@ class App:
 
     def import_config(self, query, doc, ident):
         validators = {"source": lambda n, b, v: validate_source(n, b), "point": lambda n, b, v: validate_point(n, b, v),
-                      "handler": lambda n, b, v: validate_handler(n, b), "publisher": lambda n, b, v: validate_publisher(n, b, v),
+                      "handler": lambda n, b, v: validate_handler(n, b, v), "publisher": lambda n, b, v: validate_publisher(n, b, v),
                       "watchlist": lambda n, b, v: validate_watchlist(n, b), "maintenance": lambda n, b, v: validate_maintenance(n, b),
+                      "emailgroup": lambda n, b, v: validate_emailgroup(n, b),
                       "dashboard": lambda n, b, v: validate_dashboard(n, b, v, roles_ok)[0]}
         apply_ = query.get("apply") == "1"  # a plain call is always a dry run
         errs, summary = self.maint.import_config(doc, validators, query.get("mode", "merge"), not apply_, ident["name"])
@@ -1275,7 +1276,12 @@ class App:
                     if not won:
                         continue
                     self.escalated.add(key)
-                    self.outputs.escalate(h, ev)
+                    try:
+                        self.outputs.escalate(h, ev)
+                    except Exception as ex:  # one alarm that cannot be built must not stop the other escalations
+                        self.outputs._note(h["name"], "output", f"the escalation could not be built: {sentence(ex) or 'check its settings'}")
+                        log.warning("escalation for %s failed: %s: %s", h["name"], type(ex).__name__, ex)
+                        continue
                     self.store.audit("system", "alarm.escalate", f"{ev.point} -> {h['name']}")
 
     def send_reports(self, now=None):
@@ -1468,9 +1474,10 @@ class App:
         if method == "PUT":
             body = self._body(body)
             errs = {"source": lambda: validate_source(name, body), "point": lambda: validate_point(name, body, self.store),
-                    "handler": lambda: validate_handler(name, body),
+                    "handler": lambda: validate_handler(name, body, self.store),
                     "publisher": lambda: validate_publisher(name, body, self.store),
-                    "watchlist": lambda: validate_watchlist(name, body), "maintenance": lambda: validate_maintenance(name, body)}[kind]()
+                    "watchlist": lambda: validate_watchlist(name, body), "maintenance": lambda: validate_maintenance(name, body),
+                    "emailgroup": lambda: validate_emailgroup(name, body)}[kind]()
             if errs:
                 raise ApiError(422, "validation failed", errs)
             old = self.store.get(kind, name)
@@ -1492,6 +1499,8 @@ class App:
         if method == "DELETE":
             if kind == "source" and any(p.get("source") == name for p in self.store.list("point")):
                 raise ApiError(409, "delete or move this source's points first")
+            if kind == "emailgroup" and any(name in h.get("groups", []) for h in self.store.list("handler")):
+                raise ApiError(409, "remove this group from the handlers that use it first")
             existed = self.store.delete(kind, name)
             if not existed:
                 self._404()

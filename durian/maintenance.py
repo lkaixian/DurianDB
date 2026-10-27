@@ -25,7 +25,7 @@ LIMITS = {"retention_days": (0, 36500), "purge_hour": (0, 23), "backup_hour": (-
           "export_hour": (-1, 23), "export_keep": (1, 365)}
 BACKUP_NAME = re.compile(r"^durian-\d{8}-\d{6}\.db$")
 EXPORT_NAME = re.compile(r"^durian-export-\d{8}-\d{6}\.zip$")
-KINDS = ("source", "point", "handler", "publisher", "watchlist", "maintenance", "dashboard")
+KINDS = ("source", "point", "handler", "publisher", "watchlist", "emailgroup", "maintenance", "dashboard")
 CSV_MAX_ROWS, IMPORT_MAX_ROWS = 200_000, 50_000
 EPOCH_MIN = dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc).timestamp()
 
@@ -249,10 +249,16 @@ class Maintenance:
             for name, body in objs.get(kind, {}).items():
                 for e in validators[kind](name, body, view):
                     add(f"{kind}/{name}.{e['property']}", e["message"])
+        if mode == "replace":  # a retained handler must not lose the group the replace is about to delete
+            dropped = {g["name"] for g in self.store.list("emailgroup")} - set(objs.get("emailgroup", {}))
+            for name, body in objs.get("handler", {}).items():
+                for g in body.get("groups", []) if isinstance(body.get("groups"), list) else []:
+                    if g in dropped:
+                        add(f"handler/{name}.groups", f"the replace would delete email group '{g}', but handler '{name}' still names it")
         if errors:
             return errors, None
         summary = {k: {"created": 0, "updated": 0, "unchanged": 0, "deleted": 0} for k in KINDS}
-        order = ("source", "point", "handler", "publisher", "watchlist", "maintenance", "dashboard")
+        order = ("source", "point", "emailgroup", "handler", "publisher", "watchlist", "maintenance", "dashboard")
         with self.store.atomic():  # a failure halfway leaves the stored configuration exactly as it was
             for kind in order:
                 for name, body in objs.get(kind, {}).items():

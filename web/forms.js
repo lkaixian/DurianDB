@@ -199,7 +199,10 @@ const GROUPS = {
         F("smtp.host", "SMTP server", "text"), F("smtp.port", "SMTP port", "int", {hint: "25, 587 or 465."}),
         F("smtp.security", "Security", "select", {options: opts(["none", "None"], ["starttls", "STARTTLS"], ["ssl", "SSL/TLS"])}),
         F("creds", "Credentials file", "text", {optional: true, hint: "Optional JSON file with user and password, so the password is not stored in the settings."}),
-        ...(body.type === "email" ? [F("escalate_after", "Escalate if unacknowledged for (minutes)", "int", {optional: true, hint: "Leave empty for no escalation."}),
+        ...(body.type === "email" ? [F("groups", "Also send to groups", "groups", {optional: true, hint: "Email group names, comma separated. Their addresses are added to To, once each."}),
+          F("subject", "Subject template", "text", {optional: true, hint: "Placeholders: {level} {point} {value} {source} {time} {message}. Empty = the standard subject."}),
+          F("body", "Body template", "textarea", {optional: true, hint: "Placeholders: {level} {point} {value} {source} {time} {message}. An unknown {name} stays as typed. Empty = the standard body."}),
+          F("escalate_after", "Escalate if unacknowledged for (minutes)", "int", {optional: true, hint: "Leave empty for no escalation."}),
           F("escalate_to", "Escalate to", "list", {optional: true, hint: "Email addresses to tell when nobody has acknowledged the alarm in time."})] : []),
         ...(body.type === "report" ? [F("hour", "Send daily from hour", "int", {hint: "0 to 23, server local time."}),
           F("hours", "Window (hours)", "int", {optional: true, hint: "Empty = 24. The summary covers this many hours before sending."}),
@@ -229,6 +232,8 @@ const GROUPS = {
     F("text_like", "Description contains", "text", {optional: true}),
     F("points", "Points to include", "list", {hint: "Point names, comma separated."}),
     F("read_roles", "Who can read it", "roles", {hint: ROLE_HINT})]}],
+  emailgroup: () => [{title: "Email group", fields: [
+    F("addresses", "Addresses", "list", {hint: "Email addresses, comma separated. Email handlers that name this group send to all of them, once each."})]}],
 };
 
 // ---- rendering
@@ -241,6 +246,7 @@ function control(f, body) {
     case "textarea": return `<textarea ${a} spellcheck="false" rows="3">${esc(v ?? "")}</textarea>`;
     case "number": case "int": return `<input type="number" step="${f.type === "int" ? 1 : "any"}" ${a} value="${esc(v ?? "")}">`;
     case "roles": case "list": return `<input type="text" ${a} value="${esc((v || []).join(", "))}" autocomplete="off">`;
+    case "groups": return `<input type="text" ${a} list="${id}-dl" value="${esc((v || []).join(", "))}" autocomplete="off"><datalist id="${id}-dl" data-groups="1"></datalist>`;
     case "tags": return `<input type="text" ${a} value="${esc(Object.entries(v || {}).map(([k, x]) => k + ":" + x).join(", "))}" autocomplete="off">`;
     case "days": return `<input type="text" ${a} value="${esc((v || []).map(d => DAYS[d]).join(", "))}" autocomplete="off">`;
     case "datetime": return `<input type="datetime-local" ${a} value="${v ? new Date(v * 1000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ""}">`;
@@ -296,7 +302,7 @@ function readControl(el) {
   if (t === "check") return raw;
   if (t === "number" || t === "int") return raw === "" ? undefined : Number(raw);
   if (t === "select") return raw === "" ? undefined : el.dataset.numeric ? Number(raw) : raw;
-  if (t === "roles" || t === "list") return raw.split(",").map(s => s.trim()).filter(Boolean);
+  if (t === "roles" || t === "list" || t === "groups") return raw.split(",").map(s => s.trim()).filter(Boolean);
   if (t === "days") { const d = raw.split(/[ ,]+/).map(x => DAYS.findIndex(n => n.toLowerCase() === x.slice(0, 3).toLowerCase())).filter(i => i >= 0); return [...new Set(d)].sort(); }
   if (t === "datetime") return raw === "" ? undefined : new Date(raw).getTime() / 1000;
   if (t === "states") { const o = Object.fromEntries(raw.split(",").map(s => s.trim()).filter(s => s.includes("=")).map(s => { const [k, ...v] = s.split("="); return [k.trim(), v.join("=").trim()]; })); return Object.keys(o).length ? o : undefined; }
@@ -327,6 +333,7 @@ function tidy(kind, body) {
     for (const k of ["points", "tags", "sources"]) if (body.scope[k] === undefined || (Array.isArray(body.scope[k]) ? !body.scope[k].length : !Object.keys(body.scope[k]).length)) delete body.scope[k];
     if (!Object.keys(body.scope).length) delete body.scope;
   }
+  if (kind === "handler" && !body.groups?.length) delete body.groups;
   if (kind === "maintenance") {
     for (const k of ["points", "tags", "sources"]) if (body.scope && (body.scope[k] === undefined || (Array.isArray(body.scope[k]) ? !body.scope[k].length : !Object.keys(body.scope[k]).length))) delete body.scope[k];
   }  // drop what an empty optional control leaves behind
@@ -346,9 +353,13 @@ function mountEditor(host, {kind, body, sources = []}) {
     <label for="adv">Settings (JSON)</label><textarea id="adv" spellcheck="false"></textarea><small class="fe" id="adv-e" role="alert"></small></details>`;
   const fields = host.querySelector("#fe-fields"), adv = host.querySelector("#adv");
   const groups = () => (kind === "point" ? pointGroups(body, sources) : GROUPS[kind](body));
+  let groupNames = [];  // suggestions only: an existing group can still be typed before the list arrives
+  const fillGroups = () => { const dl = fields.querySelector("datalist[data-groups]"); if (dl) dl.innerHTML = groupNames.map(n => `<option value="${esc(n)}">`).join(""); };
+  if (kind === "handler") api("GET", "/api/config/emailgroup").then(gs => { groupNames = gs.map(g => g.name); fillGroups(); }).catch(() => {});
   const sync = () => { if (document.activeElement !== adv) adv.value = JSON.stringify(tidy(kind, structuredClone(body)), null, 2); };
   const draw = focusId => {
     fields.innerHTML = groupsHtml(groups(), body);
+    fillGroups();
     sync();
     if (focusId) document.getElementById(focusId)?.focus();
   };

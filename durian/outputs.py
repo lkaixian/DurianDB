@@ -18,8 +18,8 @@ import urllib.request
 from pathlib import Path
 
 from . import windows
-from .config import load_creds
-from .core import SOURCE, Level, Quality, sentence
+from .config import NAME, load_creds
+from .core import SOURCE, Level, Quality, sentence, state_label
 from .mqtt_source import tls_client
 from .polled import NoRedirect
 
@@ -67,7 +67,18 @@ def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
-def validate_handler(name, b):
+def validate_emailgroup(name, b):
+    """A named recipient list, so several handlers can share one address book entry."""
+    e, add = [], lambda p, m: e.append({"property": p, "message": m})
+    if not (isinstance(name, str) and NAME.match(name)):
+        add("name", "use 1 to 64 letters, digits, dot, dash or underscore")
+    a = b.get("addresses")
+    if not (isinstance(a, list) and 1 <= len(a) <= 20 and all(isinstance(x, str) and ADDRESS.match(x) for x in a)):
+        add("addresses", "must be 1 to 20 email addresses")
+    return e
+
+
+def validate_handler(name, b, store=None):
     e, add = [], lambda p, m: e.append({"property": p, "message": m})
     kind = b.get("type")
     if kind not in HANDLER_TYPES:
@@ -86,7 +97,7 @@ def validate_handler(name, b):
     elif kind in ("email", "report"):  # a report is an email sent on a schedule instead of on an alarm
         to = b.get("to")
         if not (isinstance(to, list) and 1 <= len(to) <= 20 and all(isinstance(a, str) and ADDRESS.match(a) for a in to)):
-            add("to", "must be 1 to 20 email addresses")
+            add("to", "must be 1 to 20 email addresses")  # ponytail: groups are additive, so `to` stays required; loosen this to allow group-only handlers
         if not (isinstance(b.get("from"), str) and ADDRESS.match(b["from"])):
             add("from", "must be an email address")
         s = b.get("smtp")
@@ -102,6 +113,19 @@ def validate_handler(name, b):
             es = b.get("escalate_to")
             if not (isinstance(es, list) and 1 <= len(es) <= 20 and all(isinstance(a, str) and ADDRESS.match(a) for a in es)):
                 add("escalate_to", "must be 1 to 20 email addresses")
+        if kind == "email" and b.get("groups"):  # extra recipients come from named address lists, never from a client
+            g = b["groups"]
+            if not (isinstance(g, list) and 1 <= len(g) <= 20 and all(isinstance(x, str) and NAME.match(x) for x in g)):
+                add("groups", "must be a list of 1 to 20 email group names")
+            elif store is not None:
+                missing = [x for x in g if store.get("emailgroup", x) is None]
+                for x in missing:
+                    add("groups", f"there is no email group named '{x}'")
+        if kind == "email":  # optional subject/body templates; unknown placeholders stay literal when sent
+            if "subject" in b and not (isinstance(b["subject"], str) and 1 <= len(b["subject"]) <= 200 and "\n" not in b["subject"] and "\r" not in b["subject"]):
+                add("subject", "must be one line of text, up to 200 characters")
+            if "body" in b and not (isinstance(b["body"], str) and 1 <= len(b["body"]) <= 2000):
+                add("body", "must be text, up to 2000 characters")
         if kind == "report":
             if not (isinstance(b.get("hour"), int) and not isinstance(b["hour"], bool) and 0 <= b["hour"] <= 23):
                 add("hour", "must be a whole hour from 0 to 23 (server local time)")
@@ -165,6 +189,8 @@ class Outputs:
 
     def __init__(self, store, resolve=None, setter=None):
         self.handlers = [h for h in store.list("handler") if h.get("enabled", True)]
+        self.groups = {g["name"]: g["addresses"] for g in store.list("emailgroup")}  # ponytail: snapshot per Outputs; any config save rebuilds it, so no live lookup
+        self.last_value = {}  # point -> last value label, so a template can say {value}; ponytail: bounded by the point count
         self.resolve, self.setter = resolve or (lambda name: ({}, None)), setter
         self.q = queue.Queue(maxsize=1000)
         self.failed = 0  # every delivery that did not work, for the health view
@@ -196,6 +222,7 @@ class Outputs:
         self.worker.start()
 
     def on_value(self, point, value, ts):
+        self.last_value[point.name] = state_label(point, value)
         for s in self.senders:  # send a point's value when it changes, and again after `resend` seconds so the receiver sees it is alive
             if ("*" in s["names"] or point.name in s["names"]) and point.quality != Quality.BAD:
                 now = time.monotonic()
@@ -243,31 +270,65 @@ class Outputs:
         for h in self.handlers:
             if ev.level < Level[h.get("min_level", "WARNING")] or not self._in_scope(h, ev):
                 continue
-            t = h.get("type", "webhook")
-            if t == "webhook":
-                self._put(("webhook", h["url"], {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message, "ts": ev.ts, "cleared_ts": ev.cleared_ts}), h["name"])
-            elif t == "slack" and (kind == "raised" or h.get("on_clear")):
-                self._put(("webhook", h["url"], {"text": f"{'' if kind == 'raised' else 'Back to normal: '}[{ev.level.name}] {ev.point}: {ev.message}"}), h["name"])
-            elif t == "report":
-                continue  # sent on its schedule, not by alarms
-            elif t == "email" and (kind == "raised" or h.get("on_clear")):
-                self._put(("mail", h, self.message(h, ev, kind)), h["name"])
-            elif t == "setpoint" and self.setter:
-                if kind == "raised":
-                    self._put(("set", h["point"], float(h["value"]), f"handler {h['name']}"), h["name"])
-                elif "clear_value" in h:
-                    self._put(("set", h["point"], float(h["clear_value"]), f"handler {h['name']}"), h["name"])
-                elif h.get("release_on_clear"):
-                    self._put(("set", h["point"], None, f"handler {h['name']}"), h["name"])
+            try:
+                self._dispatch(h, ev, kind)
+            except Exception as ex:  # one broken handler must not stop the other alarms in this tick
+                self._note(h["name"], "output", f"the handler could not run: {sentence(ex) or 'check its settings'}")
+                log.warning("handler %s failed: %s: %s", h["name"], type(ex).__name__, ex)
 
-    @staticmethod
-    def message(h, ev, kind):
+    def _dispatch(self, h, ev, kind):
+        t = h.get("type", "webhook")
+        if t == "webhook":
+            self._put(("webhook", h["url"], {"event": kind, "point": ev.point, "level": ev.level.name, "message": ev.message, "ts": ev.ts, "cleared_ts": ev.cleared_ts}), h["name"])
+        elif t == "slack" and (kind == "raised" or h.get("on_clear")):
+            self._put(("webhook", h["url"], {"text": f"{'' if kind == 'raised' else 'Back to normal: '}[{ev.level.name}] {ev.point}: {ev.message}"}), h["name"])
+        elif t == "report":
+            return  # sent on its schedule, not by alarms
+        elif t == "email" and (kind == "raised" or h.get("on_clear")):
+            self._put(("mail", h, self.message(h, ev, kind)), h["name"])
+        elif t == "setpoint" and self.setter:
+            if kind == "raised":
+                self._put(("set", h["point"], float(h["value"]), f"handler {h['name']}"), h["name"])
+            elif "clear_value" in h:
+                self._put(("set", h["point"], float(h["clear_value"]), f"handler {h['name']}"), h["name"])
+            elif h.get("release_on_clear"):
+                self._put(("set", h["point"], None, f"handler {h['name']}"), h["name"])
+
+    def recipients(self, h):
+        """`to` plus every named group's addresses, in that order, each address once; case-insensitive, first spelling kept."""
+        out = list(h.get("to", []))
+        for g in h.get("groups", []):
+            out.extend(self.groups.get(g, []))
+        keep, seen = [], set()
+        for a in out:
+            key = a.casefold()
+            if key not in seen:
+                seen.add(key)
+                keep.append(a)
+        return keep
+
+    def _fill(self, text, ev):
+        """One pass of the six documented placeholders; ponytail: no template engine, `{value}` is the last published value at send time, and {unknown} stays literal."""
+        tags, source = self.resolve(ev.point)
+        which = {"point": ev.point, "value": self.last_value.get(ev.point, ""), "level": ev.level.name,
+                 "time": f"{ev.ts:.0f}", "message": ev.message,
+                 "source": ev.point[len(SOURCE):] if ev.point.startswith(SOURCE) else (source or "")}
+        return re.sub(r"\{(\w+)\}", lambda m: str(which[m.group(1)]) if m.group(1) in which else m.group(0), text)
+
+    def message(self, h, ev, kind):
         m = email.message.EmailMessage()
-        m["From"], m["To"] = h["from"], ", ".join(h["to"])
-        m["Subject"] = f"[{ev.level.name}] {ev.point}: {ev.message}" + ("" if kind == "raised" else " (back to normal)")
-        m.set_content(f"{'Alarm raised' if kind == 'raised' else 'Alarm returned to normal'}\n\nPoint: {ev.point}\nLevel: {ev.level.name}\nDetail: {ev.message}\n"
-                      f"Raised at (epoch seconds): {ev.ts:.0f}\n")
+        m["From"], m["To"] = h["from"], ", ".join(self.recipients(h))
+        m["Subject"] = self._subject(h, ev, kind)
+        body = self._fill(h["body"], ev) if h.get("body") else (
+            f"{'Alarm raised' if kind == 'raised' else 'Alarm returned to normal'}\n\nPoint: {ev.point}\nLevel: {ev.level.name}\nDetail: {ev.message}\n"
+            f"Raised at (epoch seconds): {ev.ts:.0f}\n")
+        m.set_content(body)
         return m
+
+    def _subject(self, h, ev, kind):
+        """Every subject, template or default, is built here; a state label or message may carry a CR/LF a header cannot."""
+        s = self._fill(h["subject"], ev) if h.get("subject") else f"[{ev.level.name}] {ev.point}: {ev.message}"
+        return (s + ("" if kind == "raised" else " (back to normal)")).replace("\r", "").replace("\n", "")
 
     def send_report(self, h, csv_bytes, hours):
         m = email.message.EmailMessage()
@@ -278,7 +339,7 @@ class Outputs:
 
     def escalate(self, h, ev):
         """Mail the handler's escalate_to list about an alarm nobody has acknowledged."""
-        m = self.message({**h, "to": h["escalate_to"]}, ev, "raised")
+        m = self.message({**h, "to": h["escalate_to"], "groups": []}, ev, "raised")  # escalation stays its own list
         m.replace_header("Subject", "[ESCALATED] " + m["Subject"])
         self._put(("mail", h, m), h["name"])
 

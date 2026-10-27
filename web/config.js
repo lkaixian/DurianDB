@@ -1,5 +1,5 @@
 "use strict";
-// Config: the editor for sources, points, handlers, publishers, watch lists and maintenance, their list views, and alarm service. Uses helpers from app.js and forms.js.
+// Config: the editor for sources, points, handlers, publishers, watch lists, email groups and maintenance, their list views, and alarm service. Uses helpers from app.js and forms.js.
 
 // ---- out of service: an administrator stops a point's alarms (for example while a sensor is replaced), with a reason that is audited
 async function drawService(name) {
@@ -15,7 +15,7 @@ async function drawService(name) {
 }
 
 // ---- config editor (administrators)
-const KINDS = {source: "Sources", point: "Points", handler: "Handlers", publisher: "Publishers", watchlist: "Watch lists", maintenance: "Maintenance"};
+const KINDS = {source: "Sources", point: "Points", handler: "Handlers", publisher: "Publishers", watchlist: "Watch lists", emailgroup: "Email groups", maintenance: "Maintenance"};
 const POINT_BASE = {unit: "", tags: {}, logging: "ON_CHANGE", tolerance: 0, settable: false, read_roles: ["user"], set_roles: []};
 const MODBUS_POINT = (m, extra = {}) => ({source: "plc", ...POINT_BASE, modbus: {unit: 1, byte_order: "big", word_order: "big", multiplier: 1, additive: 0, ...m}, ...extra});
 const TEMPLATES = {
@@ -53,6 +53,7 @@ const TEMPLATES = {
   publisher: {"MQTT over TLS": {type: "mqtt", creds: "lab/mqtt/creds.json", prefix: "durian-out/", points: ["*"], enabled: true},
     "HTTP sender": {type: "http", url: "https://other-host:8765/api/ingest/source-name", points: ["*"], enabled: true}},
   watchlist: {"By tag": {tags: {area: "boiler"}, points: [], read_roles: ["user"]}},
+  emailgroup: {"Operations list": {addresses: ["operator@example.com", "lead@example.com"]}},
   maintenance: {"Weekly window": {enabled: true, mode: "suppress", reason: "", scope: {points: []}, schedule: {type: "weekly", days: [0, 1, 2, 3, 4], start: "22:00", end: "06:00"}}},
 };
 const firstTemplate = kind => Object.values(TEMPLATES[kind])[0];
@@ -127,6 +128,7 @@ const LISTS = {
   maintenance: {cols: ["Name", "Applies to", "During", "When", "Enabled"], cell: i => [null, [...(i.scope?.points || []), ...(i.scope?.sources || []).map(s => "source " + s), tagText(i.scope?.tags)].filter(Boolean).join(", "), {suppress: "Hold alarms", acknowledge: "Acknowledge", drop: "Drop alarms"}[i.mode] || i.mode,
     i.schedule?.type === "weekly" ? `${(i.schedule.days || []).map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(" ")} ${i.schedule.start}-${i.schedule.end}` : i.schedule?.type === "once" ? `${fmt(i.schedule.from)} to ${fmt(i.schedule.to)}` : i.active ? "Switched on" : "Switched off", yes(i.enabled !== false)]},
   watchlist: {cols: ["Name", "Tags", "Points", "Who can read"], cell: i => [null, tagText(i.tags), (i.points || []).join(", "), (i.read_roles || []).join(", ")]},
+  emailgroup: {cols: ["Name", "Addresses"], cell: i => [null, (i.addresses || []).join(", ")]},
 };
 async function renderConfigList(kind, items) {
   const live = kind === "source" ? await api("GET", "/api/sources").catch(() => []) : kind === "point" ? await api("GET", "/api/points").catch(() => []) : [];
