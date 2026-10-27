@@ -44,6 +44,12 @@ call(admin, "POST", "/api/notes/temp", {"text": "electrician due at 14:00"})
 got = call(admin, "GET", "/api/notes/temp", None)[1]
 assert [n["text"] for n in got] == ["pump 2 tripping on start", "electrician due at 14:00"]
 
+# two notes written in the same instant still come back in one fixed order, whatever order the table gives
+for nid in ("0002-b", "0001-a"):
+    store.put(notes.KIND, f"temp/{nid}", {"text": nid, "user": "admin", "ts": 1.0, "id": nid})
+same = [n["text"] for n in notes.for_point(store, "temp") if n["ts"] == 1.0]
+assert same == ["0001-a", "0002-b"], same
+
 # notes stay with their own point
 try:
     call(admin, "GET", "/api/notes/nope", None)

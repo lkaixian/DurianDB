@@ -34,7 +34,9 @@ def add(store, point, text, user):
 def for_point(store, point):
     """Oldest first, so the console reads like a logbook."""
     notes = [{"point": point, **n} for n in store.list(KIND) if str(n.get("name", "")).startswith(point + "/")]
-    return sorted(notes, key=lambda n: n.get("ts", 0))
+    # ts alone is not an order two notes written in the same instant agree on, and the table returns rows in
+    # whatever order it likes: the id breaks the tie so the logbook reads the same everywhere.
+    return sorted(notes, key=lambda n: (n.get("ts", 0), str(n.get("id", ""))))
 
 
 def del_note(store, point, note_id):
