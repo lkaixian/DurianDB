@@ -677,6 +677,69 @@ mod tests {
     }
 
     #[test]
+    fn smoothness_says_nothing_until_the_window_is_full() {
+        // Python's evaluate returns None while `len(window) < maxlen`, however wildly the partial window
+        // scatters — the reading here is the same: three samples of 0, 1000, 0 measure nothing, the fourth
+        // fills the window and convicts them all.
+        let mut d = det(Kind::Smoothness { limit: 0.1, samples: 4 });
+        for (ts, v) in [(0.0, 0.0), (1.0, 1000.0), (2.0, 0.0)] {
+            assert_eq!(d.check(ts, v), None, "a partial window gets no verdict");
+        }
+        assert!(matches!(d.check(3.0, 1000.0), Some(Transition::Raised(_))), "full at last, and it scatters");
+    }
+
+    #[test]
+    fn smoothness_ignores_a_quiet_signal() {
+        let mut d = det(Kind::Smoothness { limit: 1.0, samples: 4 });
+        // sd of these four is sqrt(0.125) ≈ 0.354, well under the limit
+        for (ts, v) in [(0.0, 10.0), (1.0, 10.5), (2.0, 9.5), (3.0, 10.0)] {
+            assert_eq!(d.check(ts, v), None);
+        }
+        assert!(!d.is_active());
+    }
+
+    #[test]
+    fn smoothness_raises_on_a_spike_and_clears_when_the_window_smooths() {
+        let mut d = det(Kind::Smoothness { limit: 5.0, samples: 4 });
+        for ts in 0..4 {
+            assert_eq!(d.check(ts as f64, 10.0), None);
+        }
+        // the window becomes [10, 10, 10, 100]: mean 32.5, sd ≈ 38.971
+        let raised = d.check(4.0, 100.0).expect("the spike scatters the window");
+        if let Transition::Raised(a) = &raised {
+            assert_eq!(a.level, Level::Warning);
+            assert_eq!(a.message, "scatter 38.971 > 5 over 4 samples");
+        } else {
+            panic!("expected a raise, got {raised:?}");
+        }
+        // four more quiet samples before the spike is pushed out of the window; until then it still scatters
+        assert_eq!(d.check(5.0, 10.0), None, "condition holds, no second raise");
+        assert_eq!(d.check(6.0, 10.0), None);
+        assert_eq!(d.check(7.0, 10.0), None);
+        assert_eq!(d.check(8.0, 10.0), Some(Transition::Cleared { raised_at: 4.0, cleared_at: 8.0 }));
+        assert!(!d.is_active());
+    }
+
+    #[test]
+    fn smoothness_refuses_non_finite_and_a_backdated_ts_still_records_its_value() {
+        // non-finite follows the crate-wide policy (see `non_finite_values_never_reach_a_comparison`):
+        // counted in `rejected`, never pushed into the window. A backdated timestamp follows Python, where
+        // Smoothness.evaluate appends the value before any time is consulted: ts only drives the latch's
+        // delays here, so the sample still counts.
+        let mut d = det(Kind::Smoothness { limit: 5.0, samples: 4 });
+        for ts in 0..4 {
+            d.check(ts as f64, 10.0);
+        }
+        assert_eq!(d.check(9.0, f64::NAN), None);
+        assert_eq!(d.check(9.0, f64::INFINITY), None);
+        assert_eq!(d.rejected, 2);
+        assert_eq!(d.window.as_ref().unwrap().len(), 4, "neither poison entered the window");
+        assert!((d.window.as_ref().unwrap().mean() - 10.0).abs() < 1e-12);
+        // back in time, but a real sample: it evicts a 10 and scatters the window
+        assert!(matches!(d.check(5.0, 100.0), Some(Transition::Raised(_))));
+    }
+
+    #[test]
     fn the_window_never_grows() {
         let mut d = det(Kind::Smoothness { limit: 1e9, samples: 8 });
         for i in 0..10_000 {
