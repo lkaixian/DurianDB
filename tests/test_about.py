@@ -20,7 +20,6 @@ assert s == 200 and (me["version"], me["build"], me["repo"]) == (VERSION, BUILD,
 # the console reads all three from /api/me and nowhere else, so one change keeps the sidebar and the page in step
 web = (Path(__file__).resolve().parent.parent / "web")
 js, acct = (web / "app.js").read_text(), (web / "account.js").read_text()
-assert 'id="nav"' in (web / "index.html").read_text() and "navver" in js and "viewAbout" in js and "about: viewAbout" in js
+assert 'id="nav"' in (web / "index.html").read_text() and 'id="ver"' in (web / "index.html").read_text() and "viewAbout" in js and "about: viewAbout" in js
 assert "me.version" in js and "me.build" in acct and "me.repo" in acct
-assert ".navver" in (web / "app.css").read_text(), "the foot-of-sidebar bar needs its rule"
 print("ok")

@@ -9,7 +9,7 @@ on:
 jobs:
   browser:
     name: browser checks (headless Chromium)
-    # Every check gets a throwaway database and browser profile, so one job can run them back to back. Twelve
+    # Every check gets a throwaway database and browser profile, so one job can run them back to back. Thirteen
     # checks take about seven minutes on a laptop, hence the ceiling rather than a guess at a per-step timeout.
     runs-on: ubuntu-latest
     timeout-minutes: 20

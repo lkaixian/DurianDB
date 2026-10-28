@@ -284,3 +284,20 @@ h3.fold{grid-column:1/-1;margin:18px 0 0;padding-bottom:4px;border-bottom:1px so
 .dgrid.design{display:grid}  /* the canvas stays a grid on a phone, or positions would mean nothing */
 .phead{align-items:center;gap:6px}.phead h3{flex:1;margin:0}
 .hit .x{position:absolute;right:0;top:0;width:28px;height:28px;padding:0;line-height:1;background:var(--accent);color:var(--paper);border:0;font-size:1.2rem;cursor:pointer}
+/* ---- command palette (web/palette.js) */
+#cp{position:fixed;top:12vh;margin:0 auto;width:min(40rem,calc(100vw - 2*var(--s4)));max-height:70vh;padding:0;border:1px solid var(--rule);border-radius:var(--r2);background:var(--field);color:var(--ink);box-shadow:var(--shadow);overflow:hidden;opacity:0;transform:scale(.97);transition:opacity .12s ease-out,transform .12s ease-out}
+#cp[open]{display:flex;flex-direction:column}
+#cp.in{opacity:1;transform:none}
+#cp::backdrop{background:rgb(0 0 0/.4)}
+#cp-in{width:100%;box-sizing:border-box;border:0;border-bottom:1px solid var(--rule);border-radius:0;padding:var(--s4);font:inherit;font-size:var(--fs-l);background:transparent;color:inherit}
+#cp-in:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+#cp-list{overflow:auto;padding:var(--s2)}
+#cp .cp-g{margin:var(--s2) var(--s2) var(--s1);font-size:var(--fs-s);font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+#cp [role=option]{display:flex;justify-content:space-between;gap:var(--s4);padding:var(--s2) var(--s3);border-radius:var(--r);cursor:pointer}
+#cp [role=option] small{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#cp [role=option][aria-selected=true]{background:var(--hover);outline:2px solid var(--focus);outline-offset:-2px}
+#cp mark{background:none;color:var(--accent);font-weight:700;text-decoration:underline}
+#cp #cp-note{margin:0;padding:var(--s2) var(--s4);min-height:1.2em}
+#cp .cp-none{padding:var(--s4)}
+#cp .cp-warn{color:var(--muted)}
+@media (prefers-reduced-motion:reduce){#cp{transition:none;transform:none}}

@@ -283,6 +283,10 @@ setInterval(async () => {
 setInterval(refreshAlarmCount, 10000);
 addEventListener("hashchange", () => { refreshAlarmCount(); });
 
+// ---- command palette (web/palette.js): the same role-aware page list as the sidebar, plus Account and About
+initPalette({api, esc, store, me: () => me, toast, logout, refreshAlarmCount, theme: () => $("#theme").click(),
+  pages: () => [...NAV.filter(g => !g[2] || isAdmin()).flatMap(g => g[1].map(([v, l]) => [v, l])), ["account", "Account"], ["about", "About"]]});
+
 // ---- start
 (async () => {
   try { me = await api("GET", "/api/me"); } catch (e) { main.innerHTML = ""; const p = document.createElement("p"); p.className = "status err"; p.textContent = e.message; main.append(p); return; }
