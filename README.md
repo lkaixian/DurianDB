@@ -5,6 +5,8 @@
 [![MariaDB tests](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-mysql.yml?branch=main&label=MariaDB%20tests)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-mysql.yml)
 [![rust core](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-rust.yml?branch=main&label=rust%20core)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-rust.yml)
 
+![Feature stack](docs/feature-stack.svg)
+
 Each badge covers one workflow, and each workflow holds exactly one job, all triggered on every push to `main`:
 
 | Job | What it proves |
