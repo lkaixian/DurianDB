@@ -356,7 +356,7 @@ def svg_sync(write, reg=None, root=ROOT):
     new = svg(reg)
     try:
         with open(path, encoding="utf-8", newline="") as fh:
-            if fh.read() == new:
+            if fh.read().replace(chr(13) + chr(10), chr(10)) == new:  # a Windows checkout may have turned LF into CRLF
                 return True
     except FileNotFoundError:
         pass

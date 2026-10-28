@@ -15,7 +15,7 @@ assert features.sync(write=False), "docs/progress.html is stale; run python tool
 
 assert features.main(["svg", "--check"]) == 0, "docs/feature-stack.svg is stale; run python tools/features.py svg"
 import xml.etree.ElementTree as ET  # noqa: E402
-raw = open(os.path.join(features.ROOT, features.SVG), "rb").read()
+raw = open(os.path.join(features.ROOT, features.SVG), "rb").read().replace(bytes([13, 10]), bytes([10]))  # a Windows checkout may use CRLF
 assert b"\r" not in raw and len(raw) < 60000
 svg = ET.fromstring(raw)
 ns = "{http://www.w3.org/2000/svg}"
