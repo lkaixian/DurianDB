@@ -53,6 +53,11 @@ assert "host" in props(put("source", "g", {"type": "egauge"})), "host is require
 assert "port" in props(put("source", "g", {"type": "egauge", "host": "h", "port": 0}))
 assert "tls" in props(put("source", "g", {"type": "egauge", "host": "h", "tls": "yes"}))
 assert "creds" in props(put("source", "g", {"type": "egauge", "host": "h", "creds": str(tmp / "nope.json")}))
+for bad in ("127.0.0.1:80/internal/admin?", "user:pw@h", "h/x", "h h", "h#", "h?", "h\\x", "h:80", "h\n", "[::1", "[zz]"):
+    assert "host" in props(put("source", "g", {"type": "egauge", "host": bad})), bad
+for good in ("127.0.0.1", "meter-1.local", "[::1]"):
+    assert "host" not in props(put("source", "g", {"type": "egauge", "host": good, "port": 80})), good
+call("DELETE", "/api/config/source/g")
 cf = tmp / "c.json"; cf.write_text(json.dumps({"user": "owner", "password": "pw"}))
 assert put("source", "m", {"type": "egauge", "host": "127.0.0.1", "port": port, "tls": False, "period": 60, "creds": str(cf)})[0] == 200
 for n in ("Grid", "Solar", "L1", "Inf", "Absent"):

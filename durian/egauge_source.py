@@ -8,6 +8,7 @@ The XML comes off the network, so any DOCTYPE or entity declaration is refused b
 """
 import json
 import math
+import re
 import ssl
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -18,6 +19,7 @@ from .core import sentence
 from .polled import NoRedirect, PolledSource, number, scale
 
 MAX_BYTES = 1_000_000
+_HOST = re.compile(r"[A-Za-z0-9_.-]{1,253}|\[[0-9A-Fa-f:.]{2,45}\]")  # name, IPv4 or [IPv6]; the port is its own setting
 
 
 def _num(v):
@@ -37,8 +39,8 @@ def safe_parse(raw):
 
 
 def validate_source(b, add):
-    if not (isinstance(b.get("host"), str) and 0 < len(b["host"]) <= 253):
-        add("host", "give the meter's host name or address")
+    if not (isinstance(b.get("host"), str) and _HOST.fullmatch(b["host"])):
+        add("host", "give the meter's host name or address only, with no port, path or login")
     if "port" in b and not (isinstance(b["port"], int) and not isinstance(b["port"], bool) and 1 <= b["port"] <= 65535):
         add("port", "must be 1 to 65535")
     if not isinstance(b.get("tls", False), bool):
