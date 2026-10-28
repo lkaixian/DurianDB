@@ -38,6 +38,22 @@ def paths():
     return web, Path(os.environ["DURIAN_HOME"]) if os.environ.get("DURIAN_HOME") else home
 
 
+def stop_file():
+    """`durian stop` writes this file; the server and the supervisor poll for it and shut down cleanly."""
+    return paths()[1] / "durian.stop"
+
+
+def watch_stop_file(on_stop, path=None):
+    """Call on_stop() once when the stop file appears (checked about once a second, in a daemon thread)."""
+    path = path or stop_file()
+
+    def loop():
+        while not path.exists():
+            time.sleep(1)
+        on_stop()
+    threading.Thread(target=loop, daemon=True).start()
+
+
 WEB = paths()[0]
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/dashboards.js": ("dashboards.js", "text/javascript; charset=utf-8"), "/admin.js": ("admin.js", "text/javascript; charset=utf-8"), "/forms.js": ("forms.js", "text/javascript; charset=utf-8"),
@@ -199,6 +215,7 @@ def main(safe=False, host=None, port=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     safe = safe or os.environ.get("DURIAN_SAFE") == "1"
     home = paths()[1]
+    stop_file().unlink(missing_ok=True)  # a stop request left by an earlier run must not stop this one
     host = host or os.environ.get("DURIAN_HOST", "127.0.0.1")
     cert, key = os.environ.get("DURIAN_TLS_CERT"), os.environ.get("DURIAN_TLS_KEY")
     if cert and not key:
@@ -228,7 +245,8 @@ def main(safe=False, host=None, port=None):
     scheme = "https" if cert else "http"
     if not cert and host not in ("127.0.0.1", "::1", "localhost"):
         raise SystemExit(f"Refusing to serve plain HTTP on {host}: set DURIAN_TLS_CERT and DURIAN_TLS_KEY, or use 127.0.0.1.")
-    print(f"DurianDB on {scheme}://{host}:{port}")
+    print(f"DurianDB on {scheme}://{host}:{port}", flush=True)
+    watch_stop_file(lambda: (print("Stop requested (durian stop); shutting down.", flush=True), httpd.shutdown()))
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

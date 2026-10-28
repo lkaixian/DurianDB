@@ -45,7 +45,21 @@ def _probe(url, timeout=2):
         return False
 
 
-def _stop_child(p):
+def _inherit():
+    """Hand our redirected stdout/stderr to the child. Without a console (a detached start) Windows gives it nothing otherwise."""
+    try:
+        return {"stdout": sys.stdout.fileno(), "stderr": sys.stderr.fileno()}
+    except (AttributeError, OSError, ValueError):
+        return {}
+
+
+def _stop_child(p, graceful=0):
+    """graceful: seconds to let the child leave on its own first (it watches the same stop file), so it releases its lease."""
+    if p.poll() is None and graceful:
+        try:
+            p.wait(graceful)
+        except subprocess.TimeoutExpired:
+            pass
     if p.poll() is None:
         p.terminate()
         try:
@@ -56,7 +70,7 @@ def _stop_child(p):
 
 
 def run(cmd, stop, health_interval=10.0, hang_after=3, startup_grace=60.0, crash_limit=5,
-        crash_window=600.0, backoff_cap=60.0, healthy_reset=300.0, probe_timeout=2.0):
+        crash_window=600.0, backoff_cap=60.0, healthy_reset=300.0, probe_timeout=2.0, stop_file=None):
     """Supervise `cmd` until `stop` (a threading.Event) is set."""
     db = os.environ.get("DURIAN_DB")
     status_path = (Path(db).parent if db else Path(__file__).resolve().parent.parent) / "supervisor.json"
@@ -85,7 +99,7 @@ def run(cmd, stop, health_interval=10.0, hang_after=3, startup_grace=60.0, crash
     failures, backoff = [], 1.0
     while not stop.is_set():
         env = dict(os.environ, **({"DURIAN_SAFE": "1"} if st["safe"] else {}))
-        child = subprocess.Popen(cmd, env=env)
+        child = subprocess.Popen(cmd, env=env, **_inherit())
         log(f"started the server (pid {child.pid}){' in safe mode' if st['safe'] else ''}")
         save("safe" if st["safe"] else "running")
         born, healthy_since, bad, ever, reason = time.time(), None, 0, False, None
@@ -103,7 +117,7 @@ def run(cmd, stop, health_interval=10.0, hang_after=3, startup_grace=60.0, crash
                 elif not ever and now - born > startup_grace:
                     reason = f"the server did not become healthy within {startup_grace:g} seconds and was hung"
         was_healthy = healthy_since is not None and time.time() - healthy_since >= healthy_reset
-        _stop_child(child)
+        _stop_child(child, graceful=10 if stop_file and stop_file.exists() else 0)
         if stop.is_set():
             break
         st["last_exit"], st["restarts"] = reason, st["restarts"] + 1
@@ -146,10 +160,13 @@ def main(argv=None):
             sys.exit(f"{a[0]} must be a number.")
         a = a[2:]
     stop = threading.Event()
+    from . import server
+    server.stop_file().unlink(missing_ok=True)  # a stop request left by an earlier run must not stop this one
+    server.watch_stop_file(stop.set)
     import signal
     for s in (signal.SIGINT, signal.SIGTERM):
         signal.signal(s, lambda *_: stop.set())
-    run(default_cmd(), stop, **knobs)
+    run(default_cmd(), stop, stop_file=server.stop_file(), **knobs)
     return 0
 
 

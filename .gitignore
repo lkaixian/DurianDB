@@ -21,3 +21,10 @@ build/
 *.spec
 .claude/
 graphify-out/
+
+# runtime files written beside the database
+supervisor.json
+durian.pid
+durian.stop
+durian.log*
+spool.ndjson*

@@ -75,6 +75,9 @@ against. It needs no Python: rename it to `durian` (`durian.exe` on Windows), th
 http://127.0.0.1:8765. The database, backups and spool sit beside the executable, or in `DURIAN_HOME` when that is set.
 `durian supervise` is the watchdog; the files in `tools/service` start `python -m durian supervise`, so point them at the
 executable for a service. To build it yourself, run `python tools/build_exe.py` after `python -m pip install pyinstaller==6.22.3`.
+`durian run` holds the window; `durian start` runs the supervised server in the background (log in `durian.log`, pid in `durian.pid`, both in the data folder).
+`durian status` shows whether it is running (exit 0) or stopped (1), even after you closed the window; `durian logs [-n 50] [-f]` tails the log.
+`durian stop` asks it to leave cleanly and kills it after 20 seconds; `durian restart` does both. `start` and `restart` take `--safe` and `--no-supervise`.
 
 ## What it can do
 
