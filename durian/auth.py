@@ -19,6 +19,8 @@ log = logging.getLogger("durian.auth")
 INHERIT = {"superadmin": {"superadmin", "user", "anonymous"}, "user": {"user", "anonymous"}, "anonymous": {"anonymous"}}
 MIN_PASSWORD = 10
 LOCK_AFTER, LOCK_SECONDS = 5, 300
+NAME = re.compile(r"[A-Za-z0-9_.-]{1,32}")  # what a directory sign-in may provision
+RESERVED = {"system", "anonymous", "superadmin", "user"}  # never provisioned from a directory
 RESET_SECONDS = 3600  # an issued reset code works for one hour, once
 FAILURE_MAX = 10_000  # failed-sign-in entries kept before a prune
 SWEEP_SECONDS = 60  # expired sessions and lockouts are swept at most this often from the sign-in path
@@ -242,23 +244,41 @@ class Auth:
         self.swept = now
 
     def login(self, name, pw, code=None):
+        usable = isinstance(name, str)
+        if usable:
+            try:
+                name.encode()
+            except UnicodeEncodeError:  # a name the store cannot hold is a plain failure, counted under a printable key
+                usable, name = False, name.encode("utf-8", "replace").decode()
+        user = self.store.user(name) if usable else None
+        # LDAP only for a name with no local account, or an account an earlier LDAP sign-in created (marked LDAP_HASH)
+        cfg = ldap_config(self.store) if usable and (not user or user["hash"] == LDAP_HASH) else None
+        if cfg and not user:
+            if NAME.fullmatch(name):
+                name = name.casefold()  # directories match uid case-insensitively: one lockout key, one account
+            local = next((r for r in self.store.q("select name, hash from users") if r["name"].casefold() == name.casefold()), None)
+            if local and local["hash"] == LDAP_HASH:
+                name, user = local["name"], self.store.user(local["name"])
+            elif local or name.casefold() in RESERVED:
+                cfg = None  # a local account's name in another case, or a reserved name: an ordinary failure
         count, until = self._failure(name)
         if until > time.time():
             raise AuthError("too many failed attempts, try again later", 429)
-        user = self.store.user(name) if isinstance(name, str) else None
-        # LDAP only for a name with no local account, or an account an earlier LDAP sign-in created (marked LDAP_HASH)
-        cfg = ldap_config(self.store) if isinstance(name, str) and (not user or user["hash"] == LDAP_HASH) else None
         if cfg:
+            # ponytail: the same scrypt work as a local account so timing does not tell local from unknown names. A
+            # directory outage is still a 502 (an operator must see it), so that difference remains a documented ceiling.
+            verify_password("", self._dummy)
             try:
                 ok = ldap_bind(cfg["url"], bind_dn(cfg["bind_template"], name), pw)
             except LDAPError as ex:  # the directory is down: a sentence, not a failed attempt
                 raise AuthError(str(ex), 502)
-            if ok and not user and re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", name):
+            if ok and not user and NAME.fullmatch(name):
                 self.store.add_user(name, LDAP_HASH, cfg["default_roles"])
                 user = self.store.user(name)
             ok = ok and user
-        else:
-            ok = verify_password(pw if isinstance(pw, str) else "", user["hash"] if user else self._dummy) and user
+        else:  # an LDAP-marked account with LDAP off gets the dummy too: its hash is not scrypt, but the work is the same
+            stored = user["hash"] if user and user["hash"] != LDAP_HASH else self._dummy
+            ok = verify_password(pw if isinstance(pw, str) else "", stored) and user
         ok = ok and not user.get("disabled")  # the same message as a wrong password: a disabled account is not advertised
         if ok and user.get("totp"):
             if code is None:  # right password: ask for the second factor without counting it as a failure

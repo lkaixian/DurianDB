@@ -27,7 +27,7 @@ def escape_dn(value):
     out = "".join("\\00" if c == "\0" else "\\" + c if c in ',+"\\<>;=' else c for c in value)
     if out.startswith(("#", " ")):
         out = "\\" + out
-    if out.endswith(" ") and not out.endswith("\\ "):
+    if value.endswith(" "):  # judged on the raw value: an escaped backslash before the space must not hide it
         out = out[:-1] + "\\ "
     return out
 
@@ -146,6 +146,8 @@ def validate_ldap(body, known_roles=None):
     roles = body.get("default_roles")
     if not (isinstance(roles, list) and 0 < len(roles) <= 20 and all(isinstance(r, str) and ROLE.match(r) for r in roles)):
         add("default_roles", "must list at least one role name")
+    elif "superadmin" in roles:
+        add("default_roles", "must not include superadmin: a directory never creates administrators")
     elif known_roles is not None and (unknown := sorted(set(roles) - set(known_roles))):
         add("default_roles", f"unknown role {', '.join(unknown)}; use a role an account already holds")
     if not isinstance(body.get("enabled", True), bool):

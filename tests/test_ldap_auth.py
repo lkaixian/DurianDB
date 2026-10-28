@@ -100,6 +100,7 @@ assert fake.seen[-1][0] == r"uid=x\,ou\=admins,ou=people,dc=example,dc=com", fak
 from durian.ldap import escape_dn  # noqa: E402
 assert escape_dn('a,b+c"d\\e<f>g;h=i') == r'a\,b\+c\"d\\e\<f\>g\;h\=i'
 assert escape_dn("#x y ") == r"\#x y\ " and escape_dn(" x") == r"\ x" and escape_dn("a\0b") == r"a\00b"
+assert escape_dn("a\\ ") == r"a\\\ " and escape_dn("a ") == r"a\ "
 
 n0 = len(store.audit_log(1000))
 for i in range(20):  # made-up names: lockout state yes, audit rows no
@@ -122,6 +123,37 @@ for _ in range(5):
     fails(lambda: auth.login("carol", "wrong-password"), 401)
 fails(lambda: auth.login("carol", "wrong-password"), 429)
 assert store.failure("carol")["attempts"] == 5
+
+# ---- name case: one lockout key and one account per directory user; a local account's name in another case never reaches the directory
+import itertools  # noqa: E402
+variants = ["".join(c) for c in itertools.islice(itertools.product(*[(ch, ch.upper()) for ch in "alice"]), 31)]
+assert len(set(variants)) == 31
+for v in variants * 5:
+    try:
+        auth.login(v, "wrong-password")
+    except AuthError:
+        pass
+fails(lambda: auth.login("aLiCe", GOOD_PW), 429)  # locked now, whatever the case
+store.delete_failure("alice")
+auth.login("ALICE", GOOD_PW)
+assert [u["name"] for u in store.users() if u["name"].lower() == "alice"] == ["alice"], store.users()
+before = len(fake.seen)
+fails(lambda: auth.login("VIEWER", "viewer-password-1"), 401)
+fails(lambda: auth.login("Viewer", GOOD_PW), 401)
+assert len(fake.seen) == before, "a local account's name in other case reached the directory"
+assert not any(u["name"].lower() == "viewer" and u["name"] != "viewer" for u in store.users())
+
+# ---- reserved names are never provisioned; a directory may not hand out superadmin
+for n in ("system", "SYSTEM", "Anonymous", "superadmin", "User"):
+    fails(lambda n=n: auth.login(n, GOOD_PW), 401)
+assert not any(u["name"].lower() in ("system", "anonymous", "superadmin", "user") for u in store.users())
+fails(lambda: app.handle("PUT", "/api/auth/ldap", {}, {**cfg, "default_roles": ["user", "superadmin"]}, admin), 422)
+
+# ---- a lone surrogate in the user name is a plain failed login (no audit row)
+n0 = len(store.audit_log(1000))
+for n in ("al\ud800ce", "\udc80"):
+    fails(lambda n=n: auth.login(n, "whatever-pw"), 401)
+assert len(store.audit_log(1000)) == n0
 
 # ---- not configured / disabled: no fall-through at all
 before = len(fake.seen)
