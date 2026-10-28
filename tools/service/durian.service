@@ -1,0 +1,20 @@
+# Install: copy to /etc/systemd/system/, edit User/WorkingDirectory/paths, then
+#   systemctl daemon-reload && systemctl enable --now durian
+# The supervisor restarts a hung or crashed server itself; systemd only restarts the supervisor.
+[Unit]
+Description=DurianDB historian (supervised)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=durian
+WorkingDirectory=/opt/durian
+EnvironmentFile=-/etc/durian.env
+ExecStart=/usr/bin/python3 -m durian supervise
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
