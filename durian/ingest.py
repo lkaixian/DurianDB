@@ -71,6 +71,63 @@ def parse_payload(body, query):
     return [(i.get("point"), i.get("value"), i.get("ts"), n, i.get("quality")) for n, i in enumerate(items)]
 
 
+def _split(s, sep):
+    """Split on sep where it is neither backslash-escaped nor inside double quotes."""
+    out, cur, q, esc = [], "", False, False
+    for ch in s:
+        if esc:
+            cur, esc = cur + ch, False
+        elif ch == "\\":
+            cur, esc = cur + ch, True
+        elif ch == '"':
+            cur, q = cur + ch, not q
+        elif ch == sep and not q:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    return out + [cur]
+
+
+def _unesc(s):
+    return re.sub(r"\\(.)", r"\1", s)
+
+
+def _line_value(v):
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        return _unesc(v[1:-1])
+    if v.lower() in ("t", "true", "f", "false"):
+        return 1.0 if v.lower()[0] == "t" else 0.0
+    return float(v[:-1] if re.fullmatch(r"[+-]?\d+[iu]", v) else v)
+
+
+def parse_line(text):
+    """InfluxDB line protocol -> (candidates for HttpInSource.submit, rejected). Index is the 1-based line number.
+    Tags are ignored. ValueError when there are no lines or more than MAX_BATCH."""
+    cands, rejected = [], []
+    for n, raw in enumerate(text.splitlines(), 1):
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        parts = [p for p in _split(raw, " ") if p]
+        try:
+            if not 2 <= len(parts) <= 3:
+                raise ValueError("expected: measurement[,tags] field=value[,...] [timestamp_ns]")
+            meas = _unesc(_split(parts[0], ",")[0])
+            fields = [_split(f, "=") for f in _split(parts[1], ",")]
+            if not meas or any(len(f) != 2 or not f[0] for f in fields):
+                raise ValueError("expected: measurement[,tags] field=value[,...] [timestamp_ns]")
+            ts = int(parts[2]) / 1e9 if len(parts) == 3 else None
+            vals = [(_unesc(k), _line_value(v)) for k, v in fields]
+        except ValueError as e:
+            rejected.append({"index": n, "point": None, "reason": f"line {n}: {e}" if "expected" in str(e) else f"line {n}: bad field value or timestamp"})
+            continue
+        cands += [(meas if (k, len(vals)) == ("value", 1) else f"{meas}.{k}", v, ts, n, None) for k, v in vals]
+    if not 1 <= len(cands) + len(rejected) <= MAX_BATCH:
+        raise ValueError(f"send between 1 and {MAX_BATCH} values per request")
+    return cands, rejected
+
+
 class HttpInSource(Source):
     MAX_PENDING = 10_000  # ponytail: one cap for the whole source; a per-point share if one sender floods the rest
 

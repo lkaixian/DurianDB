@@ -24,7 +24,7 @@ from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_la
 from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, drift as baseline_drift, forecast as forecast_series
-from .ingest import HttpInSource, parse_payload
+from .ingest import HttpInSource, parse_line, parse_payload
 from .jobs import Jobs
 from .oidc import OIDC, OIDCError, local_identity, validate_sso
 from .maintenance import Maintenance, Raw
@@ -699,7 +699,7 @@ class App:
     # ---- data-plane route handlers, each the exact branches it replaced
     def _api_ingest(self, method, a, b, c, query, body, ident, need):
         if a == "ingest" and b:
-            return self.ingest(method, b, query, body, ident)
+            return self.ingest(method, b, query, body, ident, line=c == "line")
 
     def _api_value(self, method, a, b, c, query, body, ident, need):
         if (method, a) == ("GET", "value") and b and c is None:
@@ -1000,17 +1000,25 @@ class App:
             return a in cls.READ_AREAS or (a == "export" and b == "history")
         return scope == "write" and (method, a, c) == ("POST", "points", "set")
 
-    def ingest(self, method, source, query, body, ident):
+    def ingest(self, method, source, query, body, ident, line=False):
         if ident.get("scope") != "ingest":  # also keeps browser sessions out: a page could otherwise be made to push values
             raise ApiError(403 if ident.get("name") else 401, "pushing values needs an ingest token, not a browser session")
         s = next((x for x in self.engine.sources if x.name == source and isinstance(x, HttpInSource)), None)
         if s is None:
             raise ApiError(404, "unknown ingest source")
+        bad = []
         try:
-            candidates = parse_payload(body if method == "POST" else None, query)
+            if line:  # InfluxDB line protocol, a text body; the same guards in submit() apply to every field
+                if method != "POST" or not isinstance(body, str):
+                    raise ValueError("POST the lines as text (Content-Type text/plain)")
+                candidates, bad = parse_line(body)
+            else:
+                candidates = parse_payload(body if method == "POST" else None, query)
         except ValueError as e:
             raise ApiError(400, sentence(e))
         accepted, rejected = s.submit(candidates)
+        rejected = sorted(bad + rejected, key=lambda x: x["index"])
+        s.dropped += len(bad)
         return (200 if accepted else 422), {"accepted": accepted, "rejected": rejected}
 
     def tokens(self, method, name, body, ident):
