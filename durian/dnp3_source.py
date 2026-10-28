@@ -425,7 +425,7 @@ class Dnp3Source(PolledSource):
                 return
             self.fails += 1
             wait = min(self.period * self.backoff_scale ** self.fails, self.backoff_max)
-            self.next_try = time.time() + wait
+            self.next_try = time.monotonic() + wait
             self._integrity_done = False  # a recovered link re-reads every static value, so points leave BAD
             self.error, self.connected = f"{self.failure_text(e)} (retry in {wait:.0f}s)", False
             with self._lock:

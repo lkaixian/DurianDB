@@ -539,6 +539,7 @@ class Engine:
         self.down = {}  # source name -> its open source-down Event
         self.slow = {}  # source name -> its open poll-overrun Event
         self.startable = []  # sources built but not started yet; see start_sources()
+        self._prev_tick = None  # to notice the wall clock stepping back
 
     def start_sources(self):
         """Start this engine's background pollers. build_engine leaves them unstarted so the caller can finish its
@@ -600,6 +601,12 @@ class Engine:
                         p.update(None, ts, self._event, Quality.BAD)
 
     def tick(self, ts):
+        if self._prev_tick is not None and ts < self._prev_tick:  # NTP stepped the clock back: polled samples would all look old
+            for s in self.sources:
+                for p in s.points.values():
+                    p.last_ts = None
+            self._event(Event(SOURCE + "clock", Level.INFORMATION, f"the system clock stepped back {self._prev_tick - ts:.0f}s", ts))
+        self._prev_tick = ts
         for s in self.sources:
             try:
                 values = s.poll(ts)
@@ -616,6 +623,8 @@ class Engine:
                 p = s.points.get(name)
                 if p is None:  # removed by a config change while the value was in flight
                     continue
+                if not math.isfinite(t):  # NaN would disable the out-of-order guard and write a NULL-time row
+                    t, q = ts, max(q, Quality.UNCERTAIN)
                 if q != Quality.BAD:
                     if t > ts + FUTURE_SLACK:  # a clock that runs ahead: keep the value, stamp it with our time, say it is doubtful
                         t, q = ts, max(q, Quality.UNCERTAIN)

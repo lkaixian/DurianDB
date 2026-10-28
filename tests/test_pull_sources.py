@@ -135,9 +135,9 @@ assert s.connected is True and last()["a1"] == 5.0 and "Bearer secret-token" in 
 s = src_of("web"); s.period, s.backoff_scale, s.backoff_max = 1.0, 2.0, 30.0
 web.shutdown(); web.server_close()
 s.next_try = 0; s.cycle()
-assert s.connected is False and s.fails == 1 and "retry in" in s.error and 1.9 < s.next_try - time.time() < 2.1
+assert s.connected is False and s.fails == 1 and "retry in" in s.error and 1.9 < s.next_try - time.monotonic() < 2.1
 s.next_try = 0; s.cycle()
-assert s.fails == 2 and 3.9 < s.next_try - time.time() < 4.1
+assert s.fails == 2 and 3.9 < s.next_try - time.monotonic() < 4.1
 assert last()["temp"] == 30.0  # the last good value stays; a NO_UPDATE detector is what flags staleness
 
 # ---- SQL source

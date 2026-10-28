@@ -617,7 +617,7 @@ class OpcuaSource(PolledSource):
                 return
             self.fails += 1
             wait = min(self.period * self.backoff_scale ** self.fails, self.backoff_max)
-            self.next_try = time.time() + wait
+            self.next_try = time.monotonic() + wait
             self.error, self.connected = f"{self.failure_text(e)} (retry in {wait:.0f}s)", False
             with self._lock:
                 self._latest.update({n: (None, time.time(), Quality.BAD) for n in self.points})

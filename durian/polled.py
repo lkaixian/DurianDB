@@ -55,10 +55,10 @@ class PolledSource(Source):
     def _loop(self):
         while not self._stop.is_set():
             started = time.monotonic()
-            if time.time() >= self.next_try:
+            if started >= self.next_try:  # monotonic: a wall-clock step must not stretch the backoff
                 self.cycle()
                 self.poll_ms = (time.monotonic() - started) * 1000
-            self._stop.wait(max(0.05, self.period - (time.monotonic() - started), self.next_try - time.time()))
+            self._stop.wait(max(0.05, self.period - (time.monotonic() - started), self.next_try - time.monotonic()))
 
     def cycle(self):
         """One fetch. Public so tests can drive it without the thread."""
@@ -69,7 +69,7 @@ class PolledSource(Source):
                 return
             self.fails += 1
             wait = min(self.period * self.backoff_scale ** self.fails, self.backoff_max)
-            self.next_try = time.time() + wait
+            self.next_try = time.monotonic() + wait
             self.error, self.connected = f"{self.failure_text(e)} (retry in {wait:.0f}s)", False
             with self._lock:
                 self._latest.update({n: (None, time.time(), Quality.BAD) for n in self.points})

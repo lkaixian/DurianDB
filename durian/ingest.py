@@ -26,19 +26,22 @@ def parse_time(v):
         raise ValueError("ts must be epoch seconds or an ISO-8601 text")
     if isinstance(v, (int, float)):
         t = float(v)
+        if not math.isfinite(t):
+            raise ValueError("timestamp must be a finite number of epoch seconds")
         if t > 1e11:  # milliseconds, as many devices and Node-RED send
             t /= 1000.0
         return t
     if isinstance(v, str):
         s = v.strip()
         try:
-            return parse_time(float(s))
+            f = float(s)
         except ValueError:
             try:
                 d = dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
             except ValueError as e:
                 raise ValueError("ts must be epoch seconds or an ISO-8601 text") from e
             return (d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)).timestamp()
+        return parse_time(f)
     raise ValueError("ts must be epoch seconds or an ISO-8601 text")
 
 
