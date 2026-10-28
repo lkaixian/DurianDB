@@ -35,7 +35,7 @@ from .store import ALL_ROLLUPS
 log = logging.getLogger("durian.app")
 
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "emailgroup", "maintenance")
-ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import", "auth"}  # the routes below the superadmin guard
+ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import", "auth", "sql"}  # the routes below the superadmin guard
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
 
 
@@ -658,6 +658,7 @@ class App:
         "database": "_api_admin_database",
         "export": "_api_admin_export",
         "import": "_api_admin_export",
+        "sql": "_api_admin_sql",
     }
 
     def handle(self, method, path, query, body, ident):
@@ -979,6 +980,22 @@ class App:
             return self.export_retrieve(c, ident)
         if a == "database":
             return self.database(method, b, c, body, ident, query)
+
+    def _api_admin_sql(self, method, a, b, c, query, body, ident):
+        if (method, a, b) == ("POST", "sql", None):
+            if ident.get("scope"):  # a machine token never reaches administration; said again where the risk is
+                raise ApiError(403, "the SQL console needs a signed-in session, not a token")
+            text = body.get("query") if isinstance(body, dict) else None
+            if not isinstance(text, str):
+                raise ApiError(400, "send the statement as {\"query\": \"select ...\"}")
+            self.store.audit(ident["name"], "sql.query", text[:500])
+            try:
+                cols, rows, truncated = self.store.query_ro(text)
+            except PermissionError as ex:
+                raise ApiError(403, str(ex)) from None
+            except ValueError as ex:
+                raise ApiError(400, str(ex)) from None
+            return 200, {"columns": cols, "rows": rows, "truncated": truncated}
 
     def _api_admin_export(self, method, a, b, c, query, body, ident):
         if (method, a) == ("GET", "export") and b is None:

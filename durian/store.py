@@ -6,6 +6,7 @@ Config objects (sources, points, handlers, dashboards...) live in one table as J
 Validation belongs to the layer that writes them, not here. Schema changes go through durian/migrations.py.
 """
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -13,6 +14,7 @@ from contextlib import contextmanager
 import urllib.parse
 from pathlib import Path
 
+from .core import sentence
 from .migrations import MIGRATIONS
 
 ROLLUPS = {"avg": "avg(value)", "min": "min(value)", "max": "max(value)", "count": "count(*)", "sum": "sum(value)"}
@@ -470,6 +472,75 @@ class Store:
 
     def delete_token(self, name):
         return self.run("delete from api_tokens where name=?", (name,)).rowcount
+
+    # ---- read-only console (superadmin): one select, never a table that holds a hash or a token
+    SECRET = ("users", "api_tokens", "sessions", "auth_failures", "auth_last_step", "confirm_tokens", "objects",
+              "lockouts", "totp", "reset", "token", "hash", "sqlite_", "information_schema", "mysql", "settings")
+    REFUSED = ("pragma", "attach", "detach", "insert", "update", "delete", "drop", "create", "alter", "replace", "vacuum",
+               "reindex", "into", "load_extension", "load_file", "sleep", "benchmark", "with", "call", "set", "lock")
+
+    def query_ro(self, query, limit=1000, seconds=5):
+        """Run one SELECT and return (columns, rows, truncated). PermissionError is a refusal by name, ValueError a failed statement, both plain sentences.
+        Three layers: the text is checked by name, the connection is read-only, and SQLite's authorizer
+        re-checks every table actually read, so a trick the text check misses still reads nothing secret."""
+        q = query
+        while True:  # strip leading whitespace and comments
+            t = q.lstrip()
+            if t.startswith("--"):
+                q = t.partition("\n")[2]
+            elif t.startswith("/*"):
+                q = t.split("*/", 1)[1] if "*/" in t else ""
+            else:
+                q = t
+                break
+        low = q.lower()
+        if not low.startswith("select"):
+            raise PermissionError(f"only a single SELECT statement is allowed, not {(low.split() or ['an empty statement'])[0].upper()}")
+        for bad in (";", "--", "/*", "#"):
+            if bad in q:
+                raise PermissionError(f"'{bad}' is not allowed: one statement, no comments")
+        words = set(re.findall(r"[a-z_]+", low))
+        for w in self.REFUSED:
+            if w in words:
+                raise PermissionError(f"{w.upper()} is not allowed in the SQL console")
+        for w in self.SECRET:
+            if w in low:
+                raise PermissionError(f"the SQL console cannot read '{w}': it holds secrets")
+        with self.lock:
+            try:
+                if self.kind == "mysql":
+                    self.db.ping(reconnect=True)
+                    cur = self.db.cursor()
+                    cur.execute("set session max_execution_time = %s", (seconds * 1000,))
+                    cur.execute("start transaction read only")
+                    cur.execute(q.replace("%", "%%"))
+                else:
+                    t0 = time.time()
+                    self.db.execute("pragma query_only = on")
+                    self.db.set_progress_handler(lambda: time.time() - t0 > seconds, 10000)
+                    self.db.set_authorizer(self._console_auth)
+                    cur = self.db.execute(q)
+                cols = [c[0] for c in cur.description or []]
+                rows = cur.fetchmany(limit + 1)
+            except Exception as ex:
+                raise ValueError(sentence(ex) or "the statement could not be run") from None
+            finally:
+                if self.kind == "mysql":
+                    self.db.rollback()
+                else:
+                    self.db.set_authorizer(None)
+                    self.db.set_progress_handler(None, 0)
+                    self.db.execute("pragma query_only = off")
+        return cols, [dict(zip(cols, r)) for r in rows[:limit]], len(rows) > limit
+
+    def _console_auth(self, action, a, b, db, trigger):
+        if action == sqlite3.SQLITE_SELECT:
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_READ:
+            return sqlite3.SQLITE_DENY if any(w in (a or "").lower() for w in self.SECRET) else sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_FUNCTION and (b or "").lower() != "load_extension":
+            return sqlite3.SQLITE_OK
+        return sqlite3.SQLITE_DENY
 
     # ---- audit
     def audit(self, user, action, detail=""):
