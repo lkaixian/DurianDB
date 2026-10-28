@@ -36,6 +36,11 @@ POINTS = ("GET", "points", None, W)
 FORECAST = ("GET", "points", N, "forecast")
 BASELINE = ("GET", "points", N, "baseline")
 DRIFT = ("GET", "points", N, "drift")
+CORRELATE = ("GET", "points", N, "correlate")
+RELATED = ("GET", "points", N, "related")
+SEASONAL = ("GET", "points", N, "seasonal")
+SCORE = ("GET", "points", N, "score")
+CHANGEPOINTS = ("GET", "points", N, "changepoints")
 POINT = ("GET", "points", N, None)
 NOTES = (("GET", "POST"), "notes", N, None)
 REPORTS = ("GET", "reports", "summary", W)
@@ -205,6 +210,16 @@ ROWS = [
     R(BASELINE, "GET", "/api/points/boiler-temp/baseline", anon=404, viewer=200, ops=404, admin=200),
     R(DRIFT, "GET", "/api/points/boiler-temp/drift", anon=404, viewer=200, ops=404, admin=200),
     R(DRIFT, "GET", "/api/points/status-text/drift", anon=404, viewer=404, ops=400, admin=400),
+    R(SEASONAL, "GET", "/api/points/boiler-temp/seasonal", anon=404, viewer=200, ops=404, admin=200),
+    R(SEASONAL, "GET", "/api/points/status-text/seasonal", anon=404, viewer=404, ops=400, admin=400),
+    R(SCORE, "GET", "/api/points/boiler-temp/score", anon=404, viewer=200, ops=404, admin=200),
+    R(SCORE, "GET", "/api/points/status-text/score", anon=404, viewer=404, ops=400, admin=400),
+    R(CHANGEPOINTS, "GET", "/api/points/boiler-temp/changepoints", anon=404, viewer=200, ops=404, admin=200),
+    R(CHANGEPOINTS, "GET", "/api/points/status-text/changepoints", anon=404, viewer=404, ops=400, admin=400),
+    R(CORRELATE, "GET", "/api/points/boiler-temp/correlate", anon=404, viewer=200, ops=404, admin=200, query={"with": "line-pressure"}),
+    R(CORRELATE, "GET", "/api/points/boiler-temp/correlate", anon=404, viewer=404, ops=404, admin=400, query={"with": "status-text"}),
+    R(RELATED, "GET", "/api/points/boiler-temp/related", anon=404, viewer=200, ops=404, admin=200),
+    R(RELATED, "GET", "/api/points/status-text/related", anon=404, viewer=404, ops=400, admin=400),
     R(POINTS, "GET", "/api/points", anon=200, viewer=200, ops=200, admin=200, anon_empty=True),
     # me is asked before sign-in (the console needs the anonymous identity); health is the public liveness probe
     R(ME, "GET", "/api/me", anon=200, viewer=200, ops=200, admin=200),

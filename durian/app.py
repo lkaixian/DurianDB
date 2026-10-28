@@ -23,8 +23,11 @@ from .config import (build_engine, resolve, roles_ok, unknown_keys, validate_mai
                      validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_label
 from . import docfmt
+from .correlate import MIN_PAIRS, best_lag, pearson, spearman
 from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
+from .changepoint import MAX_N as CHANGEPOINT_MAX_N, detect as detect_changes
+from . import seasonal
 from .forecast import baseline as ewma_baseline, drift as baseline_drift, forecast as forecast_series
 from .ingest import HttpInSource, parse_line, parse_payload
 from .jobs import Jobs
@@ -573,6 +576,138 @@ class App:
                                 [(r["ts"], r["value"]) for r in history if r["ts"] < split])
         return 200, {"point": point, "unit": p.meta.get("unit", ""), "hours": hours, "compare": compare, **result}
 
+    def _corr_window(self, q, default_bucket):
+        hours = self._int_param(q, "hours", 24, 1, 168)
+        bucket = self._int_param(q, "bucket", default_bucket, 1, 86400)
+        steps = hours * 3600 // bucket
+        if not 1 <= steps <= 2000:
+            raise ApiError(422, "validation failed", [{"property": "bucket", "message":
+                f"bucket must give 1 to 2000 points over {hours} h; it gives {steps}"}])
+        return hours, bucket, steps, time.time() - hours * 3600
+
+    def _corr_grid(self, point, since, bucket, steps):
+        """The point's averaged series as a dense list over the bucket grid, NaN where a bucket has no sample."""
+        first, grid = int(since // bucket) * bucket, [math.nan] * (steps + 1)
+        for r in self.store.series(point, since, bucket, "avg"):
+            i = int((r["ts"] - first) // bucket)
+            if 0 <= i <= steps and r["value"] is not None:
+                grid[i] = float(r["value"])
+        return grid
+
+    def correlate_view(self, ident, point, q):
+        """GET /api/points/<name>/correlate?with=<other>&hours=24&bucket=60&lag=6: how two points move together.
+
+        Both points must be visible to the caller (a hidden one is 404). Series are aligned by bucket start; a
+        bucket missing on either side is dropped. `best_lag` > 0 means `with` trails this point by that many buckets.
+        """
+        pts = self.visible_points(ident)
+        other = q.get("with")
+        if point not in pts or not other or other not in pts:
+            if point in pts and not other:
+                raise ApiError(422, "validation failed", [{"property": "with", "message": "with must name another point"}])
+            self._404("unknown point")
+        hours, bucket, steps, since = self._corr_window(q, 60)
+        max_lag = self._int_param(q, "lag", 6, 0, 12)
+        if pts[point][0].text or pts[other][0].text:
+            raise ApiError(400, "a text point has no numeric correlation")
+        xs, ys = (self._corr_grid(n, since, bucket, steps) for n in (point, other))
+        n = sum(1 for x, y in zip(xs, ys) if math.isfinite(x) and math.isfinite(y))
+        r, rho = pearson(xs, ys), spearman(xs, ys)
+        lag, _r0, r_best = best_lag(xs, ys, max_lag)
+        note = None
+        if n < MIN_PAIRS:
+            note = f"only {n} overlapping buckets; at least {MIN_PAIRS} are needed"
+        elif r is None:
+            note = "a constant series has no correlation"
+        m = abs(r) if r is not None else 0
+        return 200, {"point": point, "with": other, "hours": hours, "bucket": bucket, "n": n, "pearson": r, "spearman": rho,
+                     "best_lag": lag, "r_at_best_lag": r_best,
+                     "strength": "strong" if m >= 0.8 else "moderate" if m >= 0.5 else "weak" if m >= 0.2 else "none", "note": note}
+
+    def related_view(self, ident, point, q):
+        """GET /api/points/<name>/related?hours=24&bucket=300&top=5: the visible points that move most like this one."""
+        pts = self.visible_points(ident)
+        if point not in pts:
+            self._404("unknown point")
+        hours, bucket, steps, since = self._corr_window(q, 300)
+        top = self._int_param(q, "top", 5, 1, 50)
+        if pts[point][0].text:
+            raise ApiError(400, "a text point has no numeric correlation")
+        xs = self._corr_grid(point, since, bucket, steps)
+        # ponytail: first 100 numeric points by name, and at most ~200k bucket rows in all; rank by an index if the tree outgrows it
+        names = [n for n in sorted(pts) if n != point and not pts[n][0].text][:max(1, min(100, 200000 // (steps + 1)))]
+        scored = []
+        for n in names:
+            ys = self._corr_grid(n, since, bucket, steps)
+            r = pearson(xs, ys)
+            if r is not None:
+                scored.append({"point": n, "pearson": r, "n": sum(1 for x, y in zip(xs, ys) if math.isfinite(x) and math.isfinite(y))})
+        scored.sort(key=lambda e: (-abs(e["pearson"]), e["point"]))
+        return 200, {"point": point, "hours": hours, "bucket": bucket, "related": scored[:top]}
+
+    def _seasonal_profile(self, ident, point, q):
+        """(point, days, profile, tz offset) for the seasonal routes. Hour-of-week is in the SERVER's local time.
+
+        Reads at most days * 96 rows (60 days: 5760) as 15-minute averages: an hourly bucket would leave only
+        two samples per hour-of-week in two weeks, under the three a slot needs.
+        """
+        p, _s = self.visible_points(ident).get(point, (None, None))
+        if p is None:
+            self._404("unknown point")
+        days = self._int_param(q, "days", 14, 2, 60)
+        if p.text:
+            raise ApiError(400, "a text point has no numeric seasonal baseline")
+        now = time.time()
+        tz = time.localtime(now).tm_gmtoff
+        history = self.store.series(point, now - days * 86400, 900, "avg")
+        return p, days, seasonal.profile([(r["ts"], r["value"]) for r in history], tz), tz
+
+    def seasonal_view(self, ident, point, q):
+        """GET /api/points/<name>/seasonal?days=14: median and MAD per hour-of-week slot, thin slots left out."""
+        p, days, prof, _tz = self._seasonal_profile(ident, point, q)
+        slots = [{"dow": d, "hour": h, **s} for (d, h), s in sorted(prof.items())]
+        note = None if slots else f"no hour of the week has {seasonal.MIN_SLOT_SAMPLES} samples yet in the last {days} days"
+        return 200, {"point": point, "unit": p.meta.get("unit", ""), "days": days, "slots": slots,
+                     "coverage": len(slots) / 168, "note": note}
+
+    def score_view(self, ident, point, q):
+        """GET /api/points/<name>/score?days=14: the latest value against its own hour-of-week slot."""
+        p, days, prof, tz = self._seasonal_profile(ident, point, q)
+        last = self.store.recent(point, 1)
+        out = {"point": point, "days": days, "value": None, "expected": None, "z": None, "slot": None,
+               "verdict": "unknown", "note": "the point has no stored value yet"}
+        if last:
+            r = seasonal.score_against(prof, last[-1]["ts"], last[-1]["value"], tz)
+            out.update(value=last[-1]["value"], expected=r["expected"], z=r["z"], note=r["reason"],
+                       slot=None if r["slot"] is None else {"dow": r["slot"][0], "hour": r["slot"][1]})
+            if r["z"] is not None:
+                out["verdict"] = "unusual" if r["z"] >= seasonal.UNUSUAL_Z else "normal"
+        return 200, out
+
+    def changepoints_view(self, ident, point, q):
+        """GET /api/points/<name>/changepoints?hours=72&bucket=300: where the level of this point shifted."""
+        p, _s = self.visible_points(ident).get(point, (None, None))
+        if p is None:
+            self._404("unknown point")
+        hours = self._int_param(q, "hours", 72, 1, 720)
+        bucket = self._int_param(q, "bucket", 300, 1, 86400)
+        steps = hours * 3600 // bucket
+        if not 1 <= steps <= CHANGEPOINT_MAX_N:
+            raise ApiError(422, "validation failed", [{"property": "bucket", "message":
+                f"bucket must give 1 to {CHANGEPOINT_MAX_N} samples over {hours} h; it gives {steps}"}])
+        if p.text:
+            raise ApiError(400, "a text point has no numeric change points")
+        rows = [r for r in self.store.series(point, time.time() - hours * 3600, bucket, "avg")
+                if isinstance(r["value"], (int, float)) and math.isfinite(r["value"])]
+        out = {"point": point, "unit": p.meta.get("unit", ""), "hours": hours, "bucket": bucket, "changes": [], "note": None}
+        if len(rows) < 10:
+            out["note"] = "need at least 10 samples to look for a change point"
+            return 200, out
+        out["changes"] = [{"ts": rows[c["index"]]["ts"], "before": c["before_mean"], "after": c["after_mean"],
+                           "shift": c["shift"], "strength": c["strength"]}
+                          for c in detect_changes([r["value"] for r in rows])]
+        return 200, out
+
     # ---- auth
     def login(self, body):
         body = self._body(body or {})
@@ -748,6 +883,16 @@ class App:
             return self.baseline_view(ident, b, query)
         if (method, a, c) == ("GET", "points", "drift") and b:
             return self.drift_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "correlate") and b:
+            return self.correlate_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "related") and b:
+            return self.related_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "seasonal") and b:
+            return self.seasonal_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "score") and b:
+            return self.score_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "changepoints") and b:
+            return self.changepoints_view(ident, b, query)
         if (method, a, c) == ("GET", "points", None) and b:
             p, s = self.visible_points(ident).get(b, (None, None))
             if p is None:
