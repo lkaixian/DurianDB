@@ -48,7 +48,7 @@ assert q._period == [5000, 12_497_500.0, 0.0, 4999.0] and len(q._period) == 4, q
 
 class Feed(Source):
     def poll(self, ts):
-        return [("p", float(i), ts) for i in range(12)]
+        return [("p", float(i), ts + i) for i in range(12)]  # one history row per (point, ts), so distinct times
 
 
 app2 = App(new_store())

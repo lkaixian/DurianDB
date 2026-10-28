@@ -10,9 +10,9 @@ makes a claim untrue. **low** = cosmetic or documentation.
 
 | # | Defect | Where | Severity |
 |---|---|---|---|
-| C20 | Import paths bypass the C15 known-key guard: `POST /api/import` runs the per-kind validators without appending `unknown_keys`, and CSV point import calls `validate_point` bare — a typo'd setting in an imported config is still stored and silently ignored, the same loss C15 closed on the PUT path. The "test this source" button (`durian/testsource.py:35`) also validates bare; whether it should refuse junk keys too is a decision the fix wave owes (a legacy config with a dead key currently saves nothing but still tests fine). Fix shape: `+ unknown_keys(kind, body)` at the two import seams, with a RED that imports a typo'd point and one that re-imports a config exported from a live server. Deliberate residual of the C15 wave, 2026-10-28. | `durian/app.py:1212`, `durian/app.py:1232`, `durian/testsource.py:35` | medium |
-| C19 | Replayable backfill rows: before F8 a `(point, ts)` already received could never be stored twice, because the older-or-equal entry was refused. Now a repeat backfill is accepted and lands as its own row, and `rollups`/`history_summary`/forecasts double-count it. Accepted knowingly (the F8 contract pins the accept path; a dedup there would pin the old refusal back); the fix shape is a unique index on `(point, ts)` or an insert-where-not-exists at the store seam, with a RED that replays the same backfill twice. Found by the F8 security review, 2026-10-28. | `durian/store.py:172-174`, `durian/migrations.py:17-18` | medium |
-| C16 | A text set-point request whose body omits `value` writes the literal string `"missing"`: the route's default sentinel passes the printable-text check, so the point takes a nonsense value that looks like a real one. Found by the F4 security review as a pre-existing sibling of that path (static trace; runtime confirmation owed with the fix's RED test). | `durian/app.py:751-753` | medium |
+
+No open entries. Deliberate leniency: the "test this source" button (`durian/testsource.py:35`) still validates
+without the known-key guard, so a legacy config with a dead key tests fine (the key is refused on save and import).
 
 C12, C13 and C14 were closed on 2026-10-27; what they cost is now covered by
 `test_calc_health.py` and `test_auth_state.py`.

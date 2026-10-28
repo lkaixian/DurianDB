@@ -57,7 +57,7 @@ store.put("point", "keep-p", {"source": "keep", "unit": "C"})
 before = {(k, o["name"]): o for k in ("source", "point") for o in store.list(k)}
 
 doc = {"format": "durian-config", "version": 1, "exported_at": 0, "objects": {
-    "source": [{"name": "new-src", "type": "virtual", "points": [{"name": "n", "kind": "sine", "period": 60, "min": 0, "max": 1}]}],
+    "source": [{"name": "new-src", "type": "virtual"}],
     "point": [{"name": "new-p", "source": "new-src"}]}}
 real_put = store.put
 calls = {"n": 0}

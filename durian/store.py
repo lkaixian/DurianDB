@@ -170,7 +170,9 @@ class Store:
 
     # ---- history
     def add_history(self, rows):
-        self.many("insert into history(point, ts, value, quality, svalue) values (?,?,?,?,?)",  # rows without a quality are good
+        # a (point, ts) already stored is skipped, so a replayed backfill never lands twice; must differ: the keyword's spelling
+        ins = "insert ignore" if self.kind == "mysql" else "insert or ignore"
+        self.many(ins + " into history(point, ts, value, quality, svalue) values (?,?,?,?,?)",  # rows without a quality are good
                   [(r[0], r[1], None if isinstance(r[2], str) else r[2], r[3] if len(r) > 3 else 0, r[2] if isinstance(r[2], str) else None) for r in rows])
 
     def recent(self, point, n=60):

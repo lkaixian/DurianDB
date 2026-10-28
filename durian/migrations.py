@@ -74,7 +74,19 @@ def v10_shared_engine_state(s):
     s.ddl("create table if not exists escalations(handler {key} not null, event_id {int} not null, primary key(handler, event_id))")
 
 
+def v11_history_unique(s):
+    # A sample is identified by (point, ts): a replayed backfill must not land twice and double-count in rollups. Fold
+    # the duplicates a database already holds into their first row (history has no id to delete by), then enforce it.
+    cols = "point, ts, value, quality, svalue"
+    for d in s.q("select point, ts from history group by point, ts having count(*) > 1"):
+        keep = s.q(f"select {cols} from history where point=? and ts=?", (d["point"], d["ts"]))[0]
+        s.run("delete from history where point=? and ts=?", (d["point"], d["ts"]))
+        s.run(f"insert into history({cols}) values (?,?,?,?,?)", tuple(keep.values()))
+    _index(s, "create unique index h_uniq on history(point, ts)")
+
+
 MIGRATIONS = [(1, "baseline", v1_baseline), (2, "settings", v2_settings), (3, "api tokens", v3_api_tokens),
               (4, "history quality", v4_history_quality), (5, "event held", v5_event_held), (6, "history text", v6_history_text), (7, "user totp", v7_user_totp),
               (8, "user disabled", v8_user_disabled), (9, "shared sign-in state", v9_shared_auth_state),
-              (10, "shared engine state", v10_shared_engine_state)]
+              (10, "shared engine state", v10_shared_engine_state),
+              (11, "unique history sample", v11_history_unique)]

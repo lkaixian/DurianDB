@@ -758,7 +758,9 @@ class App:
                 self._404("unknown point")
             need(p.meta.get("settable") and can(ident["roles"], p.meta.get("set_roles", [])))
             body = self._body(body or {})
-            v = body.get("value", "missing")
+            if "value" not in body:  # null releases the point; an absent value is a mistake, not a value
+                raise ApiError(400, "value is required: send a value, or null to release the point")
+            v = body["value"]
             if p.text:
                 if v is not None and not (isinstance(v, str) and 1 <= len(v) <= 255 and v.isprintable()):
                     raise ApiError(400, "value must be printable text of 1 to 255 characters, or null to release the point")
@@ -1214,6 +1216,8 @@ class App:
                       "watchlist": lambda n, b, v: validate_watchlist(n, b), "maintenance": lambda n, b, v: validate_maintenance(n, b),
                       "emailgroup": lambda n, b, v: validate_emailgroup(n, b),
                       "dashboard": lambda n, b, v: validate_dashboard(n, b, v, roles_ok)[0]}
+        validators = {k: (f if k == "dashboard" else lambda n, b, v, f=f, k=k: f(n, b, v) + unknown_keys(k, b))  # dashboards have no key list
+                      for k, f in validators.items()}
         apply_ = query.get("apply") == "1"  # a plain call is always a dry run
         errs, summary = self.maint.import_config(doc, validators, query.get("mode", "merge"), not apply_, ident["name"])
         if errs:
@@ -1229,7 +1233,7 @@ class App:
             raise ApiError(400, "send the CSV as text (Content-Type text/csv)")
         rows, errs = pointcsv.parse(text)
         for line, (name, body) in enumerate(rows, 2):
-            for e in validate_point(name, body, self.store):
+            for e in validate_point(name, body, self.store) + unknown_keys("point", body):
                 errs.append({"line": line, "point": name, "property": e["property"], "message": e["message"]})
         if errs:
             raise ApiError(422, "validation failed", errs[:100])
