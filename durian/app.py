@@ -36,6 +36,7 @@ from .oidc import OIDC, OIDCError, local_identity, validate_sso
 from .maintenance import Maintenance, Raw
 from .testsource import test_source
 from .outputs import Outputs, validate_emailgroup, validate_handler, validate_publisher
+from .spool import Spool
 from .store import ALL_ROLLUPS
 
 log = logging.getLogger("durian.app")
@@ -98,10 +99,17 @@ class _NoConfig:
 class App:
     safe = False  # safe mode: reload builds an empty engine, so no source or publisher is built or started
 
-    def __init__(self, store, backup_dir=None):
+    def __init__(self, store, backup_dir=None, spool=None):
         self.store, self.auth = store, Auth(store)
+        # spool: path of the NDJSON overflow file for history the database refuses; None = beside a sqlite file, off for :memory:
+        if spool is None and store.kind == "sqlite" and store.path != ":memory:":
+            spool = Path(store.path).parent / "spool.ndjson"
+        elif spool is None and store.kind == "mysql":
+            spool = Path("spool.ndjson")
+        self.spool = Spool(spool) if spool else None
         self.oidc = OIDC()  # SSO sign-in: discovery cache, pending states and ID-token checks (in-process like sessions)
         self.maint = Maintenance(store, backup_dir or Path("backups"))
+        self.maint.spool = self.spool
         self.jobs = Jobs()  # slow work runs off the request thread; GET /api/jobs/<id> reports it
         self.engine, self.outputs, self.open_events = None, None, []
         self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
@@ -224,6 +232,7 @@ class App:
         """A clean shutdown gives the tick lease back, so another process can take over at once instead of waiting
         for it to expire."""
         self.lease_held = False
+        self._spool_pending()  # buffered samples go to disk, and the next start replays them
         try:
             self.store.release_lease(self.lease_owner)
         except Exception as ex:
@@ -470,10 +479,13 @@ class App:
     def _flush_history(self, ts):
         """Write buffered samples. A failing database never loses data silently: samples wait (up to a cap) and an alarm is raised."""
         try:
+            if self.spool and self.spool.rows:
+                self.spool.replay(self.store.add_history)  # older than anything pending, so first
             while self.pending:
                 self.store.add_history(self.pending[:5000])
                 del self.pending[:5000]
         except Exception as e:
+            self._spool_pending()
             if len(self.pending) > PENDING_MAX:
                 self.lost += len(self.pending) - PENDING_MAX
                 del self.pending[:len(self.pending) - PENDING_MAX]
@@ -487,6 +499,15 @@ class App:
             if self.sys_event > 0:
                 self.store.clear_event(self.sys_event, ts)
             self.sys_event = None
+
+    def _spool_pending(self):
+        """Move the memory buffer to disk. If the disk refuses too, the rows stay in memory (capped by PENDING_MAX)."""
+        if self.spool and self.pending:
+            try:
+                self.spool.append(self.pending)
+                self.pending = []
+            except OSError as e:
+                log.error("cannot spool %d samples: %s", len(self.pending), e)
 
     def points(self):
         return {p.name: (p, s) for s in self.engine.sources for p in s.points.values()}
@@ -915,7 +936,8 @@ class App:
                          "tick_ok_ts": self.tick_ok_ts, "buffered_samples": len(self.pending), "lost_samples": self.lost,
                          "unstored_events": len(self.unstored), "events_lost": self.events_lost, "failed_deliveries": self.outputs.failed if self.outputs else 0,
                          "internal_errors": self.internal_errors, "last_internal_error": self.last_internal_error,
-                         "faults": faults}
+                         "faults": faults, **({"spool": {"rows": self.spool.rows, "dropped": self.spool.dropped}}
+                                              if self.spool and (self.spool.rows or self.spool.dropped) else {})}
 
     def _api_auth_public(self, method, a, b, c, query, body, ident, need):
         if (method, a, b, c) == ("GET", "auth", "sso", None):  # the sign-in page asks this before anyone is signed in

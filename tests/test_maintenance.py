@@ -123,6 +123,7 @@ assert call(app, viewer, "POST", "/api/import/history", csv_in, point="pump-setp
 
 # ---- a failing database: samples wait, an alarm is raised for administrators, and everything is saved once it recovers
 st3, app3, admin3, viewer3 = make("c")
+app3.spool = None  # this section covers the memory buffer alone; the disk spool has tests/test_spool.py
 c3 = lambda *a, **k: call(app3, admin3, *a, **k)
 app3.tick(1000.0)
 base = st3.history_stats()["rows"]

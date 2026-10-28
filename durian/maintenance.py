@@ -57,6 +57,7 @@ class Overlay:
 class Maintenance:
     def __init__(self, store, backup_dir, export_dir=None):
         self.store, self.backup_dir = store, Path(backup_dir)
+        self.spool = None  # set by App: where an import's rows wait when the database refuses them
         self.export_dir = Path(export_dir) if export_dir else self.backup_dir.parent / "exports"
         self._exports, self._export_thread = queue.Queue(), None
 
@@ -314,7 +315,12 @@ class Maintenance:
                 skipped += 1
                 first_error = first_error or f"line {n}: {sentence(e)}"
         for i in range(0, len(good), 5000):
-            self.store.add_history(good[i:i + 5000])
+            try:
+                self.store.add_history(good[i:i + 5000])
+            except Exception:
+                if not self.spool:
+                    raise
+                self.spool.append(good[i:i + 5000])  # database down: the rows wait on disk and are replayed, not lost
         return {"imported": len(good), "skipped": skipped, "first_error": first_error}
 
 
