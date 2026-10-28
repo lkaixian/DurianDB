@@ -253,17 +253,17 @@
 
 <div class="wrap">
   <header class="page">
-    <h1>Nine days, two bursts, and what they built</h1>
+    <h1>Ten days, two bursts, and what they built</h1>
     <p class="lede">Every figure on this page is recomputed from the repository at the last commit of each UTC
       day, the same way a daily build report would count it. Where a day shows no change, the tree genuinely
       did not change.</p>
   </header>
 
   <div class="figures">
-    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">10,928</div><div class="n">lines, 37 modules</div></div>
-    <div class="fig"><div class="k">Tests</div><div class="v">8,048</div><div class="n">lines, 65 suites, all passing</div></div>
-    <div class="fig"><div class="k">Commits</div><div class="v">195</div><div class="n">across 9 calendar days</div></div>
-    <div class="fig"><div class="k">Open debt</div><div class="v">13</div><div class="n">entries, none high severity</div></div>
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">12,191</div><div class="n">lines, 44 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">10,453</div><div class="n">lines, 88 suites, all passing</div></div>
+    <div class="fig"><div class="k">Commits</div><div class="v">234</div><div class="n">across 10 calendar days</div></div>
+    <div class="fig"><div class="k">Open debt</div><div class="v">9</div><div class="n">entries, all untested paths, none high severity</div></div>
   </div>
 
   <section>
@@ -271,7 +271,7 @@
     <div class="charts">
       <div class="card">
         <h3>Code in the tree</h3>
-        <div class="summary">Server 10,928 lines · tests 8,048 lines</div>
+        <div class="summary">Server 12,191 lines · tests 10,453 lines</div>
         <div class="legend">
           <span><i class="swatch"></i>server</span>
           <span><i class="swatch dashed"></i>tests</span>
@@ -280,7 +280,7 @@
       </div>
       <div class="card">
         <h3>Test suites</h3>
-        <div class="summary">65 suites · one process each, <code>run_all.py</code></div>
+        <div class="summary">88 suites · one process each, <code>run_all.py</code></div>
         <div class="chart-wrap" id="wrap-suites"></div>
       </div>
     </div>
@@ -315,17 +315,17 @@
           <tr><th>Area</th><th>Built</th><th>Verified by</th></tr>
         </thead>
         <tbody>
-          <tr><td class="name">Data in</td><td class="name">Virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus TCP/RTU/ASCII, SNMP v2c with a bounded GETNEXT walk, DNP3 over TCP, BACnet/IP, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens</td><td class="name"><code>test_modbus*</code>, <code>test_pull_sources</code>, <code>test_ingest</code>, <code>test_sparkplug_source</code>, <code>test_snmp_source</code>, <code>test_dnp3_source</code>, <code>test_bacnet_source</code></td></tr>
+          <tr><td class="name">Data in</td><td class="name">Virtual, MQTT over TLS, Sparkplug B over MQTT, Modbus TCP/RTU/ASCII, SNMP v2c with a bounded GETNEXT walk, DNP3 over TCP, BACnet/IP, HTTP JSON poll, read-only SQL, HTTP push with scoped tokens, a local name=value file, host system metrics, eGauge inst XML, Project Haystack read, POP3 mailbox numbers, InfluxDB line protocol at <code>/api/ingest/&lt;source&gt;/line</code> (tags ignored); Sparkplug B is now also published</td><td class="name"><code>test_modbus*</code>, <code>test_pull_sources</code>, <code>test_ingest</code>, <code>test_sparkplug_source</code>, <code>test_snmp_source</code>, <code>test_dnp3_source</code>, <code>test_bacnet_source</code>, <code>test_file_source</code>, <code>test_system_source</code>, <code>test_egauge_source</code>, <code>test_haystack_source</code>, <code>test_pop3_source</code>, <code>test_ingest_line</code>, <code>test_sparkplug_pub</code>; fake servers only for the new network sources</td></tr>
           <tr><td class="name">Data model</td><td class="name">Numeric and text points, engineering range, units, decimals, binary and multistate labels, folders, tags, descriptions</td><td class="name"><code>test_app</code>, <code>test_text_points</code></td></tr>
           <tr><td class="name">Quality and time</td><td class="name">GOOD / UNCERTAIN / BAD per value, source timestamps, future-clock and stale rules, out-of-order drop</td><td class="name"><code>test_quality</code></td></tr>
-          <tr><td class="name">Alarms</td><td class="name">12 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all</td><td class="name"><code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
-          <tr><td class="name">Control</td><td class="name">Permissioned writes, engineering limits, max step, two-step confirm, reason required, audit with old and new value</td><td class="name"><code>test_safe_control</code></td></tr>
-          <tr><td class="name">Outbound</td><td class="name">Webhook, email, Slack, escalation, set-point handler, scheduled reports, MQTT publisher, HTTP sender</td><td class="name"><code>test_handlers</code>, <code>test_http_sender</code></td></tr>
+          <tr><td class="name">Alarms</td><td class="name">12 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all; per-point scan classes (poll every n-th cycle, Modbus path)</td><td class="name"><code>test_scan_classes</code>, <code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
+          <tr><td class="name">Control</td><td class="name">Permissioned writes, engineering limits, max step, per-point write rate limit (<code>min_write_gap</code>), two-step confirm, reason required, audit with old and new value</td><td class="name"><code>test_safe_control</code>, <code>test_set_value_required</code></td></tr>
+          <tr><td class="name">Outbound</td><td class="name">Webhook, email, Slack, escalation, set-point handler, scheduled reports, MQTT publisher, Sparkplug B publisher, HTTP sender, persistent TCP publisher with reconnect backoff</td><td class="name"><code>test_handlers</code>, <code>test_http_sender</code>, <code>test_sparkplug_pub</code>, <code>test_tcp_publisher</code></td></tr>
           <tr><td class="name">HMI</td><td class="name">Overview, point page with trend, forecast and logbook, history comparison, dashboards with 10 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>, <code>test_prediction_widget</code>; 11 browser scripts, all in CI</td></tr>
-          <tr><td class="name">Accounts</td><td class="name">scrypt passwords, sessions, role inheritance, lockout, TOTP second factor, reset by one-time code, account disable, offline admin reset, scoped machine tokens</td><td class="name"><code>test_auth</code>, <code>test_mfa</code>, <code>test_disabled</code>, <code>test_reset</code></td></tr>
-          <tr><td class="name">Storage</td><td class="name">SQLite or MySQL/MariaDB, versioned migrations, eight rollups, retention, backups, buffered writes with a system alarm</td><td class="name"><code>test_store</code>, <code>test_series</code>, <code>test_maintenance</code></td></tr>
+          <tr><td class="name">Accounts</td><td class="name">scrypt passwords, sessions, role inheritance, lockout, TOTP second factor, reset by one-time code, account disable, offline admin reset, scoped machine tokens, LDAP simple-bind sign-in for names with no local account</td><td class="name"><code>test_ldap_auth</code>, <code>test_auth</code>, <code>test_mfa</code>, <code>test_disabled</code>, <code>test_reset</code></td></tr>
+          <tr><td class="name">Storage</td><td class="name">SQLite or MySQL/MariaDB, versioned migrations, eight rollups, retention, backups, buffered writes with a system alarm, unique history rows per (point, time), read-only admin SQL console (SELECT only, secret tables refused, audited)</td><td class="name"><code>test_sql_console</code>, <code>test_history_unique</code>, <code>test_store</code>, <code>test_series</code>, <code>test_maintenance</code></td></tr>
           <tr><td class="name">Transport</td><td class="name">TLS 1.2+ with HSTS and Secure cookies when a certificate is given; plain HTTP refuses any non-local address</td><td class="name"><code>test_tls</code></td></tr>
-          <tr><td class="name">Data out</td><td class="name">History CSV, reports, one-click and scheduled export bundles (history, events, config, manifest) in one ZIP, and retrieval of the bundles the scheduler wrote</td><td class="name"><code>test_export</code>, <code>test_export_retrieve</code>, <code>test_reports</code></td></tr>
+          <tr><td class="name">Data out</td><td class="name">History CSV, reports, one-click and scheduled export bundles (history, events, config, manifest) in one ZIP, and retrieval of the bundles the scheduler wrote; report export as Excel (.xlsx) and PDF, stdlib only</td><td class="name"><code>test_report_formats</code>, <code>test_export</code>, <code>test_export_retrieve</code>, <code>test_reports</code></td></tr>
           <tr><td class="name">AI/ML</td><td class="name">EWMA baseline, robust-z score, short-horizon forecast with a 95% band, and a prediction dashboard widget that says when no honest forecast exists</td><td class="name"><code>test_forecast</code>, <code>test_prediction_widget</code>, <code>test_anomaly</code></td></tr>
           <tr><td class="name">Modelling</td><td class="name">Engineering units with an optional display unit and conversion, tags inherited from folder and source</td><td class="name"><code>test_units</code></td></tr>
           <tr><td class="name">Federation</td><td class="name">SSO sign-in through OpenID Connect: authorization code with PKCE, RS256 from the provider JWKS, same sessions and roles</td><td class="name"><code>test_oidc</code></td></tr>
@@ -361,42 +361,35 @@
   </section>
 
   <section>
-    <h2>Open gaps, worst first</h2>
+    <h2>Open now</h2>
     <div class="note">
-      <p>These are the findings of the 2026-10-27 audit, in <code>docs/12-error-handling.md</code>. The first
-        one is the serious one: a failing tick loop is logged and the loop continues, so the console keeps
-        showing the last values while the data plane is dead.</p>
+      <p>All eleven findings of the 2026-10-27 audit (<code>docs/12-error-handling.md</code>, <code>NEXTPLAN.md</code>
+        section 1) are closed, each with a test. What is open now is in <code>TECHNICAL_DEBT.md</code>, and every
+        entry is a path that has only met a simulator or a fake server.</p>
     </div>
     <ol class="steps" style="margin-top:16px">
-      <li><span class="body">A failing tick loop is invisible to operators.</span></li>
-      <li><span class="body">Handler and publisher delivery failures are counters no page shows.</span></li>
-      <li><span class="body">The event write path retries without a cap, so a database outage during an alarm
-        storm grows memory without bound.</span></li>
-      <li><span class="body">Config import has no rollback, and config is saved before the reload that
-        activates it.</span></li>
-      <li><span class="body">A few envelope cases reach the caller as 500s or tracebacks instead of
-        sentences: a non-object JSON body, a corrupt schema version, a bootstrap auth error.</span></li>
-      <li><span class="body">Modbus values are never checked for finiteness, so NaN can enter history where
-        every comparison is silently false.</span></li>
-      <li><span class="body">The source-down alarm drops the real failure reason.</span></li>
-      <li><span class="body">One global lock spans the tick and <code>reload()</code>, so a slow tick stalls
-        every request.</span></li>
+      <li><span class="body">Modbus, email/Slack/escalation delivery, SNMP, Sparkplug B, DNP3, BACnet/IP and OPC UA
+        (U1, U3, U8 to U12) have never met real hardware or a real external server.</span></li>
+      <li><span class="body">eGauge, Haystack and POP3 (U13) were run against fake servers only. POP3 STARTTLS and SSL
+        and Haystack authentication beyond a Bearer token are untested.</span></li>
+      <li><span class="body">LDAP sign-in (U14) ran against a fake directory on plain <code>ldap://</code> localhost;
+        <code>ldaps://</code> never ran, and result codes 51 and 52 count as a bad password.</span></li>
+      <li><span class="body">The SQL console MySQL/MariaDB branch has not been run; the SQLite branch is
+        tested.</span></li>
     </ol>
   </section>
 
   <section>
-    <h2>Next</h2>
+    <h2>Next work</h2>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Work</th><th>State</th><th>Detail</th></tr></thead>
         <tbody>
-          <tr><td class="name">Authentication</td><td><span class="pill part">partial</span></td><td class="name">TOTP, reset, disable and machine tokens done. SSO / OIDC not started.</td></tr>
-          <tr><td class="name">Data extraction</td><td><span class="pill part">partial</span></td><td class="name">Reports, CSV in and out, history CSV, SQL source and REST done. Scheduled export bundles not started.</td></tr>
-          <tr><td class="name">Data modelling</td><td><span class="pill part">partial</span></td><td class="name">Calculated points, engineering ranges and multistate labels done. Unit conversion and tag inheritance not started.</td></tr>
-          <tr><td class="name">AI and machine learning</td><td><span class="pill none">not started</span></td><td class="name">No model, no anomaly scoring, no forecasting.</td></tr>
-          <tr><td class="name">Data input</td><td><span class="pill part">partial</span></td><td class="name">Twelve source types, four of them device protocols read-only. OPC UA is SecurityPolicy None only.</td></tr>
-          <tr><td class="name">Rust real-time core</td><td><span class="pill part">experiment</span></td><td class="name">Detector layer ported, 19 tests. Not wired into the server.</td></tr>
-          <tr><td class="name">Progress tracking</td><td><span class="pill done">done</span></td><td class="name">This page and <code>PROGRESS.md</code>.</td></tr>
+          <tr><td class="name">Authentication, export bundles, unit conversion, AI and forecast</td><td><span class="pill done">done</span></td><td class="name">OIDC and LDAP sign-in, scheduled export bundles, display-unit conversion, EWMA anomaly score and forecast are built and tested.</td></tr>
+          <tr><td class="name">Hardware verification</td><td><span class="pill part">open</span></td><td class="name">Drivers U1, U3, U8 to U12 need a real device or server; eGauge, Haystack, POP3 and LDAP need a real peer, and the TLS paths a real certificate. <code>tools/hw_probe.py</code> is ready.</td></tr>
+          <tr><td class="name">Rust real-time core</td><td><span class="pill part">experiment</span></td><td class="name">Detector layer ported with parity vectors against Python. Not wired into the server.</td></tr>
+          <tr><td class="name">OPC DA</td><td><span class="pill none">declined</span></td><td class="name">Needs Windows COM/DCOM, which is not stdlib.</td></tr>
+          <tr><td class="name">Progress tracking</td><td><span class="pill done">done</span></td><td class="name">This page, <code>PROGRESS.html</code> and <code>PROGRESS.md</code>.</td></tr>
         </tbody>
       </table>
     </div>
@@ -412,13 +405,13 @@
 (function () {
   "use strict";
 
-  var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27"];
-  var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"];
-  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 195];
-  var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 37];
-  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 65];
-  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 10928];
-  var TESTS = [274, 2702, 2702, 2702, 2702, 2702, 2702, 2702, 8048];
+  var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27", "10-28"];
+  var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28"];
+  var COMMITS = [68, 79, 79, 79, 79, 79, 79, 94, 224, 234];
+  var MODULES = [23, 24, 24, 24, 24, 24, 24, 25, 38, 44];
+  var SUITES = [25, 27, 27, 27, 27, 27, 27, 38, 75, 88];
+  var SERVER = [4809, 5048, 5048, 5048, 5048, 5048, 5048, 5299, 11281, 12191];
+  var TESTS = [2496, 2670, 2670, 2670, 2670, 2670, 2670, 3319, 9301, 10453];
 
   var NS = "http://www.w3.org/2000/svg";
   var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
@@ -523,13 +516,13 @@
   }
 
   build("wrap-code", [
-    { name: "Server lines", short: "10,928", values: SERVER },
-    { name: "Test lines", short: "8,048", values: TESTS, dashed: true }
-  ], { label: "Lines of code in durian and tests, 19 to 27 October" });
+    { name: "Server lines", short: "12,191", values: SERVER },
+    { name: "Test lines", short: "10,453", values: TESTS, dashed: true }
+  ], { label: "Lines of code in durian and tests, 19 to 28 October" });
 
   build("wrap-suites", [
-    { name: "Test suites", short: "65", values: SUITES }
-  ], { label: "Number of test suites, 19 to 27 October" });
+    { name: "Test suites", short: "88", values: SUITES }
+  ], { label: "Number of test suites, 19 to 28 October" });
 
   // daily table
   var tbody = document.getElementById("history");

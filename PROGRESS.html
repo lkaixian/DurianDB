@@ -37,6 +37,15 @@
 <section><h2>Landed this pass</h2>
 <table>
 <tr><th>Commit</th><th>What</th><th>Debt closed</th><th>Gate evidence</th></tr>
+<tr><td><code>981e1aa</code></td><td>F17: LDAP simple-bind sign-in for names with no local account; empty passwords refused before any bind, DN input escaped, made-up names count toward lockout without an audit row</td><td>opens U14</td><td><code>test_ldap_auth</code> against a fake directory on plain <code>ldap://</code> localhost; <code>ldaps://</code> never run; result codes 51/52 read as a bad password</td></tr>
+<tr><td><code>41c971f</code></td><td>F16: report export as Excel (.xlsx) and PDF with stdlib only</td><td>—</td><td><code>test_report_formats</code> PASS; output not opened in Excel or a PDF viewer by a person</td></tr>
+<tr><td><code>c6c90f0</code></td><td>F13-F15: eGauge (<code>inst</code> XML, DOCTYPE refused), Haystack (read grid, never writes) and POP3 (bounded regex) sources</td><td>opens U13</td><td>fake servers only; public docs checked only for eGauge inst XML and the Haystack read op; POP3 STARTTLS/SSL and Haystack auth beyond Bearer untested</td></tr>
+<tr><td><code>744f08c</code></td><td>F12: read-only admin SQL console: SELECT only, secret tables refused, audited</td><td>—</td><td><code>test_sql_console</code> on SQLite; the MySQL branch (<code>store.py</code> <code>query_ro</code>) has not been run, no MariaDB run</td></tr>
+<tr><td><code>2dce970</code></td><td>F9b: file source offered in the console form and the Start-from list</td><td>—</td><td>browser check extended in <code>tools/browser_forms.mjs</code>; not re-run for this note</td></tr>
+<tr><td><code>5f064d9</code></td><td>F11: persistent TCP publisher with reconnect backoff and delivery health</td><td>—</td><td><code>test_tcp_publisher</code> against a local socket; no real receiver</td></tr>
+<tr><td><code>637c252</code></td><td>F9: file source reads <code>name=value</code> lines from a local file</td><td>—</td><td><code>test_file_source</code> PASS</td></tr>
+<tr><td><code>f32815d</code></td><td>F10: InfluxDB line protocol at <code>/api/ingest/&lt;source&gt;/line</code>; tags are ignored and there is no precision parameter (nanoseconds only)</td><td>—</td><td><code>test_ingest_line</code> PASS</td></tr>
+<tr><td><code>25d18c2</code></td><td>C16, C19, C20 closed: a set handler requires a value, history is unique per (point, ts) via a migration, import paths use the known-key guard</td><td><span class="ok">C16, C19, C20</span></td><td><code>test_set_value_required</code>, <code>test_history_unique</code>, <code>test_import_keys</code> added; the migration was not re-run on MariaDB</td></tr>
 <tr><td><code>eab2c19</code></td><td>F5 probe tooling: <code>tools/hw_probe.py</code> — per-driver probes; an absent endpoint is an honest, named skip</td><td>—</td><td>no config: exit 0, 7 skips, 0 failed</td></tr>
 <tr><td><code>d3bc9b1</code></td><td>Email recipient groups and <code>{placeholder}</code> subject/body templates; the mail path hardened to the review findings</td><td>—</td><td><code>tests/test_email_groups.py</code> PASS; run_all green</td></tr>
 <tr><td><code>52ca0b6</code></td><td>Browser CI job green for the first time: report a signal-killed Chrome, <code>--no-sandbox</code> for ubuntu-24.04 AppArmor</td><td class="ok">U6</td><td>12-check browser suite green; <code>CI / browser</code> badge green</td></tr>
@@ -45,7 +54,7 @@
 <tr><td><code>053e87e</code></td><td>All 12 browser checks now exit 1 on an error they did not provoke; designer steps rewritten against current markup</td><td class="ok">U6</td><td>4/4 PASS; injected console.error proven to turn a check red</td></tr>
 <tr><td><code>b9b016b</code></td><td>One workflow file per CI job, one badge each in the README</td><td class="ok">—</td><td>tests + MariaDB + rust green independently</td></tr>
 </table>
-<p class="foot">Open debt now: <strong>7</strong> → U1, U3, U8–U12 (hardware, probe tooling landed at <code>tools/hw_probe.py</code>). Was 13; C15 (a typo'd or unknown config key was stored silently) was closed test-first in this pass, and its one deliberate residual — the import paths still validate without the known-key guard — opened as C20 in the same commit. C17 opened and closed the same day it was found by CI, and so did C18 (NaN <code>ts</code> poisoning the ingest guards — found by the F8 review, closed test-first in this pass). C19 (backfill replays insert duplicate history rows) stays open by design until the store's dedup shape lands.</p></section>
+<p class="foot">Open debt now: <strong>9</strong> → U1, U3, U8–U14, all untested paths (hardware, real servers, ldaps, STARTTLS), per <code>TECHNICAL_DEBT.md</code>. C15, C16, C19 and C20 are closed; no correctness entry is open. Also recorded there as deliberate, not debt: the unrun MySQL branch of the SQL console and the line-protocol limits.</p></section>
 
 <section><h2>In flight</h2>
 <table>
@@ -70,7 +79,7 @@
 <tr><td class="ok">F6</td><td>Sparkplug B publisher — baseline doc 10 row 12 gap: the codec and the read-only source exist, nothing publishes NBIRTH/DBIRTH/DDATA — <strong>landed (<code>56b7f8c</code>)</strong></td><td colspan="2">see the row above; the check lives in <code>tests/test_sparkplug_pub.py</code> (its broker layer skips with a named reason only when no local broker answers)</td></tr>
 <tr><td class="ok">F3</td><td>Scan classes — baseline doc 10 row 2 gap; points all tick at the source period — <strong>landed (<code>ba7d386</code>)</strong></td><td colspan="2">see the row above; the check lives in <code>tests/test_scan_classes.py</code></td></tr>
 <tr><td class="ok">F4</td><td>Time-based write rate limit — baseline doc 10 row 7 gap — <strong>landed (<code>34c509e</code>)</strong></td><td colspan="2">see the row above; the check lives in <code>tests/test_safe_control.py</code></td></tr>
-<tr><td>—</td><td>Declined on purpose, not debt: image points, scripted meta points, process/script handlers, gRPC publisher, Excel templates (new dep — CSV covers it), OPC UA server, store-and-forward at the edge, backfill</td><td colspan="2">each decline carries the doc-10/11 reason; revisit only when a real requirement shows up</td></tr>
+<tr><td>—</td><td>Declined on purpose, not debt: image points, scripted meta points, process/script handlers, gRPC publisher, Excel templates, OPC UA server, store-and-forward at the edge, OPC DA (Windows COM/DCOM; not stdlib)</td><td colspan="2">each decline carries the doc-10/11 reason; revisit only when a real requirement shows up</td></tr>
 </table></section>
 
 <section><h2>The loop (why the order is test → code → gate → commit)</h2>
