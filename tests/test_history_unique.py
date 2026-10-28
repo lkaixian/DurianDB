@@ -36,4 +36,35 @@ new = Store(path)
 assert new.history_stats()["rows"] == 2, new.history_stats()
 new.add_history([("a", 1.0, 5.0)])
 assert new.history_stats()["rows"] == 2
+
+# _index swallows only "already exists"; a MySQL "Duplicate entry" means the unique index FAILED
+from durian.migrations import _index, v11_history_unique  # noqa: E402
+
+
+class Ddl:
+    def __init__(self, msg): self.msg = msg
+    def ddl(self, sql): raise Exception(self.msg)
+
+
+_index(Ddl("Duplicate key name 'h_uniq'"), "x"); _index(Ddl("index h_uniq already exists"), "x")
+try:
+    _index(Ddl("Duplicate entry 'a-1' for key 'h_uniq'"), "x")
+except Exception as e:
+    assert "Duplicate entry" in str(e)
+else:
+    raise AssertionError("a failed unique index must not be swallowed")
+
+# a crash between the delete and the re-insert loses no sample
+crash = Store(str(Path(tempfile.mkdtemp()) / "crash.db"))
+crash.run("drop index h_uniq")
+for _ in range(2):
+    crash.run("insert into history(point, ts, value, quality) values ('c', 1.0, 5.0, 0)")
+real_run = crash.run
+crash.run = lambda sql, *a: (_ for _ in ()).throw(RuntimeError("boom")) if sql.startswith("insert") else real_run(sql, *a)
+try:
+    v11_history_unique(crash)
+except RuntimeError:
+    pass
+crash.run = real_run
+assert crash.history_stats()["rows"] == 2, crash.history_stats()
 print("ok")

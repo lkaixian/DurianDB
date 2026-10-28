@@ -9,7 +9,7 @@ def _index(s, sql):
     try:
         s.ddl(sql)
     except Exception as e:  # an index that already exists is fine (databases from before migrations existed)
-        if not any(w in str(e).lower() for w in ("exist", "duplicate")):
+        if not any(w in str(e).lower() for w in ("already exists", "duplicate key name")):
             raise
 
 
@@ -78,10 +78,11 @@ def v11_history_unique(s):
     # A sample is identified by (point, ts): a replayed backfill must not land twice and double-count in rollups. Fold
     # the duplicates a database already holds into their first row (history has no id to delete by), then enforce it.
     cols = "point, ts, value, quality, svalue"
-    for d in s.q("select point, ts from history group by point, ts having count(*) > 1"):
-        keep = s.q(f"select {cols} from history where point=? and ts=?", (d["point"], d["ts"]))[0]
-        s.run("delete from history where point=? and ts=?", (d["point"], d["ts"]))
-        s.run(f"insert into history({cols}) values (?,?,?,?,?)", tuple(keep.values()))
+    with s.atomic():  # a crash between the delete and the re-insert must not lose the sample
+        for d in s.q("select point, ts from history group by point, ts having count(*) > 1"):
+            keep = s.q(f"select {cols} from history where point=? and ts=?", (d["point"], d["ts"]))[0]
+            s.run("delete from history where point=? and ts=?", (d["point"], d["ts"]))
+            s.run(f"insert into history({cols}) values (?,?,?,?,?)", tuple(keep.values()))
     _index(s, "create unique index h_uniq on history(point, ts)")
 
 
