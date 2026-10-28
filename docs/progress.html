@@ -260,10 +260,10 @@
   </header>
 
   <div class="figures">
-    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">12,191</div><div class="n">lines, 44 modules</div></div>
-    <div class="fig"><div class="k">Tests</div><div class="v">10,453</div><div class="n">lines, 88 suites, all passing</div></div>
-    <div class="fig"><div class="k">Commits</div><div class="v">234</div><div class="n">across 10 calendar days</div></div>
-    <div class="fig"><div class="k">Open debt</div><div class="v">9</div><div class="n">entries, all untested paths, none high severity</div></div>
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">12,985</div><div class="n">lines, 49 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">11,521</div><div class="n">lines, 97 suites</div></div>
+    <div class="fig"><div class="k">Commits</div><div class="v">249</div><div class="n">across 10 calendar days</div></div>
+    <div class="fig"><div class="k">Open debt</div><div class="v">16</div><div class="n">entries (9 untested paths, 7 left by the 10-28 work), none high severity</div></div>
   </div>
 
   <section>
@@ -271,7 +271,7 @@
     <div class="charts">
       <div class="card">
         <h3>Code in the tree</h3>
-        <div class="summary">Server 12,191 lines · tests 10,453 lines</div>
+        <div class="summary">Server 12,985 lines · tests 11,521 lines</div>
         <div class="legend">
           <span><i class="swatch"></i>server</span>
           <span><i class="swatch dashed"></i>tests</span>
@@ -280,7 +280,7 @@
       </div>
       <div class="card">
         <h3>Test suites</h3>
-        <div class="summary">88 suites · one process each, <code>run_all.py</code></div>
+        <div class="summary">97 suites · one process each, <code>run_all.py</code></div>
         <div class="chart-wrap" id="wrap-suites"></div>
       </div>
     </div>
@@ -326,7 +326,9 @@
           <tr><td class="name">Storage</td><td class="name">SQLite or MySQL/MariaDB, versioned migrations, eight rollups, retention, backups, buffered writes with a system alarm, unique history rows per (point, time), read-only admin SQL console (SELECT only, secret tables refused, audited)</td><td class="name"><code>test_sql_console</code>, <code>test_history_unique</code>, <code>test_store</code>, <code>test_series</code>, <code>test_maintenance</code></td></tr>
           <tr><td class="name">Transport</td><td class="name">TLS 1.2+ with HSTS and Secure cookies when a certificate is given; plain HTTP refuses any non-local address</td><td class="name"><code>test_tls</code></td></tr>
           <tr><td class="name">Data out</td><td class="name">History CSV, reports, one-click and scheduled export bundles (history, events, config, manifest) in one ZIP, and retrieval of the bundles the scheduler wrote; report export as Excel (.xlsx) and PDF, stdlib only</td><td class="name"><code>test_report_formats</code>, <code>test_export</code>, <code>test_export_retrieve</code>, <code>test_reports</code></td></tr>
-          <tr><td class="name">AI/ML</td><td class="name">EWMA baseline, robust-z score, short-horizon forecast with a 95% band, and a prediction dashboard widget that says when no honest forecast exists</td><td class="name"><code>test_forecast</code>, <code>test_prediction_widget</code>, <code>test_anomaly</code></td></tr>
+          <tr><td class="name">AI/ML</td><td class="name">EWMA baseline, robust-z score, short-horizon forecast with a 95% band (linear, or a robust Theil-Sen option); a seasonal hour-of-week baseline with a per-slot score route; change-point detection; Pearson/Spearman correlation with best lag and a related-points ranking that never names a point the caller cannot see; a backtest reporting MAE, RMSE and 95% coverage across naive, linear, robust and seasonal-naive; a predictive TREND_LIMIT detector (alarms when a limit is projected to be reached within a horizon); persisted per-point models retrained daily in bounded batches, with an admin retrain route; a prediction dashboard widget that says when no honest forecast exists</td><td class="name"><code>test_forecast</code>, <code>test_prediction_widget</code>, <code>test_anomaly</code>, <code>test_seasonal</code>, <code>test_changepoint</code>, <code>test_correlate</code>, <code>test_backtest</code>, <code>test_trend_limit</code>, <code>test_models</code>. Measured: on a ramp with spikes robust MAE 0.90 vs linear 79.53; on a seasonal series seasonal-naive 0.436 vs linear 6.370; coverage about 0.945 for linear and robust on Gaussian noise; TREND_LIMIT alarmed on 0 of 300 noise seeds. Synthetic data only, no real plant series</td></tr>
+          <tr><td class="name">Security hardening</td><td class="name">A penetration test of the new surface: POP3 pattern-shape guard and a 2000-character match cap, bytes counted as they arrive, ssl by default; file source with printable bounded text, bounded reads, devices and special files refused; eGauge accepts only a host name or address literal; LDAP one lockout and account per case-folded name, reserved names refused, no admin default role; SQL console byte caps and blobs as hex; report dates bounded and exports surrogate-safe; line-protocol overflow is a 422</td><td class="name"><code>test_pop3_source</code>, <code>test_file_source</code>, <code>test_egauge_source</code>, <code>test_ldap_auth</code>, <code>test_sql_console</code>, <code>test_report_formats</code>, <code>test_ingest_line</code>. Equalised login timing is not measured, and the MySQL/MariaDB paths were not run</td></tr>
+          <tr><td class="name">Resilience</td><td class="name">Atomic reload (the new engine is built before the old one stops); bounded, health-reporting MQTT publishers; stop() never blocks; recovery from a backward clock step; NaN source timestamps refused; atomic migration v11; partial-backup cleanup; POP3 marks a message seen only after retrieval</td><td class="name"><code>test_output_resilience</code>, <code>test_clock_step</code>, <code>test_ts_nan_mqtt</code>, <code>test_history_unique</code>, <code>test_store</code>, <code>test_pop3_source</code>; migration v11 and backup cleanup only on SQLite</td></tr>
           <tr><td class="name">Modelling</td><td class="name">Engineering units with an optional display unit and conversion, tags inherited from folder and source</td><td class="name"><code>test_units</code></td></tr>
           <tr><td class="name">Federation</td><td class="name">SSO sign-in through OpenID Connect: authorization code with PKCE, RS256 from the provider JWKS, same sessions and roles</td><td class="name"><code>test_oidc</code></td></tr>
           <tr><td class="name">Safety net</td><td class="name">A permission matrix over every dispatcher branch, background jobs for backups and source tests, bounded in-memory state, percent-decoded route names</td><td class="name"><code>test_permissions</code>, <code>test_jobs</code>, <code>test_bounded_state</code>, <code>test_route_names</code></td></tr>
@@ -363,7 +365,7 @@
   <section>
     <h2>Open now</h2>
     <div class="note">
-      <p>All eleven findings of the 2026-10-27 audit (<code>docs/12-error-handling.md</code>, <code>NEXTPLAN.md</code>
+      <p>The 2026-10-28 AI/ML work was verified on synthetic series only. All eleven findings of the 2026-10-27 audit (<code>docs/12-error-handling.md</code>, <code>NEXTPLAN.md</code>
         section 1) are closed, each with a test. What is open now is in <code>TECHNICAL_DEBT.md</code>, and every
         entry is a path that has only met a simulator or a fake server.</p>
     </div>
@@ -375,7 +377,13 @@
       <li><span class="body">LDAP sign-in (U14) ran against a fake directory on plain <code>ldap://</code> localhost;
         <code>ldaps://</code> never ran, and result codes 51 and 52 count as a bad password.</span></li>
       <li><span class="body">The SQL console MySQL/MariaDB branch has not been run; the SQLite branch is
-        tested.</span></li>
+        tested. The console byte caps, the <code>performance_schema</code>/<code>sys</code> secret additions, the atomic
+        migration v11 and the partial-backup cleanup have not run on MySQL/MariaDB either.</span></li>
+      <li><span class="body">Seven entries (W1 to W7) were left by the 10-28 work: POP3 now defaults to ssl and refuses
+        patterns with three or more open-ended repeats, so common ones such as <code>Temp:\s*(...)</code> must be
+        rewritten; TREND_LIMIT state is memory-only and UNCERTAIN values enter its fit; the robust forecast band is
+        constant width; model retraining is once a day and the stored profile serves only the 14-day window; LDAP login
+        timing is untested; dashboards accept unknown keys.</span></li>
     </ol>
   </section>
 
@@ -386,6 +394,7 @@
         <thead><tr><th>Work</th><th>State</th><th>Detail</th></tr></thead>
         <tbody>
           <tr><td class="name">Authentication, export bundles, unit conversion, AI and forecast</td><td><span class="pill done">done</span></td><td class="name">OIDC and LDAP sign-in, scheduled export bundles, display-unit conversion, EWMA anomaly score and forecast are built and tested.</td></tr>
+          <tr><td class="name">Analytics on real data</td><td><span class="pill part">open</span></td><td class="name">Backtest, seasonal, change-point, correlation and TREND_LIMIT numbers come from generated series. Run them on a real plant history before relying on a threshold; the 4x standard-error bar trades sensitivity for fewer false alarms.</td></tr>
           <tr><td class="name">Hardware verification</td><td><span class="pill part">open</span></td><td class="name">Drivers U1, U3, U8 to U12 need a real device or server; eGauge, Haystack, POP3 and LDAP need a real peer, and the TLS paths a real certificate. <code>tools/hw_probe.py</code> is ready.</td></tr>
           <tr><td class="name">Rust real-time core</td><td><span class="pill part">experiment</span></td><td class="name">Detector layer ported with parity vectors against Python. Not wired into the server.</td></tr>
           <tr><td class="name">OPC DA</td><td><span class="pill none">declined</span></td><td class="name">Needs Windows COM/DCOM, which is not stdlib.</td></tr>
@@ -407,11 +416,11 @@
 
   var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27", "10-28"];
   var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28"];
-  var COMMITS = [68, 79, 79, 79, 79, 79, 79, 94, 224, 234];
-  var MODULES = [23, 24, 24, 24, 24, 24, 24, 25, 38, 44];
-  var SUITES = [25, 27, 27, 27, 27, 27, 27, 38, 75, 88];
-  var SERVER = [4809, 5048, 5048, 5048, 5048, 5048, 5048, 5299, 11281, 12191];
-  var TESTS = [2496, 2670, 2670, 2670, 2670, 2670, 2670, 3319, 9301, 10453];
+  var COMMITS = [68, 79, 79, 79, 79, 79, 79, 94, 224, 249];
+  var MODULES = [23, 24, 24, 24, 24, 24, 24, 25, 38, 49];
+  var SUITES = [25, 27, 27, 27, 27, 27, 27, 38, 75, 97];
+  var SERVER = [4809, 5048, 5048, 5048, 5048, 5048, 5048, 5299, 11281, 12985];
+  var TESTS = [2496, 2670, 2670, 2670, 2670, 2670, 2670, 3319, 9301, 11521];
 
   var NS = "http://www.w3.org/2000/svg";
   var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
@@ -516,12 +525,12 @@
   }
 
   build("wrap-code", [
-    { name: "Server lines", short: "12,191", values: SERVER },
-    { name: "Test lines", short: "10,453", values: TESTS, dashed: true }
+    { name: "Server lines", short: "12,985", values: SERVER },
+    { name: "Test lines", short: "11,521", values: TESTS, dashed: true }
   ], { label: "Lines of code in durian and tests, 19 to 28 October" });
 
   build("wrap-suites", [
-    { name: "Test suites", short: "88", values: SUITES }
+    { name: "Test suites", short: "97", values: SUITES }
   ], { label: "Number of test suites, 19 to 28 October" });
 
   // daily table

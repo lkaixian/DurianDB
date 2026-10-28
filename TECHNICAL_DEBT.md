@@ -86,6 +86,20 @@ for a declared dependency). E5: the CI matrix now includes 3.14, and the full su
 | U13 | eGauge, Haystack and POP3 sources (`durian/egauge_source.py:79`, `durian/haystack_source.py:37`, `durian/pop3_source.py:81`) | Fake servers only. eGauge parses the documented `inst` XML and Haystack the `read` op, the only parts checked against public docs; POP3 `starttls`/`ssl` (`pop3_source.py:85-88`) and Haystack authentication beyond a Bearer token were never run | medium |
 | U14 | LDAP sign-in (`durian/ldap.py:92`) | A fake directory over plain `ldap://` on localhost; `ldaps://` (`ldap.py:100`) never ran | medium |
 
+### 5a. Left open by the 2026-10-28 work
+
+Seven entries, each a cost or an unrun path the M1-M7 and hardening commits knowingly left. Same severity scale.
+
+| # | Defect | Where | Severity |
+|---|---|---|---|
+| W1 | POP3 breaking changes. `security` now defaults to `ssl` (it used to be plaintext), and a saved `none` on a non-loopback host fails revalidation, so an old config must be edited before it loads. The pattern guard is a conservative ReDoS filter: more than `MAX_UNBOUNDED = 2` open-ended repeats is refused, so the common `Temp:\s*([-+]?\d+(?:\.\d+)?)` (three: `\s*`, `\d+`, `\d+`) is refused although the 2000-character match cap would keep it fast (not timed). The operator must rewrite it with bounded repeats such as `\d{1,6}` | `durian/pop3_source.py:21` (caps), `:37-48` (`_unsafe`), `:56-59` (security rule), `:116` (default) | medium |
+| W2 | TREND_LIMIT keeps its sample window in memory only, so every restart or config reload (which rebuilds the engine) relearns it and cannot alarm until the window refills. BAD quality is excluded by `Point.update` before any detector runs, not by the caller; an UNCERTAIN value is not excluded and enters the fit. The significance bar was raised from 3 to 4 standard errors to stop noise alarms (0 of 300 noise seeds), which also makes a genuinely shallow trend alarm later or not at all | `durian/core.py:365` (memory-only note), `:370` (window), `:401` (4x bar), `:524-531` (BAD returns before detectors), `:548` (UNCERTAIN reaches them) | medium |
+| W3 | The robust forecast interval is a constant width (1.96 x 1.4826 x MAD of the fit residuals) at every horizon, so it understates the uncertainty far ahead of the data. The coverage figure in the backtest is for one-step-ahead folds, not for the far end of a long horizon | `durian/backtest.py:72-83` (`robust`), `durian/app.py:555-559` (`forecast_view`) | medium |
+| W4 | Model retraining is hour-granular: the schedule runs once a day at `models_hour` (default 02:00 local) and the stored profile is only used by the seasonal routes when the request asks for the same window it was trained on, 14 days (`WINDOW_DAYS`), and it is under 8 days old; any other `days` recomputes from history | `durian/maintenance.py:24` (default), `:204-207` (hour gate), `durian/models.py:10`, `durian/app.py:706-708` | low |
+| W5 | LDAP timing equalisation is untested: `test_ldap_auth.py` replaces the dummy hash with the string `not-a-hash` (so no scrypt work is spent), and no test measures sign-in time for a local, an LDAP and an unknown name. A directory outage still answers 502 where everything else answers 401, so an outsider can tell an outage from a wrong password; that difference is a documented ceiling | `durian/auth.py:92` (dummy), `:269-274` (ceiling and 502), `tests/test_ldap_auth.py:70` | medium |
+| W6 | Never run on MySQL/MariaDB: the SQL console's byte caps and read-only path, the `performance_schema` and `sys` additions to `SECRET`, the atomic migration v11 (`s.atomic()` around the delete and re-insert) and the partial-backup cleanup. Only SQLite ran them | `durian/store.py:477-478` (`SECRET`), `:514-515` (console), `durian/migrations.py:77-90` (v11) | medium |
+| W7 | Dashboards accept unknown keys: `KNOWN_KEYS` has no `dashboard` kind and the validator list exempts it, so a typo in a dashboard is stored and ignored. The guard is per kind, not per source type: a source of one type still accepts another type's setting (`port` on a virtual source) | `durian/config.py:47-64` (`KNOWN_KEYS`), `durian/app.py:1470` (dashboard exemption) | low |
+
 U6 and U7 were closed on 2026-10-28: the twelve browser checks all run in CI, every one of them now
 exits 1 on a problem it did not provoke (each of the four that used to only prove it ran lists its
 own intentional 4xx requests and fails on anything else; `browser_dashboard`'s designer steps were
@@ -107,7 +121,7 @@ These are choices, recorded so nobody "fixes" them by accident:
 - The Sparkplug B source is read-only: no command topics, no STATE topic and no rebirth request, so a point cannot be written over it.
 - Plain HTTP on localhost; anything else needs a certificate.
 - Reset codes and TOTP pending secrets live in memory, so a restart voids them.
-- The admin SQL console's MySQL/MariaDB branch (`durian/store.py:511`: `max_execution_time`, `start transaction read only`) has never been run; only the SQLite branch is tested (`tests/test_sql_console.py`).
+- The admin SQL console's MySQL/MariaDB branch (`durian/store.py:514-515`: `max_execution_time`, `start transaction read only`) has never been run; only the SQLite branch is tested (`tests/test_sql_console.py`).
 - Line-protocol ingest ignores tags and has no `precision` parameter: timestamps are always nanoseconds (`durian/ingest.py:104`, `durian/ingest.py:120`).
 - OPC DA is declined: it needs Windows COM/DCOM, which is not stdlib.
 
