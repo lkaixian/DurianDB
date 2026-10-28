@@ -24,7 +24,7 @@ async function viewPoint(name) {
     </div>`;
   const when = t => t == null ? "never" : fmt(t);
   const fix = (p, v) => v == null ? "none" : p.decimals == null || typeof v === "string" ? String(v) : Number(v).toFixed(p.decimals);
-  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for", SMOOTHNESS: "scatter above", CUSUM: "drift from", ANOMALY: "outlier", TEXT: "text"};
+  const kinds = {HIGH_LIMIT: "above", LOW_LIMIT: "below", RATE_OF_CHANGE: "changing faster than", NO_UPDATE: "no update for", STATE: "in state", RANGE: "range", CHANGE: "every change", NO_CHANGE: "unchanged for", SMOOTHNESS: "scatter above", CUSUM: "drift from", ANOMALY: "outlier", TREND_LIMIT: "heading for", TEXT: "text"};
   let drawn = "", current = null;  // `current` is what the trend needs for its limit lines
   async function refresh() {
     let p;

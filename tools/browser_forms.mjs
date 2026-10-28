@@ -171,6 +171,21 @@ await save();
 const fileCfg = await ev(`fetch('/api/config/source/file-src').then(r=>r.json())`);
 console.log("stored file source:", JSON.stringify({type: fileCfg?.type, path: fileCfg?.path}));
 if (fileCfg?.type !== "file" || fileCfg?.path !== "values.txt") { console.log("FAIL: the saved file source did not keep type/path from the form"); process.exit(1); }
+// 13. a predictive TREND_LIMIT alarm is chosen in the detector form and saved with its direction, horizon and window (durian/core.py TrendLimit)
+await go("#config/point/_new");
+await set("source", "demo");
+await ev(`document.querySelector('#ed').name.value='trend-pt'`);
+await ev(`document.querySelector('[data-add-det]').click()`); await sleep(300);
+const trendKind = await ev(`(()=>{const k=document.querySelector('#d0-kind');if(![...k.options].some(o=>o.value==='TREND_LIMIT'))return 'missing';k.value='TREND_LIMIT';k.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()`);
+await sleep(300);
+const setDet = (id, v) => ev(`(()=>{const e=document.querySelector('#d0-${id}');if(!e)return 'no field';e.value='${v}';e.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()`);
+const trendSet = [await setDet("limit", 80), await setDet("direction", "below"), await setDet("horizon", 900), await setDet("window", 30)];
+console.log("trend form:", trendKind, trendSet.join());
+if (trendKind !== "ok" || trendSet.some(x => x !== "ok")) { console.log("FAIL: the detector form has no Heading for a limit condition with limit/direction/horizon/window"); process.exit(1); }
+await save();
+const trendCfg = await ev(`fetch('/api/config/point/trend-pt').then(r=>r.json())`);
+console.log("stored trend:", JSON.stringify(trendCfg?.detectors));
+if (JSON.stringify(trendCfg?.detectors?.[0]) !== JSON.stringify({kind: "TREND_LIMIT", limit: 80, direction: "below", horizon: 900, window: 30, level: "WARNING"}) && !(trendCfg?.detectors?.[0]?.kind === "TREND_LIMIT" && trendCfg.detectors[0].direction === "below" && trendCfg.detectors[0].horizon === 900 && trendCfg.detectors[0].window === 30 && trendCfg.detectors[0].limit === 80)) { console.log("FAIL: the saved point did not keep the TREND_LIMIT fields"); process.exit(1); }
 // mobile
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");

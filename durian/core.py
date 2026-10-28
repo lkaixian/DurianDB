@@ -358,8 +358,57 @@ class Cusum(_Latch):
             return f"drifting below {self.target:g} (sum {self.lo:.3g} > {self.threshold:g})"
 
 
-DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange, Smoothness, Cusum, TextDetector, Anomaly)}
-LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE", "SMOOTHNESS", "CUSUM", "TEXT", "ANOMALY")  # these take duration (on-delay) and off_delay
+class TrendLimit(_Latch):
+    """Predictive alarm: raises while the fitted trend of the last `window` (time, value) samples would reach `limit` within `horizon` seconds,
+    before the value gets there (once it has crossed, HIGH_LIMIT / LOW_LIMIT own the alarm). The slope is the Theil-Sen median of pairwise slopes
+    over at most the latest 100 samples; it counts only when it is over 4 standard errors of the least-squares slope, so noise around a flat line
+    rarely alarms, and only when that holds for window/5 samples in a row. Once raised it holds until the projection is past 1.25 x `horizon` or the trend stops. The window is in memory only: a restart relearns it."""
+    kind = "TREND_LIMIT"
+
+    def __init__(self, limit, direction, horizon, window=20, level=Level.WARNING, duration=0.0, off_delay=0.0):
+        super().__init__(level, duration, off_delay)
+        self.limit, self.sign, self.horizon, self.window, self.hits = limit, 1 if direction == "above" else -1, horizon, deque(maxlen=window), 0
+
+    def reset(self):
+        super().reset()
+        self.window.clear()
+        self.hits = 0
+
+    def evaluate(self, point, value, ts):
+        w = self.window
+        if w and ts <= w[-1][0]:  # no time has passed: a repeat says nothing about the slope, and must not clear or raise
+            return self.event.message if self.event else None
+        w.append((ts, value))
+        msg = self._trend(value)
+        self.hits = self.hits + 1 if msg else 0
+        # a chance slope in noise is gone a sample or two later; a real trend persists, so a fresh alarm needs a streak
+        return msg if msg and (self.event or self.hits >= max(1, w.maxlen // 5)) else None
+
+    def _trend(self, value):
+        w = self.window
+        if len(w) < w.maxlen or (value - self.limit) * self.sign >= 0:
+            return None
+        pts = list(w)[-100:]
+        slopes = sorted((y2 - y1) / (t2 - t1) for i, (t1, y1) in enumerate(pts) for t2, y2 in pts[i + 1:])
+        m = len(slopes)
+        slope = (slopes[m // 2] + slopes[(m - 1) // 2]) / 2 * self.sign  # positive = heading toward the limit
+        if slope <= 0:
+            return None
+        n, mt, my = len(pts), sum(t for t, _ in pts) / len(pts), sum(y for _, y in pts) / len(pts)
+        sxx = sum((t - mt) ** 2 for t, _ in pts)
+        b = sum((t - mt) * (y - my) for t, y in pts) / sxx
+        sse = sum((y - my - b * (t - mt)) ** 2 for t, y in pts)
+        if slope <= 4 * math.sqrt(sse / (n - 2) / sxx):
+            return None
+        eta = abs(self.limit - value) / slope
+        if eta > self.horizon * (1.25 if self.event else 1):
+            return None
+        when = f"{eta:.0f} s" if eta < 90 else f"{eta / 60:.0f} min" if eta < 5400 else f"{eta / 3600:.1f} h"
+        return f"will reach {self.limit:g} in about {when} at the current rate"
+
+
+DETECTORS = {c.kind: c for c in (HighLimit, LowLimit, RateOfChange, NoUpdate, StateDetector, RangeDetector, ChangeDetector, NoChange, Smoothness, Cusum, TextDetector, Anomaly, TrendLimit)}
+LATCHING = ("HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE", "STATE", "RANGE", "SMOOTHNESS", "CUSUM", "TEXT", "ANOMALY", "TREND_LIMIT")  # these take duration (on-delay) and off_delay
 
 
 def make_detector(cfg: dict) -> Detector:
@@ -416,6 +465,16 @@ def make_detector(cfg: dict) -> Detector:
         if not isinstance(n, int) or isinstance(n, bool) or not 3 <= n <= 1000:
             raise ValueError("window must be a whole number from 3 to 1000")
         return Anomaly(num("z_limit", lo=0.1), n, level, deadband=float(num("deadband", 0.5, 0)), **late)
+    if kind == "TREND_LIMIT":
+        limit = num("limit")
+        if cfg.get("direction") not in ("above", "below"):
+            raise ValueError("direction must be above or below")
+        h, n = num("horizon"), cfg.get("window", 20)
+        if not 60 <= h <= 86400:
+            raise ValueError("horizon must be from 60 to 86400 seconds")
+        if not isinstance(n, int) or isinstance(n, bool) or not 5 <= n <= 1000:
+            raise ValueError("window must be a whole number from 5 to 1000")
+        return TrendLimit(limit, cfg["direction"], h, n, level, **late)
     if kind == "CHANGE":
         return ChangeDetector(float(num("tolerance", 0, 0)), level)
     return NoChange(num("seconds", lo=1), float(num("tolerance", 0, 0)), level)

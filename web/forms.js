@@ -284,6 +284,7 @@ const DET = {
   SMOOTHNESS: {label: "Noisy signal", args: [["limit", "Scatter limit (std. deviation)"], ["samples", "Over this many samples"]], late: true, start: {limit: 1, samples: 10}},
   CUSUM: {label: "Slow drift (CUSUM)", args: [["target", "Target value"], ["slack", "Allowance per sample"], ["threshold", "Alarm when the sum passes"]], late: true, start: {target: 0, slack: 0, threshold: 10}},
   ANOMALY: {label: "Outlier (statistical)", args: [["z_limit", "Standard deviations from normal"], ["window", "Compared with this many samples"]], late: true, start: {z_limit: 3, window: 20}},
+  TREND_LIMIT: {label: "Heading for a limit (predictive)", args: [["limit", "Limit"], ["direction", "Heading", "select", opts(["above", "up to the limit"], ["below", "down to the limit"])], ["horizon", "Alarm when it will arrive within (seconds)"], ["window", "Trend over this many samples"]], late: true, start: {limit: 100, direction: "above", horizon: 600, window: 20}},
   TEXT: {label: "Text matches", args: [["values", "Texts", "tlist"], ["mode", "Alarm when the value", "select", opts(["equals", "equals one of them"], ["contains", "contains one of them"])]], late: true, start: {values: ["FAULT"], mode: "equals"}},
   NO_UPDATE: {label: "No update", args: [["seconds", "Seconds without a value"]], start: {seconds: 60}},
 };
