@@ -1,0 +1,69 @@
+name: Release
+
+# A tag such as v0.0.1 builds, tests and smoke-tests the single-file executables, then publishes them as a GitHub
+# Release. A manual run (workflow_dispatch) on a branch builds and uploads the artifacts only.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the dependencies and PyInstaller
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller==6.22.3
+      - name: Test suite
+        run: python tests/run_all.py
+      - name: Build the executable
+        run: python tools/build_exe.py
+      - name: Smoke test the executable
+        shell: bash
+        run: |
+          for exe in dist/durian-*; do
+            case "$exe" in *.sha256) continue ;; esac
+            python tools/smoke_exe.py "$exe"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: durian-${{ runner.os }}
+          path: dist/durian-*
+          if-no-files-found: error
+
+  release:
+    name: publish the GitHub Release
+    needs: build
+    # Only a tag publishes. A manual run without a tag stops after the artifacts are uploaded.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: durian-*
+          merge-multiple: true
+          path: release
+      - name: Create the release with the executables and SHA256SUMS
+        working-directory: release
+        run: |
+          cat durian-*.sha256 > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "DurianDB $GITHUB_REF_NAME" --generate-notes \
+            SHA256SUMS $(ls durian-* | grep -v '\.sha256$')

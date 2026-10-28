@@ -32,7 +32,7 @@ control points, forwards events, and serves a browser console with dashboards yo
 
 ```sh
 python -m durian.server      # http://127.0.0.1:8765
-python tests/run_all.py      # 65 suites, all passing
+python tests/run_all.py      # 101 suites, all passing
 ```
 
 To run the suite on the MySQL/MariaDB backend, start a throwaway MariaDB and point the two test URLs at it
@@ -65,6 +65,14 @@ The console is served on `127.0.0.1` only. To reach it from another machine, giv
 DURIAN_TLS_KEY=tools/cert.key`. It then serves HTTPS only (TLS 1.2 or newer), sends HSTS and marks the session
 cookie `Secure`. Without a certificate it refuses to start on any other address rather than put a password on
 the network in clear.
+
+## Single-file build
+
+Each release tag publishes an executable for Windows and Linux on the GitHub Releases page, with `SHA256SUMS` to check it
+against. It needs no Python: rename it to `durian` (`durian.exe` on Windows), then `durian run` starts the console on
+http://127.0.0.1:8765. The database, backups and spool sit beside the executable, or in `DURIAN_HOME` when that is set.
+`durian supervise` is the watchdog; the files in `tools/service` start `python -m durian supervise`, so point them at the
+executable for a service. To build it yourself, run `python tools/build_exe.py` after `python -m pip install pyinstaller==6.22.3`.
 
 ## What it can do
 

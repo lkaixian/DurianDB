@@ -16,5 +16,8 @@ tools/cert.key
 
 # build output and local agent settings
 rust/target/
+dist/
+build/
+*.spec
 .claude/
 graphify-out/
