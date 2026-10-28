@@ -5,15 +5,20 @@ operator-configured (config PUT is authenticated); the file is read whole only i
 """
 import math
 import os
+import re
+import stat
 
 from .polled import PolledSource, number, scale
 
 MAX_BYTES, MAX_LINES = 1_000_000, 10000
+_DEVICE = re.compile(r"(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", re.I)  # Windows device names, with or without extension
 
 
 def validate_source(b, add):
     if not (isinstance(b.get("path"), str) and 0 < len(b["path"]) <= 255):
         add("path", "give the path of the text file to read, up to 255 characters")
+    elif os.name == "nt" and _DEVICE.fullmatch(re.split(r"[/\\]", b["path"])[-1]):
+        add("path", "a device name such as CON or NUL is not a file")
     if b.get("format", "lines") != "lines":
         add("format", 'must be "lines"')
     if "period" in b and not (isinstance(b["period"], (int, float)) and not isinstance(b["period"], bool)
@@ -27,10 +32,13 @@ class FileSource(PolledSource):
         self.path = cfg["path"]
 
     def fetch(self):
-        if os.path.getsize(self.path) > MAX_BYTES:
-            raise ValueError(f"the file is too large (over {MAX_BYTES} bytes)")
+        if not stat.S_ISREG(os.stat(self.path).st_mode):  # before open(): a FIFO or device would block the poll thread
+            raise ValueError("the path is not a regular file")
         with open(self.path, encoding="utf-8", errors="replace") as fh:
-            lines = fh.read().splitlines()[:MAX_LINES]
+            text = fh.read(MAX_BYTES + 1)  # bounded however the file grows after the stat
+        if len(text) > MAX_BYTES:
+            raise ValueError(f"the file is too large (over {MAX_BYTES} bytes)")
+        lines = text.splitlines()[:MAX_LINES]
         found = {}
         for ln in lines:
             ln = ln.strip()
@@ -42,8 +50,11 @@ class FileSource(PolledSource):
         for p in self.points.values():
             if p.name not in found:
                 rejected.append(f"{p.name}: no line for it")
-            elif p.text:
-                values[p.name] = found[p.name]
+            elif p.text:  # same rule as ingest/set
+                if 1 <= len(found[p.name]) <= 255 and found[p.name].isprintable():
+                    values[p.name] = found[p.name]
+                else:
+                    rejected.append(f"{p.name}: text must be 1 to 255 printable characters")
             else:
                 try:
                     values[p.name] = scale(p, number(float(found[p.name])))
