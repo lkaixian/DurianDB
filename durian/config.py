@@ -34,6 +34,33 @@ SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "dnp3", "bacne
                 "sql", "http_in", "calc", "system")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
+# Every top-level setting a stored object of each kind may carry. A body with any other key is refused by name at
+# the shared config PUT path, so a typo'd safety setting cannot be stored and silently ignored.
+# ponytail: one list per kind, so a source of one type still accepts another type's setting (e.g. `port` on a
+# virtual source); split the source list by type if that ever becomes a real typo source.
+KNOWN_KEYS = {kind: set(keys.split()) for kind, keys in {
+    "source": """type enabled read_roles heartbeat_seconds down_after default_tags default_unit tags unit folders
+        creds prefix cmd_prefix auto_create group link framing retries max_read_bits max_read_regs max_write_regs
+        timeout period backoff_max backoff_scale persistent contiguous_only multiple_writes_only monitor host port
+        community dnp3 bacnet opcua url headers token_file max_bytes ca path query max_age_days""",
+    "point": """source logging log_interval log_mode tolerance tags unit display_unit settable retention_days
+        read_roles set_roles datatype detectors description eu_low eu_high set_min set_max decimals max_step confirm
+        require_reason min_write_gap scan folder states suppress_when generator modbus snmp dnp3 bacnet opcua http
+        sql scale calc""",
+    "handler": """type min_level enabled scope url to from smtp creds on_clear escalate_after escalate_to groups
+        subject body hour hours watchlist point value clear_value release_on_clear""",
+    "publisher": "type url creds resend prefix group node device points enabled",
+    "watchlist": "tags points query name_like text_like read_roles owner",
+    "maintenance": "enabled mode reason scope schedule active",
+    "emailgroup": "addresses",
+}.items()}
+
+
+def unknown_keys(kind, b):
+    """[{property, message}] naming each top-level key this kind does not store, so a typo is refused by name."""
+    known = KNOWN_KEYS.get(kind, ())
+    return [{"property": k, "message": f"not a known {kind} setting; check the spelling"} for k in b if k not in known]
+
 
 def _int(v, lo, hi):
     return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi

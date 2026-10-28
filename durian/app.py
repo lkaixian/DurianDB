@@ -18,7 +18,8 @@ from urllib.parse import unquote
 from .auth import ApiError, Auth, AuthError, can, check_password_strength, hash_password, verify_password
 from . import export, notes, pointcsv, units, windows
 from . import VERSION, BUILD, REPO
-from .config import (build_engine, resolve, roles_ok, validate_maintenance, validate_point, validate_source, validate_watchlist)
+from .config import (build_engine, resolve, roles_ok, unknown_keys, validate_maintenance, validate_point, validate_source,
+                     validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_label
 from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
@@ -1526,7 +1527,7 @@ class App:
                     "handler": lambda: validate_handler(name, body, self.store),
                     "publisher": lambda: validate_publisher(name, body, self.store),
                     "watchlist": lambda: validate_watchlist(name, body), "maintenance": lambda: validate_maintenance(name, body),
-                    "emailgroup": lambda: validate_emailgroup(name, body)}[kind]()
+                    "emailgroup": lambda: validate_emailgroup(name, body)}[kind]() + unknown_keys(kind, body)
             if errs:
                 raise ApiError(422, "validation failed", errs)
             old = self.store.get(kind, name)

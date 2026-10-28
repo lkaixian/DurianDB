@@ -11,7 +11,7 @@ app = App(store)
 admin = {"name": "admin", "roles": {"superadmin"}}
 
 # ---- a save that cannot be started is rolled back, and the previous version stays
-app.handle("PUT", "/api/config/source/v", {}, {"type": "virtual", "period": 60, "points": [{"name": "gen", "kind": "sine", "period": 60, "min": 0, "max": 10}]}, admin)
+app.handle("PUT", "/api/config/source/v", {}, {"type": "virtual", "period": 60}, admin)
 good = app.store.get("source", "v")
 assert good is not None
 
@@ -29,7 +29,7 @@ def explode(self):
 
 App.reload = explode
 try:
-    app.handle("PUT", "/api/config/source/v", {}, {"type": "virtual", "points": []}, admin)
+    app.handle("PUT", "/api/config/source/v", {}, {"type": "virtual"}, admin)
 except ApiError as e:
     assert e.status == 409 and "not saved" in str(e) and "previous version" in str(e), e
 else:
@@ -45,7 +45,7 @@ assert [s.name for s in app.engine.sources] == ["v"]
 boom["n"] = 0
 App.reload = explode
 try:
-    app.handle("PUT", "/api/config/source/broken", {}, {"type": "virtual", "points": []}, admin)
+    app.handle("PUT", "/api/config/source/broken", {}, {"type": "virtual"}, admin)
 except ApiError:
     pass
 App.reload = real
