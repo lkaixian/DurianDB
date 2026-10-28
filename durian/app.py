@@ -7,8 +7,10 @@ import logging
 import fnmatch
 import json
 import math
+import os
 import re
 import secrets
+import socket
 import threading
 import time
 from collections import Counter
@@ -21,7 +23,7 @@ from . import export, notes, pointcsv, units, windows
 from . import VERSION, BUILD, REPO
 from .config import (build_engine, resolve, roles_ok, unknown_keys, validate_maintenance, validate_point, validate_source,
                      validate_watchlist)
-from .core import SOURCE, Engine, Event, Level, Quality, alarm_state, sentence, state_label
+from .core import SOURCE, Engine, Event, Level, Quality, alarm_state, pid_alive, sentence, state_label
 from . import docfmt
 from .correlate import MIN_PAIRS, best_lag, pearson, spearman
 from .csvfmt import csv_bytes, iso
@@ -114,9 +116,11 @@ class App:
         self.engine, self.outputs, self.open_events = None, None, []
         self.engine_lock = threading.RLock()  # guards the engine and its runtime state, not the database: a slow tick must not stall a query
         self.escalated = set()  # fallback only: escalations live in the store, so any process escalates an alarm once
-        self.lease_owner = secrets.token_hex(8)  # this process's identity in the tick lease
+        self.host = socket.gethostname()
+        self.lease_owner = f"{self.host}:{os.getpid()}:{secrets.token_hex(8)}"  # this process's identity in the tick lease
         self.tick_seconds = 2.0  # how often this process polls; the lease outlives a few missed renewals
         self.lease_held = False  # set by the last tick: True when this process owns polling and the scheduled work
+        self.lease_holder = ("", "", 0)  # (host, pid, expires) of the last refusal, for the warning
         self.lease_warned = False  # the one sentence that another process owns the tick
         self.state_warned = False  # the one sentence that the shared tick lease and escalation guard are unavailable
         self.confirms = {}  # fallback only: confirm tokens live in the store, so any process can spend one exactly once
@@ -190,7 +194,17 @@ class App:
         """Claim or renew the tick lease. False means another process owns the tick; True when there is no store to
         ask, because a degraded database must not stop a single server from polling."""
         try:
-            return self.store.take_lease(self.lease_owner, self.lease_seconds())
+            if self.store.take_lease(self.lease_owner, self.lease_seconds()):
+                return True
+            row = self.store.lease()  # held by someone: a dead process on this host does not get to keep it
+            host, pid, _ = ([*str(row["owner"]).rsplit(":", 2), "", ""][:3] if row else ("", "", ""))
+            self.lease_holder = (host, pid, row["expires"] if row else 0)
+            if row and host == self.host and pid.isdigit() and not pid_alive(int(pid)):
+                self.store.evict_lease(row["owner"])
+                self.lease_warned = False
+                log.warning("this process took over the tick lease from process %s, which is no longer running", pid)
+                return self.store.take_lease(self.lease_owner, self.lease_seconds())
+            return False
         except Exception as ex:
             self._degraded(ex)
             return True
@@ -203,9 +217,15 @@ class App:
                 self.lease_held = False
                 if not self.lease_warned:
                     self.lease_warned = True
-                    log.warning("another server process owns the tick lease on this database, so this process is not "
-                                "polling; stop one of the two processes, or give this one its own database")
+                    host, pid, expires = self.lease_holder
+                    who = f"process {pid} on {host}" if pid.isdigit() else "another server process"
+                    log.warning("%s owns the tick lease on this database, so this process is not polling; it expires in %d "
+                                "seconds and this process will then take over (or stop that process, or give this one its "
+                                "own database)", who, max(0, round(expires - time.time())))
                 return
+            if self.lease_warned:  # it was waiting: say once that it now polls
+                self.lease_warned = False
+                log.warning("this process took over the tick lease and is now polling")
             self.lease_held = True
             self._tick(ts)
         except Exception as e:

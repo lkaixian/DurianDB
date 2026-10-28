@@ -430,6 +430,10 @@ class Store:
         r = self.q("select owner, expires from tick_lease where id=?", (self.LEASE_ID,))
         return r[0] if r else None
 
+    def evict_lease(self, owner):
+        """Remove a lease whose owner is known to be dead (same as release, named for who calls it)."""
+        return self.release_lease(owner)
+
     def release_lease(self, owner):
         """Give the lease back on a clean shutdown, so another process can take over at once. Only its owner may."""
         return self.run("delete from tick_lease where id=? and owner=?", (self.LEASE_ID, owner)).rowcount

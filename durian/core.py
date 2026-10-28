@@ -3,6 +3,7 @@
 Original teaching implementation of the concepts in docs/research. Not derived from Mango code.
 """
 import math
+import os
 import re
 import urllib.error
 from collections import deque
@@ -701,3 +702,28 @@ class Engine:
                     ev = d.tick(p, ts)
                     if ev:
                         self._event(ev)
+
+
+def pid_alive(pid):
+    """False only when the process is known to be gone; "cannot tell" counts as alive."""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            import ctypes
+            k = ctypes.windll.kernel32
+            k.OpenProcess.restype = ctypes.c_void_p
+            h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return ctypes.GetLastError() != 87  # 87: no such pid; access denied (5) means it exists
+            try:
+                code = ctypes.c_ulong()
+                return not k.GetExitCodeProcess(ctypes.c_void_p(h), ctypes.byref(code)) or code.value == 259  # STILL_ACTIVE
+            finally:
+                k.CloseHandle(ctypes.c_void_p(h))
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except Exception:
+        return True
