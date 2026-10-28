@@ -66,6 +66,7 @@ MACHINE_PROBES += [  # the administration shapes of the areas the data plane als
     ("GET", "/api/export/points", None), ("GET", "/api/export/bundle", None), ("GET", "/api/export/manifest", None),
     ("POST", "/api/import/points", None), ("POST", "/api/import", {"format": "durian-config", "version": 1, "objects": {}}),
     ("PUT", "/api/auth/sso", {"issuer": "https://idp.example.test"}), ("DELETE", "/api/auth/sso", None),
+    ("PUT", "/api/auth/ldap", {"url": "ldaps://dir.example.test"}), ("DELETE", "/api/auth/ldap", None),
 ]
 for token in TOKENS:
     for method, path, body in MACHINE_PROBES:

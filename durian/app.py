@@ -15,14 +15,15 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import unquote
 
-from .auth import ApiError, Auth, AuthError, can, check_password_strength, hash_password, verify_password
+from .auth import ApiError, Auth, AuthError, INHERIT, can, check_password_strength, hash_password, verify_password
+from .ldap import validate_ldap
 from . import export, notes, pointcsv, units, windows
 from . import VERSION, BUILD, REPO
 from .config import (build_engine, resolve, roles_ok, unknown_keys, validate_maintenance, validate_point, validate_source,
                      validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_label
-from .csvfmt import csv_bytes, iso
 from . import docfmt
+from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, drift as baseline_drift, forecast as forecast_series
 from .ingest import HttpInSource, parse_line, parse_payload
@@ -940,6 +941,19 @@ class App:
         if (method, a, b, c) == ("DELETE", "auth", "sso", None):
             self.store.set_setting("sso", None)
             self.store.audit(ident["name"], "sso.remove")
+            return 200, {"configured": False}
+        if (method, a, b, c) == ("PUT", "auth", "ldap", None):
+            body = self._body(body)
+            known = set(INHERIT) | {r for u in self.store.users() for r in u["roles"]}
+            errs = validate_ldap(body, known)
+            if errs:
+                raise ApiError(422, "validation failed", errs)
+            self.store.set_setting("ldap", body)
+            self.store.audit(ident["name"], "ldap.configure", body["url"])
+            return 200, {"saved": True}
+        if (method, a, b, c) == ("DELETE", "auth", "ldap", None):
+            self.store.set_setting("ldap", None)
+            self.store.audit(ident["name"], "ldap.remove")
             return 200, {"configured": False}
 
     def _api_admin_config(self, method, a, b, c, query, body, ident):

@@ -8,8 +8,11 @@ import base64
 import hmac
 import logging
 import os
+import re
 import secrets
 import time
+
+from .ldap import LDAP_HASH, LDAPError, bind as ldap_bind, bind_dn, ldap_config
 
 log = logging.getLogger("durian.auth")
 
@@ -243,7 +246,19 @@ class Auth:
         if until > time.time():
             raise AuthError("too many failed attempts, try again later", 429)
         user = self.store.user(name) if isinstance(name, str) else None
-        ok = verify_password(pw if isinstance(pw, str) else "", user["hash"] if user else self._dummy) and user
+        # LDAP only for a name with no local account, or an account an earlier LDAP sign-in created (marked LDAP_HASH)
+        cfg = ldap_config(self.store) if isinstance(name, str) and (not user or user["hash"] == LDAP_HASH) else None
+        if cfg:
+            try:
+                ok = ldap_bind(cfg["url"], bind_dn(cfg["bind_template"], name), pw)
+            except LDAPError as ex:  # the directory is down: a sentence, not a failed attempt
+                raise AuthError(str(ex), 502)
+            if ok and not user and re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", name):
+                self.store.add_user(name, LDAP_HASH, cfg["default_roles"])
+                user = self.store.user(name)
+            ok = ok and user
+        else:
+            ok = verify_password(pw if isinstance(pw, str) else "", user["hash"] if user else self._dummy) and user
         ok = ok and not user.get("disabled")  # the same message as a wrong password: a disabled account is not advertised
         if ok and user.get("totp"):
             if code is None:  # right password: ask for the second factor without counting it as a failure
@@ -255,10 +270,10 @@ class Auth:
             count += 1
             self._set_failure(name, count, time.time() + LOCK_SECONDS if count >= LOCK_AFTER else 0)
             if user:  # only real accounts are audited: a stream of made-up names must not fill the trail
-                self.store.audit(name, "login.locked" if count == LOCK_AFTER else "login.failed", f"attempt {count}")
+                self.store.audit(name, "login.locked" if count == LOCK_AFTER else "ldap.failed" if cfg else "login.failed", f"attempt {count}")
             raise AuthError("bad username, password or code")
         self._clear_failure(name)
-        self.store.audit(name, "login")
+        self.store.audit(name, "ldap.login" if cfg else "login")
         return self._session(name)
 
     def _session(self, name):
