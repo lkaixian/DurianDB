@@ -9,6 +9,7 @@ import logging
 import queue
 import re
 import smtplib
+import socket
 import ssl
 import threading
 import time
@@ -31,7 +32,7 @@ opener = urllib.request.build_opener(NoRedirect)
 ADDRESS = re.compile(r"^[^@\s<>,;]{1,64}@[^@\s<>,;]{1,255}$")
 HANDLER_TYPES = ("webhook", "email", "setpoint", "report", "slack")
 SECURITY = ("none", "starttls", "ssl")
-PUBLISHER_TYPES = ("mqtt", "http", "sparkplug")
+PUBLISHER_TYPES = ("mqtt", "http", "sparkplug", "tcp")
 DELIVERY_TIMEOUT = 5
 
 
@@ -168,6 +169,13 @@ def validate_publisher(name, b, store):
                 add("creds", "must be the path of a JSON file with a token, sent as a Bearer token")
         if "resend" in b and not (_num(b["resend"]) and 1 <= b["resend"] <= 86400):
             add("resend", "must be a number of seconds from 1 to 86400")
+    elif kind == "tcp":  # one socket kept open, one JSON line per change
+        if not (isinstance(b.get("host"), str) and b["host"] and not any(c in b["host"] for c in " /\\@")):
+            add("host", "must be a host name or address")
+        if not (isinstance(b.get("port"), int) and not isinstance(b["port"], bool) and 1 <= b["port"] <= 65535):
+            add("port", "must be a port from 1 to 65535")
+        if not isinstance(b.get("tls", False), bool):
+            add("tls", "must be true or false")
     elif kind == "mqtt":
         try:
             load_creds(b.get("creds", ""))
@@ -214,8 +222,13 @@ class Outputs:
         self.failed = 0  # every delivery that did not work, for the health view
         self.status = {}  # target name -> {kind, failed, last_error, last_ok}; a dead route must not be invisible
         self.publishers, self.senders = [], []  # MQTT clients, and HTTP senders {url, names, headers, resend, sent}
+        self.tcps = []  # TCP senders {name, host, port, tls, names, last, sock, wait, retry_at}; only the worker thread touches sock/wait/retry_at
         for p in store.list("publisher"):
             if not p.get("enabled", True):
+                continue
+            if p.get("type") == "tcp":
+                self.tcps.append({"name": p["name"], "host": p["host"], "port": p["port"], "tls": p.get("tls", False), "names": set(p["points"]),
+                                  "last": {}, "sock": None, "wait": 1, "retry_at": 0})
                 continue
             if p.get("type") == "http":
                 try:
@@ -251,6 +264,10 @@ class Outputs:
                 if last is None or last[0] != value or now - last[1] >= s["resend"]:
                     s["sent"][point.name] = (value, now)
                     self._put(("webhook", s["url"], {"point": point.name, "value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}, s["headers"]), s["name"])
+        for s in self.tcps:  # on change only; a dropped line is not resent, the next change is
+            if ("*" in s["names"] or point.name in s["names"]) and point.quality != Quality.BAD and s["last"].get(point.name) != value:
+                s["last"][point.name] = value
+                self._put(("tcp", s, json.dumps({"point": point.name, "value": value, "ts": ts, "quality": Quality(point.quality).name.lower()}) + "\n"), s["name"])
         for cl, target, names in self.publishers:
             if "*" not in names and point.name not in names:
                 continue
@@ -387,6 +404,25 @@ class Outputs:
                 c.login(creds["user"], creds.get("password", ""))
             c.send_message(m)
 
+    def _send_tcp(self, s, line):
+        """Send on the open socket; connect first if there is none. After a failure wait 1s, 2s ... up to 30s before dialling again."""
+        if s["sock"] is None:
+            if time.monotonic() < s["retry_at"]:
+                raise ConnectionError("still waiting to reconnect")
+            try:
+                sock = socket.create_connection((s["host"], s["port"]), timeout=DELIVERY_TIMEOUT)
+                s["sock"] = ssl.create_default_context().wrap_socket(sock, server_hostname=s["host"]) if s["tls"] else sock
+            except OSError:
+                s["retry_at"], s["wait"] = time.monotonic() + s["wait"], min(s["wait"] * 2, 30)
+                raise
+            s["wait"] = 1
+        try:
+            s["sock"].sendall(line.encode())
+        except OSError:
+            s["sock"].close()
+            s["sock"], s["retry_at"] = None, time.monotonic() + 1
+            raise
+
     def _work(self):
         while True:
             target, item = self.q.get()
@@ -396,6 +432,8 @@ class Outputs:
                 if item[0] == "webhook":
                     _, url, body, *extra = item
                     opener.open(urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", **(extra[0] if extra else {})}), timeout=DELIVERY_TIMEOUT).read(1024)
+                elif item[0] == "tcp":
+                    self._send_tcp(*item[1:])
                 elif item[0] == "mail":
                     self._send_mail(*item[1:])
                 elif item[0] == "set":
@@ -415,3 +453,6 @@ class Outputs:
         for cl, _, _ in self.publishers:
             cl.loop_stop()
             cl.disconnect()
+        for s in self.tcps:
+            if s["sock"]:
+                s["sock"].close()
