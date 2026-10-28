@@ -27,11 +27,13 @@ from .opcua_source import parse_node_id as parse_opcua_node
 from .snmp_source import SnmpSource, encode_oid
 from .sparkplug_source import SparkplugSource
 from .sql_source import SqlSource
+from . import file_source
+from .file_source import FileSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
 SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "dnp3", "bacnet", "opcua", "http_json",
-                "sql", "http_in", "calc", "system")
+                "sql", "http_in", "calc", "system", "file")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 # Every top-level setting a stored object of each kind may carry. A body with any other key is refused by name at
@@ -42,14 +44,14 @@ KNOWN_KEYS = {kind: set(keys.split()) for kind, keys in {
     "source": """type enabled read_roles heartbeat_seconds down_after default_tags default_unit tags unit folders
         creds prefix cmd_prefix auto_create group link framing retries max_read_bits max_read_regs max_write_regs
         timeout period backoff_max backoff_scale persistent contiguous_only multiple_writes_only monitor host port
-        community dnp3 bacnet opcua url headers token_file max_bytes ca path query max_age_days""",
+        community dnp3 bacnet opcua url headers token_file max_bytes ca path query max_age_days format""",
     "point": """source logging log_interval log_mode tolerance tags unit display_unit settable retention_days
         read_roles set_roles datatype detectors description eu_low eu_high set_min set_max decimals max_step confirm
         require_reason min_write_gap scan folder states suppress_when generator modbus snmp dnp3 bacnet opcua http
         sql scale calc""",
     "handler": """type min_level enabled scope url to from smtp creds on_clear escalate_after escalate_to groups
         subject body hour hours watchlist point value clear_value release_on_clear""",
-    "publisher": "type url creds resend prefix group node device points enabled",
+    "publisher": "type url creds resend prefix group node device points enabled host port tls",
     "watchlist": "tags points query name_like text_like read_roles owner",
     "maintenance": "enabled mode reason scope schedule active",
     "emailgroup": "addresses",
@@ -450,6 +452,8 @@ def validate_source(name, b):
         http_source.validate_source(b, add)
     elif b.get("type") == "sql":
         sql_source.validate_source(b, add)
+    elif b.get("type") == "file":
+        file_source.validate_source(b, add)
     elif b.get("type") == "http_in":
         if not isinstance(b.get("auto_create", False), bool):
             add("auto_create", "must be true or false")
@@ -505,8 +509,8 @@ def validate_point(name, b, store):
         add("datatype", "must be number or text")
     text = text == "text"
     if text:
-        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug", "snmp", "bacnet", "opcua"):
-            add("datatype", "text points are supported on virtual, http_in, mqtt, sparkplug, snmp, bacnet and opcua sources")
+        if src and src.get("type") not in ("virtual", "http_in", "mqtt", "sparkplug", "snmp", "bacnet", "opcua", "file"):
+            add("datatype", "text points are supported on virtual, http_in, mqtt, sparkplug, snmp, bacnet, opcua and file sources")
         if b.get("logging") == "INTERVAL":
             add("logging", "a text point is logged on change or always, not at an interval")
     dets = b.get("detectors", [])
@@ -590,7 +594,7 @@ def validate_point(name, b, store):
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
     if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp", "dnp3",
-                                                         "bacnet", "opcua"):
+                                                         "bacnet", "opcua", "file"):
         add("settable", "this source type is read-only")
     if src and src.get("type") == "calc":
         try:
@@ -694,8 +698,8 @@ def build_engine(store):
                     src.gens[n] = p.get("generator", {"kind": "walk"})
                     if n in held:
                         src.override[n] = held[n]
-            elif s["type"] in ("http_json", "sql"):
-                src = (HttpJsonSource if s["type"] == "http_json" else SqlSource)(s["name"], s)
+            elif s["type"] in ("http_json", "sql", "file"):
+                src = {"http_json": HttpJsonSource, "sql": SqlSource, "file": FileSource}[s["type"]](s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 eng.startable.append(src)
