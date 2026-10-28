@@ -100,6 +100,20 @@ Seven entries, each a cost or an unrun path the M1-M7 and hardening commits know
 | W6 | Never run on MySQL/MariaDB: the SQL console's byte caps and read-only path, the `performance_schema` and `sys` additions to `SECRET`, the atomic migration v11 (`s.atomic()` around the delete and re-insert) and the partial-backup cleanup. Only SQLite ran them | `durian/store.py:477-478` (`SECRET`), `:514-515` (console), `durian/migrations.py:77-90` (v11) | medium |
 | W7 | Dashboards accept unknown keys: `KNOWN_KEYS` has no `dashboard` kind and the validator list exempts it, so a typo in a dashboard is stored and ignored. The guard is per kind, not per source type: a source of one type still accepts another type's setting (`port` on a virtual source) | `durian/config.py:47-64` (`KNOWN_KEYS`), `durian/app.py:1470` (dashboard exemption) | low |
 
+### 5b. Left open by the safe-mode, spool, supervisor and executable work
+
+Seven entries, same severity scale.
+
+| # | Defect | Where | Severity |
+|---|---|---|---|
+| V1 | The Windows executable is unsigned, so SmartScreen warns on first run. The release workflow publishes `SHA256SUMS`, which proves the file matches the build, not who built it | `tools/build_exe.py:40-42` (digest only), `.github/workflows/release.yml` | medium |
+| V2 | `cryptography` is bundled into the executable (about 14.6 MB total) because `requirements.txt` mixes runtime and dev dependencies (it is there for `tools/make_cert.py`, `tools/mqtt_lab.py` and `tests/test_tls.py`); the server does not need it. A split into runtime and dev files would shrink the build | `requirements.txt:7`, `tools/build_exe.py:18-19` | low |
+| V3 | The Windows installer registers a startup scheduled task running `python -m durian supervise`, not a Services-panel entry (`sc.exe create` needs a service-aware binary), and it was never run on a machine. The systemd unit was not run either | `tools/service/install-windows-service.ps1:3-4`, `tools/service/durian.service` | medium |
+| V4 | The supervisor's SIGTERM path (stop the child, then exit) is untested end to end: the handler only sets an event, and the tests drive `run()` with their own event rather than a real signal | `durian/supervisor.py:149-152` | medium |
+| V5 | The spool covers history only. Events and alarm state the database refuses are not spooled, so a database outage can still lose them. It is bounded at 50 MB and drops the oldest segment (counted in `/api/health` `spool.dropped`) | `durian/spool.py:19` (`max_bytes`), `durian/app.py:503-510` (`_spool_pending`) | medium |
+| V6 | `/api/health` `ok` ignores the spool: rows waiting or dropped appear in the `spool` block but do not turn `ok` false, so a monitor watching only `ok` sees a healthy server while data is being held on disk or lost. | `durian/app.py:935,939-940` | medium |
+| V7 | The Linux build and the release workflow are unverified: only the Windows executable was built and smoke-tested (locally), and `release.yml` (tag `v*` publishes both binaries and `SHA256SUMS`) has not run on GitHub, so the matrix, the upload and the checksum step are untested until the first CI run | `.github/workflows/release.yml:22` (matrix), `tools/smoke_exe.py` | medium |
+
 U6 and U7 were closed on 2026-10-28: the twelve browser checks all run in CI, every one of them now
 exits 1 on a problem it did not provoke (each of the four that used to only prove it ran lists its
 own intentional 4xx requests and fails on anything else; `browser_dashboard`'s designer steps were
