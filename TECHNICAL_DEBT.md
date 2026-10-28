@@ -84,7 +84,7 @@ for a declared dependency). E5: the CI matrix now includes 3.14, and the full su
 | U11 | BACnet/IP source | An in-process fake device on a UDP socket; never a real device | medium |
 | U12 | OPC UA source | An in-process fake server; never a real server, and only SecurityPolicy None is implemented | medium |
 | U13 | eGauge, Haystack and POP3 sources (`durian/egauge_source.py:79`, `durian/haystack_source.py:37`, `durian/pop3_source.py:81`) | Fake servers only. eGauge parses the documented `inst` XML and Haystack the `read` op, the only parts checked against public docs; POP3 `starttls`/`ssl` (`pop3_source.py:85-88`) and Haystack authentication beyond a Bearer token were never run | medium |
-| U14 | LDAP sign-in (`durian/ldap.py:92`) | A fake directory over plain `ldap://` on localhost; `ldaps://` (`ldap.py:100`) never ran, and result codes 51/52 (busy/unavailable) count as a bad password (`ldap.py:110`) | medium |
+| U14 | LDAP sign-in (`durian/ldap.py:92`) | A fake directory over plain `ldap://` on localhost; `ldaps://` (`ldap.py:100`) never ran | medium |
 
 U6 and U7 were closed on 2026-10-28: the twelve browser checks all run in CI, every one of them now
 exits 1 on a problem it did not provoke (each of the four that used to only prove it ran lists its

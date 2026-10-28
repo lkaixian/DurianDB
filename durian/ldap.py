@@ -8,11 +8,13 @@ import socket
 import ssl
 import urllib.parse
 
+from .core import sentence
 from .oidc import ROLE, _localhost
 
 TIMEOUT = 8
 MAX_REPLY = 8192
 SETTINGS = ("url", "bind_template", "default_roles", "enabled")
+UNAVAILABLE = (51, 52, 53, 80, 81)  # busy, unavailable, unwilling to perform, other, server down
 LDAP_HASH = "ldap"  # stored in place of a password hash: such an account signs in by bind only (never matches a scrypt hash)
 
 
@@ -94,11 +96,15 @@ def bind(url, dn, password, timeout=TIMEOUT):
     an empty-password simple bind is an anonymous bind, which many servers accept (RFC 4513 section 5.1.2)."""
     if not (isinstance(password, str) and password and isinstance(dn, str) and dn):
         return False
+    try:
+        request = bind_request(dn, password)
+    except UnicodeEncodeError:  # a lone surrogate cannot be sent: a failed bind for this name, as for a local password
+        return False
     scheme, host, port = _target(url)
     try:
         with socket.create_connection((host, port), timeout) as raw:
             s = ssl.create_default_context().wrap_socket(raw, server_hostname=host) if scheme == "ldaps" else raw
-            s.sendall(bind_request(dn, password))
+            s.sendall(request)
             buf = b""
             while (code := parse_bind_response(buf)) is None:
                 chunk = s.recv(1024)
@@ -106,8 +112,10 @@ def bind(url, dn, password, timeout=TIMEOUT):
                     raise LDAPError("the directory closed the connection without answering")
                 buf += chunk
     except (OSError, ssl.SSLError) as ex:
-        raise LDAPError(f"the directory at {host} could not be reached: {ex.__class__.__name__}") from None
-    return code == 0  # ponytail: any non-zero resultCode is "wrong password"; busy/unavailable (51/52) should raise LDAPError instead
+        raise LDAPError(f"the directory at {host} could not be reached" + (f": {why}" if (why := sentence(ex)) else "")) from None
+    if code in UNAVAILABLE:  # not a verdict on the password, so it must not count toward a lockout
+        raise LDAPError(f"the directory at {host} is busy or unavailable, try again shortly")
+    return code == 0  # ponytail: any other non-zero resultCode is "wrong password"
 
 
 def validate_ldap(body, known_roles=None):

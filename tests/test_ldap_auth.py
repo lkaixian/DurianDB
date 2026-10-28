@@ -45,7 +45,7 @@ class Fake:
             _, ps, pe = tlv(data, ne)  # [0] simple password
             dn, pw = data[ns:ne].decode(), data[ps:pe].decode()
             self.seen.append((dn, pw))
-            code = 0 if (dn, pw) == (GOOD_DN, GOOD_PW) else 49
+            code = 0 if (dn, pw) == (GOOD_DN, GOOD_PW) else 51 if pw == "busy-pw" else 49
             op = b"\x0a\x01" + bytes([code]) + b"\x04\x00\x04\x00"
             body = b"\x02\x01\x01" + b"\x61" + L(len(op)) + op
             c.sendall(b"\x30" + L(len(body)) + body)
@@ -131,6 +131,16 @@ app.handle("DELETE", "/api/auth/ldap", {}, None, admin)
 fails(lambda: auth.login("dave", GOOD_PW), 401)
 assert len(fake.seen) == before
 
+# ---- a busy directory (resultCode 51) is a sentence, not a lockout
+app.handle("PUT", "/api/auth/ldap", {}, cfg, admin)
+e = fails(lambda: auth.login("frank", "busy-pw"), 502)
+assert store.failure("frank") is None and "busy" in str(e).lower(), (store.failure("frank"), str(e))
+
+# ---- a lone surrogate never reaches the network and counts as a wrong password
+before = len(fake.seen)
+fails(lambda: auth.login("grace", "pw-\ud800-x"), 401)
+assert len(fake.seen) == before and store.failure("grace")["attempts"] == 1
+
 # ---- an unreachable directory is a sentence, not a lockout
 dead = socket.socket()
 dead.bind(("127.0.0.1", 0))
@@ -139,5 +149,7 @@ dead.close()
 app.handle("PUT", "/api/auth/ldap", {}, {**cfg, "url": f"ldap://127.0.0.1:{port}"}, admin)
 fails(lambda: auth.login("erin", GOOD_PW), 502)
 assert store.failure("erin") is None
+e = fails(lambda: auth.login("erin", GOOD_PW), 502)
+assert "Error" not in str(e), str(e)
 
 print("ok")
