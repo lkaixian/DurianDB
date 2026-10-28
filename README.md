@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/brand/durian-logo.png" alt="DurianDB" width="520"></p>
+
 # DurianDB
 
 [![tests (3.12–3.14)](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-tests.yml?branch=main&label=tests%20%283.12%E2%80%933.14%29)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-tests.yml)
@@ -6,6 +8,21 @@
 [![rust core](https://img.shields.io/github/actions/workflow/status/lkaixian/DurianDB/ci-rust.yml?branch=main&label=rust%20core)](https://github.com/lkaixian/DurianDB/actions/workflows/ci-rust.yml)
 
 ![Feature stack](docs/feature-stack.svg)
+
+## A look at the console
+
+<table>
+<tr>
+<td align="center"><a href="docs/screenshots/overview.png"><img src="docs/screenshots/overview.png" alt="Overview"></a><br><sub>Overview: live points, alarms, set and release</sub></td>
+<td align="center"><a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" alt="Dashboard"></a><br><sub>A dashboard built from widgets</sub></td>
+<td align="center"><a href="docs/screenshots/designer.png"><img src="docs/screenshots/designer.png" alt="Dashboard designer"></a><br><sub>The drag-and-drop dashboard designer</sub></td>
+</tr>
+<tr>
+<td align="center"><a href="docs/screenshots/history.png"><img src="docs/screenshots/history.png" alt="History"></a><br><sub>History with rollups and alarm limits</sub></td>
+<td align="center"><a href="docs/screenshots/config-point.png"><img src="docs/screenshots/config-point.png" alt="Point configuration"></a><br><sub>Point configuration form</sub></td>
+<td align="center"><a href="docs/screenshots/alarms.png"><img src="docs/screenshots/alarms.png" alt="Alarms"></a><br><sub>Alarms: acknowledge, shelve, escalate</sub></td>
+</tr>
+</table>
 
 Each badge covers one workflow, and each workflow holds exactly one job, all triggered on every push to `main`:
 
