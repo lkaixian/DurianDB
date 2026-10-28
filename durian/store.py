@@ -511,7 +511,10 @@ class Store:
                 if self.kind == "mysql":
                     self.db.ping(reconnect=True)
                     cur = self.db.cursor()
-                    cur.execute("set session max_execution_time = %s", (seconds * 1000,))
+                    try:
+                        cur.execute("set session max_execution_time = %s", (seconds * 1000,))
+                    except Exception:  # MariaDB names it max_statement_time, in seconds
+                        cur.execute("set session max_statement_time = %s", (seconds,))
                     cur.execute("start transaction read only")
                     cur.execute(q.replace("%", "%%"))
                 else:

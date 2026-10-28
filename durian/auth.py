@@ -251,6 +251,8 @@ class Auth:
             except UnicodeEncodeError:  # a name the store cannot hold is a plain failure, counted under a printable key
                 usable, name = False, name.encode("utf-8", "replace").decode()
         user = self.store.user(name) if usable else None
+        if user and user["name"] != name:  # MySQL/MariaDB collations match names case-insensitively; accounts here are exact
+            user = None
         # LDAP only for a name with no local account, or an account an earlier LDAP sign-in created (marked LDAP_HASH)
         cfg = ldap_config(self.store) if usable and (not user or user["hash"] == LDAP_HASH) else None
         if cfg and not user:

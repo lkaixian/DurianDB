@@ -15,6 +15,7 @@ store = new_store()
 app = App(store)
 assert app.auth.bootstrap("sql-admin-password-1") is None
 store.add_user("viewer", hash_password("viewer-password-1"), ["user"])
+store.run("drop table if exists probe")
 store.ddl("create table if not exists probe(id {int}, name {key})")
 store.run("insert into probe(id, name) values (1, 'a')")
 for i in range(1500):
@@ -88,15 +89,16 @@ assert all(len(r["detail"]) <= 500 for r in log)
 sql(ADMIN, "select '" + "x" * 2000 + "'")
 assert max(len(r["detail"]) for r in store.audit_log() if r["action"] == "sql.query") <= 500
 
-# response size: blobs become hex, big cells are cut, a huge value fails as a sentence, total output is capped
-status, out = sql(ADMIN, "select zeroblob(4) as b")
-assert status == 200 and out["rows"] == [{"b": "00000000"}], (status, out)
-status, out = sql(ADMIN, "select hex(zeroblob(450000000)) as h")
-assert status == 400 and "error" in out, status
-status, out = sql(ADMIN, "select hex(zeroblob(40000)) as h from history")
-assert status == 200 and len(out["rows"][0]["h"]) == 65536 and out["truncated"] is True, (status, len(out.get("rows", [])))
-assert sum(len(r["h"]) for r in out["rows"]) <= 4_000_000 + 65536 and len(out["rows"]) < 100
-assert sql(ADMIN, "select 1 as one")[0] == 200  # the length limit was restored
-assert store.db.getlimit(__import__("sqlite3").SQLITE_LIMIT_LENGTH) > 100_000_000
+# response size: blobs become hex, big cells are cut, a huge value fails as a sentence, total output is capped (zeroblob and the length limit are SQLite's)
+if store.kind == "sqlite":
+    status, out = sql(ADMIN, "select zeroblob(4) as b")
+    assert status == 200 and out["rows"] == [{"b": "00000000"}], (status, out)
+    status, out = sql(ADMIN, "select hex(zeroblob(450000000)) as h")
+    assert status == 400 and "error" in out, status
+    status, out = sql(ADMIN, "select hex(zeroblob(40000)) as h from history")
+    assert status == 200 and len(out["rows"][0]["h"]) == 65536 and out["truncated"] is True, (status, len(out.get("rows", [])))
+    assert sum(len(r["h"]) for r in out["rows"]) <= 4_000_000 + 65536 and len(out["rows"]) < 100
+    assert sql(ADMIN, "select 1 as one")[0] == 200  # the length limit was restored
+    assert store.db.getlimit(__import__("sqlite3").SQLITE_LIMIT_LENGTH) > 100_000_000
 
 print("ok")

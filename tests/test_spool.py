@@ -9,6 +9,7 @@ from pathlib import Path  # noqa: E402
 from _support import new_store  # noqa: E402
 from durian.app import App  # noqa: E402
 from durian.spool import Spool  # noqa: E402
+from durian.store import Store  # noqa: E402
 
 admin = {"name": "admin", "roles": {"superadmin"}}
 tmp = Path(tempfile.mkdtemp())
@@ -90,6 +91,6 @@ app2.tick(3002)
 assert len(app2.pending) == 3
 
 # --- :memory: store has no spool
-assert App(new_store()).spool is None
+assert App(Store()).spool is None
 
 print("ok")
