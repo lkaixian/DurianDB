@@ -60,7 +60,11 @@ STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("inde
           "/account.js": ("account.js", "text/javascript; charset=utf-8"), "/overview.js": ("overview.js", "text/javascript; charset=utf-8"), "/point.js": ("point.js", "text/javascript; charset=utf-8"), "/history.js": ("history.js", "text/javascript; charset=utf-8"),
           "/alarms.js": ("alarms.js", "text/javascript; charset=utf-8"), "/reports.js": ("reports.js", "text/javascript; charset=utf-8"), "/config.js": ("config.js", "text/javascript; charset=utf-8"), "/users.js": ("users.js", "text/javascript; charset=utf-8"),
           "/palette.js": ("palette.js", "text/javascript; charset=utf-8"),
-          "/app.css": ("app.css", "text/css; charset=utf-8")}
+          "/app.css": ("app.css", "text/css; charset=utf-8"),
+          "/logo.svg": ("logo.svg", "image/svg+xml"), "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+          "/favicon.ico": ("favicon.ico", "image/x-icon"), "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png")}
+# status icons (dev, alpha, beta, notification, warning, error) for a build channel or a tab badge
+STATIC.update({f"/icons/{n}.ico": (f"icons/{n}.ico", "image/x-icon") for n in ("durian", "dev", "alpha", "beta", "notification", "warning", "error")})
 CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 COOKIE = "durian_session"
 MAX_BODY, MAX_IMPORT = 1_000_000, 5_000_000

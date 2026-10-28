@@ -28,7 +28,7 @@ main.enter{animation:fin var(--t) ease-out}
 /* top bar */
 header{position:sticky;top:0;z-index:30;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);min-height:var(--hh);padding:var(--s2) var(--s4);background:var(--bar);color:var(--bar-ink)}
 header :focus-visible{outline-color:var(--bar-ink)}
-h1{font-size:var(--fs-l);margin:0}
+h1{font-size:var(--fs-l);margin:0;display:flex;align-items:center;gap:var(--s2)}
 .ptitle{color:color-mix(in srgb,var(--bar-ink) 80%,transparent)}
 .ptitle:not(:empty)::before{content:"/";margin-right:var(--s2)}
 header .hdr{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s4);margin-left:auto}
