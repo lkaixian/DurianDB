@@ -591,10 +591,17 @@ class Store:
             out = sqlite3.connect(dest)
             try:
                 self.db.backup(out)
-                ok = out.execute("pragma integrity_check").fetchone()[0]
-            finally:
+            except BaseException:  # disk full or any other failure: no partial file may be listed as a backup
                 out.close()
+                Path(dest).unlink(missing_ok=True)
+                raise
+        ok = None  # the check only touches the copy, so the lock is already released
+        try:
+            ok = out.execute("pragma integrity_check").fetchone()[0]
+        finally:
+            out.close()
+            if ok != "ok":
+                Path(dest).unlink(missing_ok=True)
         if ok != "ok":
-            Path(dest).unlink(missing_ok=True)
             raise RuntimeError(f"backup failed its integrity check: {ok}")
         return Path(dest).stat().st_size

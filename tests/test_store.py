@@ -106,6 +106,24 @@ live.add_history([("p", float(i), float(i)) for i in range(1000)])
 size = live.backup_to(str(tmp / "copy.db"))
 copy = Store(str(tmp / "copy.db"))
 assert size > 0 and copy.history_stats()["rows"] == 1000 and copy.version() == live.version()
+import sqlite3 as _sq  # noqa: E402
+bad = tmp / "partial.db"
+real_db = live.db
+
+
+class Full:
+    def backup(self, out): raise _sq.OperationalError("database or disk is full")
+    def __getattr__(self, a): return getattr(real_db, a)
+
+
+live.db = Full()
+try:
+    live.backup_to(str(bad))
+    raise AssertionError("a failed backup must raise")
+except _sq.OperationalError:
+    pass
+live.db = real_db
+assert not bad.exists(), "a failed backup left a partial file"
 try:
     Store().backup_to(str(tmp / "x.db"))
     raise AssertionError("memory databases cannot be backed up")
