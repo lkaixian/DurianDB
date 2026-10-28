@@ -1558,6 +1558,8 @@ class App:
             start = float(query.get("from", end - float(query.get("hours", 24)) * 3600))
         except ValueError:
             raise ApiError(400, "from, to and hours are numbers")
+        if not (0 <= start <= 253402300799 and 0 <= end <= 253402300799):  # 1970..9999, also rejects nan/inf
+            raise ApiError(400, "from, to and hours are numbers in range")
         if not 0 < end - start <= 31 * 86400:
             raise ApiError(400, "the window must be positive and at most 31 days")
         pts = self.select_points(ident, query)

@@ -475,7 +475,7 @@ class Store:
 
     # ---- read-only console (superadmin): one select, never a table that holds a hash or a token
     SECRET = ("users", "api_tokens", "sessions", "auth_failures", "auth_last_step", "confirm_tokens", "objects",
-              "lockouts", "totp", "reset", "token", "hash", "sqlite_", "information_schema", "mysql", "settings")
+              "lockouts", "totp", "reset", "token", "hash", "sqlite_", "information_schema", "mysql", "performance_schema", "sys", "settings")
     REFUSED = ("pragma", "attach", "detach", "insert", "update", "delete", "drop", "create", "alter", "replace", "vacuum",
                "reindex", "into", "load_extension", "load_file", "sleep", "benchmark", "with", "call", "set", "lock")
 
@@ -516,6 +516,7 @@ class Store:
                     cur.execute(q.replace("%", "%%"))
                 else:
                     t0 = time.time()
+                    old_len = self.db.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, 1_000_000)  # max_length: no giant blob or string
                     self.db.execute("pragma query_only = on")
                     self.db.set_progress_handler(lambda: time.time() - t0 > seconds, 10000)
                     self.db.set_authorizer(self._console_auth)
@@ -531,7 +532,15 @@ class Store:
                     self.db.set_authorizer(None)
                     self.db.set_progress_handler(None, 0)
                     self.db.execute("pragma query_only = off")
-        return cols, [dict(zip(cols, r)) for r in rows[:limit]], len(rows) > limit
+                    self.db.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, old_len)
+        more, out, total = len(rows) > limit, [], 0
+        for r in rows[:limit]:
+            r = [c.hex() if isinstance(c, bytes) else c[:65536] if isinstance(c, str) else c for c in r]
+            total += sum(len(c) for c in r if isinstance(c, str))
+            if total > 4_000_000:  # cap the response, not just the row count
+                return cols, out, True
+            out.append(dict(zip(cols, r)))
+        return cols, out, more
 
     def _console_auth(self, action, a, b, db, trigger):
         if action == sqlite3.SQLITE_SELECT:

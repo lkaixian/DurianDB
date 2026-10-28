@@ -36,7 +36,7 @@ def _cell(ref, v, style=""):
         return ""
     if _is_num(v):
         return f'<c r="{ref}"{style}><v>{v!r}</v></c>'
-    return f'<c r="{ref}"{style} t="inlineStr"><is><t>{escape(_CTRL.sub("", str(v)))}</t></is></c>'
+    return f'<c r="{ref}"{style} t="inlineStr"><is><t>{escape(_CTRL.sub("", str(v).encode("utf-8", "replace").decode()))}</t></is></c>'
 
 
 def xlsx_bytes(header, rows):

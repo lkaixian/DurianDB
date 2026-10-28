@@ -12,7 +12,10 @@ def iso(ts):
     """UTC ISO-8601 to the whole second. A missing time is an empty cell, not the word None."""
     if ts is None:
         return ""
-    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (OverflowError, OSError, ValueError):  # outside 1970..9999 or not finite: an empty cell
+        return ""
 
 
 def iso_millis(ts):

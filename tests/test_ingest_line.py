@@ -65,6 +65,9 @@ assert [x["index"] for x in r["rejected"]] == [2, 3, 4, 5, 6, 7], ("refused by 1
 assert "unknown point" in r["rejected"][3]["reason"] and r["rejected"][3]["point"] == "missing.x", r
 assert "future" in r["rejected"][5]["reason"], ("the shared guards apply", r)
 
+s, r = line("tag v=1 " + "9" * 400 + f"\ntag v=1 {ns + 3000}")
+assert s == 200 and r["accepted"] == 1 and [x["index"] for x in r["rejected"]] == [1], ("400-digit timestamp is a rejected line, not a 500", s, r)
+
 s, r = line("garbage")
 assert s == 422 and r["accepted"] == 0 and r["rejected"][0]["index"] == 1, ("all bad is 422", s, r)
 

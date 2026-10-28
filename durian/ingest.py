@@ -122,7 +122,7 @@ def parse_line(text):
                 raise ValueError("expected: measurement[,tags] field=value[,...] [timestamp_ns]")
             ts = int(parts[2]) / 1e9 if len(parts) == 3 else None
             vals = [(_unesc(k), _line_value(v)) for k, v in fields]
-        except ValueError as e:
+        except (ValueError, OverflowError) as e:  # OverflowError: a timestamp too big for a float
             rejected.append({"index": n, "point": None, "reason": f"line {n}: {e}" if "expected" in str(e) else f"line {n}: bad field value or timestamp"})
             continue
         cands += [(meas if (k, len(vals)) == ("value", 1) else f"{meas}.{k}", v, ts, n, None) for k, v in vals]
