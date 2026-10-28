@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import ssl
+import sys
 import threading
 import time
 from http.cookies import SimpleCookie
@@ -25,7 +26,19 @@ from .maintenance import Raw
 from .store import Store
 
 ROOT = Path(__file__).resolve().parent.parent
-WEB = ROOT / "web"
+
+
+def paths():
+    """(web assets folder, data folder). Frozen (PyInstaller): assets from the bundle, data beside the executable.
+    DURIAN_HOME overrides the data folder either way."""
+    if getattr(sys, "frozen", False):
+        web, home = Path(sys._MEIPASS) / "web", Path(sys.executable).parent
+    else:
+        web, home = ROOT / "web", ROOT
+    return web, Path(os.environ["DURIAN_HOME"]) if os.environ.get("DURIAN_HOME") else home
+
+
+WEB = paths()[0]
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
           "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/dashboards.js": ("dashboards.js", "text/javascript; charset=utf-8"), "/admin.js": ("admin.js", "text/javascript; charset=utf-8"), "/forms.js": ("forms.js", "text/javascript; charset=utf-8"),
           "/account.js": ("account.js", "text/javascript; charset=utf-8"), "/overview.js": ("overview.js", "text/javascript; charset=utf-8"), "/point.js": ("point.js", "text/javascript; charset=utf-8"), "/history.js": ("history.js", "text/javascript; charset=utf-8"),
@@ -180,17 +193,21 @@ def make_server(host, port, cert=None, key=None):
     return httpd
 
 
-def main():
+def main(safe=False, host=None, port=None):
+    """safe (or DURIAN_SAFE=1): database, login and admin API only; no tick, no maintenance, no sources or publishers."""
     global app, TLS
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    host = os.environ.get("DURIAN_HOST", "127.0.0.1")
+    safe = safe or os.environ.get("DURIAN_SAFE") == "1"
+    home = paths()[1]
+    host = host or os.environ.get("DURIAN_HOST", "127.0.0.1")
     cert, key = os.environ.get("DURIAN_TLS_CERT"), os.environ.get("DURIAN_TLS_KEY")
     if cert and not key:
         raise SystemExit("DURIAN_TLS_CERT needs DURIAN_TLS_KEY")
     TLS = bool(cert)
-    store = Store(os.environ.get("DURIAN_DB", str(ROOT / "durian.db")))
-    seeded = seed(store, os.environ.get("DURIAN_MQTT_CREDS", ROOT / "lab" / "mqtt" / "creds.json"))
-    app = App(store, ROOT / "backups")
+    store = Store(os.environ.get("DURIAN_DB", str(home / "durian.db")))
+    seeded = seed(store, os.environ.get("DURIAN_MQTT_CREDS", ROOT / "lab" / "mqtt" / "creds.json")) if not safe else False
+    App.safe = safe
+    app = App(store, home / "backups")
     try:
         pw = app.auth.bootstrap(os.environ.get("DURIAN_ADMIN_PASSWORD"))
     except AuthError as ex:  # a weak DURIAN_ADMIN_PASSWORD is a sentence, not a stack trace
@@ -201,9 +218,12 @@ def main():
         print("Seeded demo configuration. Edit it under Config in the console.")
     tick = float(os.environ.get("DURIAN_TICK", 2))
     app.tick_seconds = tick  # the lease outlives three ticks, so a slow poll does not hand the tick to a second process
-    threading.Thread(target=run_ticks, args=(tick,), daemon=True).start()
-    threading.Thread(target=run_maintenance, daemon=True).start()
-    port = int(os.environ.get("DURIAN_PORT", 8765))
+    if safe:
+        print("SAFE MODE: nothing is being polled, published or backed up on schedule. Fix the configuration, then restart without --safe.")
+    else:
+        threading.Thread(target=run_ticks, args=(tick,), daemon=True).start()
+        threading.Thread(target=run_maintenance, daemon=True).start()
+    port = int(port or os.environ.get("DURIAN_PORT", 8765))
     httpd = make_server(host, port, cert, key)
     scheme = "https" if cert else "http"
     if not cert and host not in ("127.0.0.1", "::1", "localhost"):

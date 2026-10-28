@@ -21,7 +21,7 @@ from . import export, notes, pointcsv, units, windows
 from . import VERSION, BUILD, REPO
 from .config import (build_engine, resolve, roles_ok, unknown_keys, validate_maintenance, validate_point, validate_source,
                      validate_watchlist)
-from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_label
+from .core import SOURCE, Engine, Event, Level, Quality, alarm_state, sentence, state_label
 from . import docfmt
 from .correlate import MIN_PAIRS, best_lag, pearson, spearman
 from .csvfmt import csv_bytes, iso
@@ -90,7 +90,14 @@ def _diff(old, new):
     return " (" + "; ".join(ch)[:500] + ")" if ch else " (no change)"
 
 
+class _NoConfig:
+    def list(self, kind):
+        return []
+
+
 class App:
+    safe = False  # safe mode: reload builds an empty engine, so no source or publisher is built or started
+
     def __init__(self, store, backup_dir=None):
         self.store, self.auth = store, Auth(store)
         self.oidc = OIDC()  # SSO sign-in: discovery cache, pending states and ID-token checks (in-process like sessions)
@@ -129,8 +136,8 @@ class App:
             # Build everything that reads the store first: if that fails the old engine keeps running untouched.
             engine = outputs = None
             try:
-                engine = build_engine(self.store)
-                outputs = Outputs(self.store, self.scope_of, self.handler_write)
+                engine = Engine() if self.safe else build_engine(self.store)
+                outputs = Outputs(_NoConfig() if self.safe else self.store, self.scope_of, self.handler_write)
                 holds = {h["name"]: h for h in self.store.list("alarmhold")}
                 folders = {f["name"]: f for f in self.store.list("folder")}  # folder tags and unit, if any are configured
             except Exception:  # release what the half-built replacement opened (an MQTT source connects when built)
@@ -904,7 +911,7 @@ class App:
         if (method, a, b, c) == ("GET", "health", None, None):
             # The data plane's own state. A stalled loop is the one failure a console cannot otherwise see.
             faults = self.outputs.faults() if self.outputs else []
-            return 200, {"ok": self.tick_failures == 0 and not faults, "tick_failures": self.tick_failures, "tick_error": self.tick_error,
+            return 200, {"safe": self.safe, "ok": self.tick_failures == 0 and not faults, "tick_failures": self.tick_failures, "tick_error": self.tick_error,
                          "tick_ok_ts": self.tick_ok_ts, "buffered_samples": len(self.pending), "lost_samples": self.lost,
                          "unstored_events": len(self.unstored), "events_lost": self.events_lost, "failed_deliveries": self.outputs.failed if self.outputs else 0,
                          "internal_errors": self.internal_errors, "last_internal_error": self.last_internal_error,
