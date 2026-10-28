@@ -34,6 +34,7 @@ HEALTH = ("GET", "health", None, None)
 JOBS = ("GET", "jobs", N, None)
 POINTS = ("GET", "points", None, W)
 FORECAST = ("GET", "points", N, "forecast")
+BACKTEST = ("GET", "points", N, "backtest")
 BASELINE = ("GET", "points", N, "baseline")
 DRIFT = ("GET", "points", N, "drift")
 CORRELATE = ("GET", "points", N, "correlate")
@@ -41,6 +42,8 @@ RELATED = ("GET", "points", N, "related")
 SEASONAL = ("GET", "points", N, "seasonal")
 SCORE = ("GET", "points", N, "score")
 CHANGEPOINTS = ("GET", "points", N, "changepoints")
+MODEL = ("GET", "points", N, "model")
+RETRAIN = ("POST", "models", "retrain", W)
 POINT = ("GET", "points", N, None)
 NOTES = (("GET", "POST"), "notes", N, None)
 REPORTS = ("GET", "reports", "summary", W)
@@ -212,6 +215,10 @@ ROWS = [
     R(DRIFT, "GET", "/api/points/status-text/drift", anon=404, viewer=404, ops=400, admin=400),
     R(SEASONAL, "GET", "/api/points/boiler-temp/seasonal", anon=404, viewer=200, ops=404, admin=200),
     R(SEASONAL, "GET", "/api/points/status-text/seasonal", anon=404, viewer=404, ops=400, admin=400),
+    R(MODEL, "GET", "/api/points/boiler-temp/model", anon=404, viewer=200, ops=404, admin=200),
+    R(MODEL, "GET", "/api/points/status-text/model", anon=404, viewer=404, ops=200, admin=200),
+    R(BACKTEST, "GET", "/api/points/boiler-temp/backtest", anon=404, viewer=200, ops=404, admin=200),
+    R(BACKTEST, "GET", "/api/points/status-text/backtest", anon=404, viewer=404, ops=400, admin=400),
     R(SCORE, "GET", "/api/points/boiler-temp/score", anon=404, viewer=200, ops=404, admin=200),
     R(SCORE, "GET", "/api/points/status-text/score", anon=404, viewer=404, ops=400, admin=400),
     R(CHANGEPOINTS, "GET", "/api/points/boiler-temp/changepoints", anon=404, viewer=200, ops=404, admin=200),
@@ -294,6 +301,7 @@ ROWS = [
     R(USERS, "DELETE", "/api/users/probe-user", anon=401, viewer=403, ops=403, admin=200),
     R(OUTPUTS, "GET", "/api/outputs", anon=401, viewer=403, ops=403, admin=200),
     R(SQL, "POST", "/api/sql", {"query": "select 1"}, anon=401, viewer=403, ops=403, admin=200),
+    R(RETRAIN, "POST", "/api/models/retrain", {"point": "boiler-temp"}, anon=401, viewer=403, ops=403, admin=202),
     R(AUDIT, "GET", "/api/audit", anon=401, viewer=403, ops=403, admin=200),
     # sign-in through a provider: the status is public (the sign-in page asks before anyone is signed in),
     # but configuring it is administration and the block carries a client secret
@@ -396,6 +404,7 @@ assert READ["scope"] == "read" and WRITE["scope"] == "write" and INGEST_TOKEN["s
 ADMIN_ROUTES = [
     ("GET", "/api/users", None, {}), ("GET", "/api/config/point", None, {}),
     ("GET", "/api/audit", None, {}), ("POST", "/api/sql", {"query": "select 1"}, {}), ("GET", "/api/database", None, {}),
+    ("POST", "/api/models/retrain", None, {}),
     ("GET", "/api/database/exports", None, {}),
     ("GET", "/api/database/exports/durian-export-19700101-000000.zip", None, {}),
     ("GET", "/api/export", None, {}), ("GET", "/api/export/points", None, {}),

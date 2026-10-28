@@ -14,15 +14,16 @@ import threading
 import time
 from pathlib import Path
 
+from . import models
 from .core import sentence
 from .csvfmt import csv_bytes, iso_millis
 
 log = logging.getLogger("durian.maintenance")
 
 DEFAULTS = {"retention_days": 365, "purge_hour": 3, "backup_hour": -1, "backup_keep": 7,
-            "export_hour": -1, "export_keep": 7}
+            "export_hour": -1, "export_keep": 7, "models_hour": 2}
 LIMITS = {"retention_days": (0, 36500), "purge_hour": (0, 23), "backup_hour": (-1, 23), "backup_keep": (1, 365),
-          "export_hour": (-1, 23), "export_keep": (1, 365)}
+          "export_hour": (-1, 23), "export_keep": (1, 365), "models_hour": (-1, 23)}
 BACKUP_NAME = re.compile(r"^durian-\d{8}-\d{6}\.db$")
 EXPORT_NAME = re.compile(r"^durian-export-\d{8}-\d{6}\.zip$")
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "emailgroup", "maintenance", "dashboard")
@@ -188,6 +189,10 @@ class Maintenance:
         if self._export_thread is not None:
             self._exports.join()
 
+    def _retrain(self, now):
+        if not models.retrain_batch(self.store, now):
+            self.store.set_setting("last_models_day", None)  # unfinished: the next tick resumes from the cursor
+
     # ---- schedule: call once a minute
     def tick(self, now=None):
         now = now or time.time()
@@ -195,7 +200,8 @@ class Maintenance:
         s, today, did = self.settings(), local.strftime("%Y-%m-%d"), []
         jobs = (("purge", s["purge_hour"], lambda: self.purge(now)),
                 ("backup", s["backup_hour"], lambda: self.backup(now)),
-                ("export", s["export_hour"], lambda: self._queue_export(now)))
+                ("export", s["export_hour"], lambda: self._queue_export(now)),
+                ("models", s["models_hour"], lambda: self._retrain(now)))
         for what, hour, fn in jobs:
             last = self.store.get_setting(f"last_{what}_day")
             if hour >= 0 and local.hour >= hour and last != today and (what != "backup" or self.supported()):

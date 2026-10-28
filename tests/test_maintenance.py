@@ -71,7 +71,7 @@ assert call(mem, mem.auth.identity(mem.auth.login("admin", "admin-password-123")
 
 # ---- schedule: each job runs once per day, at or after its hour; a failure is not retried every minute
 import datetime as dt  # noqa: E402
-st.set_setting("purge_hour", 3); st.set_setting("backup_hour", 4)
+st.set_setting("purge_hour", 3); st.set_setting("backup_hour", 4); st.set_setting("models_hour", -1)
 at = lambda h, d=0: dt.datetime(2030, 6, 1 + d, h, 5).timestamp()
 assert app.maint.tick(at(2)) == [] and app.maint.tick(at(3)) == ["purge"] and app.maint.tick(at(3)) == []
 assert app.maint.tick(at(5)) == ["backup"] and app.maint.tick(at(23)) == []

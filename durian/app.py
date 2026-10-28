@@ -27,7 +27,8 @@ from .correlate import MIN_PAIRS, best_lag, pearson, spearman
 from .csvfmt import csv_bytes, iso
 from .dashboards import validate_dashboard
 from .changepoint import MAX_N as CHANGEPOINT_MAX_N, detect as detect_changes
-from . import seasonal
+from . import models, seasonal
+from . import backtest
 from .forecast import baseline as ewma_baseline, drift as baseline_drift, forecast as forecast_series
 from .ingest import HttpInSource, parse_line, parse_payload
 from .jobs import Jobs
@@ -40,7 +41,7 @@ from .store import ALL_ROLLUPS
 log = logging.getLogger("durian.app")
 
 KINDS = ("source", "point", "handler", "publisher", "watchlist", "emailgroup", "maintenance")
-ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import", "auth", "sql"}  # the routes below the superadmin guard
+ADMIN_AREAS = {"config", "users", "outputs", "audit", "tokens", "database", "export", "import", "auth", "sql", "models"}  # the routes below the superadmin guard
 ROUTE = re.compile(r"^/api/(?P<a>[a-z-]+)(?:/(?P<b>[^/]+))?(?:/(?P<c>[^/]+))?$")
 
 
@@ -542,10 +543,43 @@ class App:
                 f"bucket must give 1 to 2000 forecast points over {hours} h; it gives {steps}"}])
         if p.text:
             raise ApiError(400, "a text point has no numeric forecast")
+        method = q.get("method", "linear")
+        if method not in ("linear", "robust"):
+            raise ApiError(422, "validation failed", [{"property": "method", "message": "method must be linear or robust"}])
+        ahead = self._int_param(q, "ahead", steps, 1, 2000)
         history = self.store.series(point, time.time() - hours * 3600, bucket, "avg")
-        result = forecast_series([(r["ts"], r["value"]) for r in history], steps)
-        return 200, {"point": point, "unit": p.meta.get("unit", ""), "hours": hours, "bucket": bucket,
-                     "points": history, "forecast": result["items"], "note": result["note"]}
+        pairs = [(r["ts"], r["value"]) for r in history]
+        result = forecast_series(pairs, ahead)  # also supplies the thin/flat notes for the robust method
+        out = {"point": point, "unit": p.meta.get("unit", ""), "hours": hours, "bucket": bucket,
+               "points": history, "forecast": result["items"], "note": result["note"]}
+        if method == "robust":
+            out["method"] = method
+            if result["items"]:
+                rows = backtest.robust(pairs, [it["ts"] for it in result["items"]])
+                out["forecast"] = [{"ts": t, "value": v, "low": lo, "high": hi} for t, v, lo, hi in rows]
+        return 200, out
+
+    def backtest_view(self, ident, point, q):
+        """GET /api/points/<name>/backtest?hours=72&bucket=300&horizon=12&folds=5: how well each method forecast this point."""
+        p, _s = self.visible_points(ident).get(point, (None, None))
+        if p is None:
+            self._404("unknown point")
+        hours = self._int_param(q, "hours", 72, 6, 720)
+        bucket = self._int_param(q, "bucket", 300, 1, 86400)
+        horizon = self._int_param(q, "horizon", 12, 1, 200)
+        folds = self._int_param(q, "folds", 5, 1, 10)
+        steps = hours * 3600 // bucket
+        if not 1 <= steps <= 3000:
+            raise ApiError(422, "validation failed", [{"property": "bucket", "message":
+                f"bucket must give 1 to 3000 points over {hours} h; it gives {steps}"}])
+        if p.text:
+            raise ApiError(400, "a text point has no numeric backtest")
+        now = time.time()
+        history = self.store.series(point, now - hours * 3600, bucket, "avg")
+        res = backtest.run([(r["ts"], r["value"]) for r in history], horizon, folds, time.localtime(now).tm_gmtoff)
+        ranked = [(m["mae"], name) for name, m in res["methods"].items() if m["n"] >= horizon]
+        return 200, {"point": point, "unit": p.meta.get("unit", ""), "hours": hours, "bucket": bucket, "horizon": horizon,
+                     "folds": folds, "methods": res["methods"], "best": min(ranked)[1] if ranked else None, "note": res["note"]}
 
     def baseline_view(self, ident, point, q):
         """GET /api/points/<name>/baseline?window=200: an EWMA baseline over the last `window` good samples."""
@@ -655,7 +689,7 @@ class App:
         scored.sort(key=lambda e: (-abs(e["pearson"]), e["point"]))
         return 200, {"point": point, "hours": hours, "bucket": bucket, "related": scored[:top]}
 
-    def _seasonal_profile(self, ident, point, q):
+    def _seasonal_profile(self, ident, point, q, use_stored=False):
         """(point, days, profile, tz offset) for the seasonal routes. Hour-of-week is in the SERVER's local time.
 
         Reads at most days * 96 rows (60 days: 5760) as 15-minute averages: an hourly bucket would leave only
@@ -668,13 +702,17 @@ class App:
         if p.text:
             raise ApiError(400, "a text point has no numeric seasonal baseline")
         now = time.time()
+        if use_stored:  # the daily-trained profile, when it is under 8 days old and was built over the same window
+            m = models.get(self.store, point)
+            if m and m["window_days"] == days and not models.stale(m, now, 8 * 86400):
+                return p, days, models.profile(m), m["tz"], "stored"
         tz = time.localtime(now).tm_gmtoff
         history = self.store.series(point, now - days * 86400, 900, "avg")
-        return p, days, seasonal.profile([(r["ts"], r["value"]) for r in history], tz), tz
+        return p, days, seasonal.profile([(r["ts"], r["value"]) for r in history], tz), tz, "live"
 
     def seasonal_view(self, ident, point, q):
         """GET /api/points/<name>/seasonal?days=14: median and MAD per hour-of-week slot, thin slots left out."""
-        p, days, prof, _tz = self._seasonal_profile(ident, point, q)
+        p, days, prof, _tz, _src = self._seasonal_profile(ident, point, q)
         slots = [{"dow": d, "hour": h, **s} for (d, h), s in sorted(prof.items())]
         note = None if slots else f"no hour of the week has {seasonal.MIN_SLOT_SAMPLES} samples yet in the last {days} days"
         return 200, {"point": point, "unit": p.meta.get("unit", ""), "days": days, "slots": slots,
@@ -682,9 +720,9 @@ class App:
 
     def score_view(self, ident, point, q):
         """GET /api/points/<name>/score?days=14: the latest value against its own hour-of-week slot."""
-        p, days, prof, tz = self._seasonal_profile(ident, point, q)
+        p, days, prof, tz, src = self._seasonal_profile(ident, point, q, use_stored=True)
         last = self.store.recent(point, 1)
-        out = {"point": point, "days": days, "value": None, "expected": None, "z": None, "slot": None,
+        out = {"point": point, "days": days, "source": src, "value": None, "expected": None, "z": None, "slot": None,
                "verdict": "unknown", "note": "the point has no stored value yet"}
         if last:
             r = seasonal.score_against(prof, last[-1]["ts"], last[-1]["value"], tz)
@@ -806,6 +844,7 @@ class App:
         "export": "_api_admin_export",
         "import": "_api_admin_export",
         "sql": "_api_admin_sql",
+        "models": "_api_admin_models",
     }
 
     def handle(self, method, path, query, body, ident):
@@ -889,6 +928,8 @@ class App:
             return 200, [self.point_view(p, s) for p, s in self.select_points(ident, query).values()]
         if (method, a, c) == ("GET", "points", "forecast") and b:
             return self.forecast_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "backtest") and b:
+            return self.backtest_view(ident, b, query)
         if (method, a, c) == ("GET", "points", "baseline") and b:
             return self.baseline_view(ident, b, query)
         if (method, a, c) == ("GET", "points", "drift") and b:
@@ -901,6 +942,11 @@ class App:
             return self.seasonal_view(ident, b, query)
         if (method, a, c) == ("GET", "points", "score") and b:
             return self.score_view(ident, b, query)
+        if (method, a, c) == ("GET", "points", "model") and b:
+            if b not in self.visible_points(ident):
+                self._404("unknown point")
+            m = models.get(self.store, b)
+            return 200, {"point": b, "model": m, "note": None if m else "no model has been trained for this point yet"}
         if (method, a, c) == ("GET", "points", "changepoints") and b:
             return self.changepoints_view(ident, b, query)
         if (method, a, c) == ("GET", "points", None) and b:
@@ -1150,6 +1196,16 @@ class App:
             return self.export_retrieve(c, ident)
         if a == "database":
             return self.database(method, b, c, body, ident, query)
+
+    def _api_admin_models(self, method, a, b, c, query, body, ident):
+        if (method, a, b) == ("POST", "models", "retrain"):
+            point = body.get("point") if isinstance(body, dict) else None
+            if point is not None and self.store.get("point", point) is None:
+                self._404("unknown point")
+            names = [point] if point else [p["name"] for p in self.store.list("point")]
+            self.store.audit(ident["name"], "models.retrain", point or "all points")
+            jid = self.jobs.submit("retrain models", lambda: {"trained": sum(models.train(self.store, n, time.time()) is not None for n in names)}, ident["name"])
+            return 202, {"job": jid, "state": "running", "message": f"retraining is running; ask GET /api/jobs/{jid}"}
 
     def _api_admin_sql(self, method, a, b, c, query, body, ident):
         if (method, a, b) == ("POST", "sql", None):
@@ -1775,6 +1831,7 @@ class App:
                     if str(n.get("name", "")).startswith(name + "/"):
                         self.store.delete("note", n["name"])
                 self.pending = [r for r in self.pending if r[0] != name]
+                models.drop(self.store, name)
             self.store.audit(ident["name"], "config.delete", f"{kind}/{name}")
             self.load_windows() if kind == "maintenance" else self.reload()
             return 200, {"deleted": name}
