@@ -9,13 +9,22 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header>
-  <h1>DurianDB Console</h1>
-  <span class="hdr"><button type="button" id="snd" class="link" aria-pressed="false" hidden>Alarm sound: off</button> <a id="alarm-count" href="#alarms" hidden></a></span>
+  <button type="button" id="menu" aria-controls="nav" aria-expanded="false" hidden>Menu</button>
+  <h1>DurianDB</h1><span id="ptitle" class="ptitle"></span>
+  <span class="hdr">
+    <button type="button" id="cmdk" aria-keyshortcuts="Control+K" hidden>Search <kbd>Ctrl K</kbd></button>
+    <span id="conn" class="conn" role="status" hidden></span>
+    <button type="button" id="snd" class="link" aria-pressed="false" hidden>Alarm sound: off</button> <a id="alarm-count" class="ac" href="#alarms" hidden></a>
+    <button type="button" id="theme"></button>
+    <details id="acct" class="menu" hidden><summary></summary><div class="pop"><a href="#account">Account and security</a><a href="#about">About</a><button type="button" id="logout-menu">Log out</button><p id="ver"></p></div></details>
+  </span>
 </header>
+<div id="banner" role="alert" hidden></div>
 <div class="shell solo">
   <nav id="nav" aria-label="Sections"></nav>
   <main id="main" tabindex="-1"><p class="status">Loading console...</p></main>
 </div>
+<div id="toasts" role="status" aria-live="polite"></div>
 <noscript><p class="status err">The console needs JavaScript to show live data.</p></noscript>
 <script src="/dashboards.js"></script>
 <script src="/forms.js"></script>

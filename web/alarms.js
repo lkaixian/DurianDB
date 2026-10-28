@@ -15,7 +15,7 @@ function bindAlarmActions(box, refresh) {
       call = ["POST", `/api/alarms/${encodeURIComponent(d.shelve)}/shelve`, {reason, minutes}];
     } else if (d.unshelve) call = ["POST", `/api/alarms/${encodeURIComponent(d.unshelve)}/unshelve`, undefined];
     ev.target.disabled = true;
-    try { await api(...call); await refresh(); refreshAlarmCount(); } catch (e) { ev.target.disabled = false; showErr(e, box); }
+    try { await api(...call); toast(d.ack ? "Alarm acknowledged." : d.shelve ? "Alarm shelved." : "Alarm unshelved."); await refresh(); refreshAlarmCount(); } catch (e) { ev.target.disabled = false; toast(e.message, true); }
   });
 }
 
@@ -33,8 +33,9 @@ function bindSetForms(box) {
         res = await api("POST", url, {value, reason, confirm: res.confirm});
       }
       out.textContent = "sent";
+      toast(value === null ? `Released ${name}.` : `Sent ${value} to ${name}.`);
     }
-    catch (e) { out.textContent = e.message; }
+    catch (e) { out.textContent = e.message; toast(e.message, true); }
   });
 }
 
@@ -56,16 +57,16 @@ function bindAckAll(box, refresh) {
     const list = ids.split(",").map(Number);
     if (!confirm(`Acknowledge ${list.length} alarms? They are recorded as acknowledged by you.`)) return;
     ev.target.disabled = true;
-    try { await api("POST", "/api/events/ack-many", {ids: list}); await refresh(); refreshAlarmCount(); } catch (e) { ev.target.disabled = false; showErr(e, box); }
+    try { await api("POST", "/api/events/ack-many", {ids: list}); toast(`${list.length} alarms acknowledged.`); await refresh(); refreshAlarmCount(); } catch (e) { ev.target.disabled = false; toast(e.message, true); }
   });
 }
 
 function renderAlarms(evs) {
   const box = $("#alarms"), open = evs.filter(e => e.acked_ts == null).length;
   $("#al-count").textContent = evs.length ? `${open} unacknowledged of ${evs.length}` : "";
-  if (!evs.length) { box.className = "status"; box.textContent = "No alarms. One is raised when a point breaks a limit or stops reporting, and it stays here until someone acknowledges it."; return; }
+  if (!evs.length) { empty(box, "No alarms. One is raised when a point breaks a limit or stops reporting, and it stays here until someone acknowledges it.", "#alarms", "Open the alarm journal"); return; }
   box.className = "";
-  box.innerHTML = ackAllHtml(evs) + alarmTableHtml(evs);
+  setHtml(box, ackAllHtml(evs) + alarmTableHtml(evs));  // patched in place: a poll keeps focus, hover and scroll
 }
 
 function alarmTableHtml(evs, showPoint = true) {
@@ -101,8 +102,8 @@ function viewAlarms() {
     q.delete("limit"); q.delete("offset"); q.set("format", "csv");
     $("#aj-csv").href = "/api/events/search?" + q;
     const box = $("#aj-out");
-    box.className = r.items.length ? "" : "status";
-    box.innerHTML = r.items.length ? ackAllHtml(r.items) + alarmTableHtml(r.items) : "No alarms match. Widen the time range or clear the search.";
+    if (r.items.length) { box.className = ""; box.innerHTML = ackAllHtml(r.items) + alarmTableHtml(r.items); }
+    else empty(box, "No alarms match. Widen the time range or clear the search.");
     $("#aj-pager").hidden = r.total <= PAGE;
     $("#aj-newer").disabled = offset === 0;
     $("#aj-older").disabled = offset + PAGE >= r.total;
@@ -111,7 +112,8 @@ function viewAlarms() {
   };
   const reload = () => load().catch(e => showErr(e, $("#aj-out")));
   $("#aj").addEventListener("change", () => { offset = 0; reload(); });
-  $("#aj").addEventListener("input", e => { if (e.target.name === "q") { offset = 0; clearTimeout(viewAlarms.t); viewAlarms.t = setTimeout(reload, 300); } });
+  const later = debounce(reload, 300);
+  $("#aj").addEventListener("input", e => { if (e.target.name === "q") { offset = 0; later(); } });
   $("#aj").addEventListener("submit", e => e.preventDefault());
   $("#aj-newer").addEventListener("click", () => { offset = Math.max(0, offset - PAGE); reload(); });
   $("#aj-older").addEventListener("click", () => { offset += PAGE; reload(); });

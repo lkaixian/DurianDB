@@ -44,10 +44,10 @@ async function viewPoint(name) {
     if (p.hold?.kind === "shelved") notes.push(`Alarms shelved by ${p.hold.user} until ${fmt(p.hold.until)}: ${p.hold.reason}.`);
     current = p;
     $("#pd-top").className = "";
-    $("#pd-top").innerHTML = `<p class="pd-val num ${over ? "over" : ""}">${p.last == null ? "no value yet" : esc(p.text ?? fix(p, p.last))}<span class="u"> ${p.text == null ? esc(p.unit) : ""}</span></p>
+    setHtml($("#pd-top"), `<p class="pd-val num ${over ? "over" : ""}">${p.last == null ? "no value yet" : esc(p.text ?? fix(p, p.last))}<span class="u"> ${p.text == null ? esc(p.unit) : ""}</span></p>
       ${p.description ? `<p>${esc(p.description)}</p>` : ""}
       <p class="note">Source ${esc(p.source)} (${esc(p.source_type)}). Value time ${esc(when(p.last_ts))}, received ${esc(when(p.received))}.${Object.keys(p.tags).length ? " Tags: " + esc(Object.entries(p.tags).map(([k, v]) => k + ":" + v).join(", ")) + "." : ""}</p>
-      ${notes.map(n => `<p class="err">${esc(n)}</p>`).join("")}`;
+      ${notes.map(n => `<p class="err">${esc(n)}</p>`).join("")}`);
     const sig = JSON.stringify([p.settable, p.set_limits]);
     if (sig !== drawn) {  // keep what a person is typing: rebuild the form only when its rules change
       drawn = sig;
@@ -57,14 +57,14 @@ async function viewPoint(name) {
     const arg = d => d.kind === "STATE" ? (d.states || []).map(x => p.states?.[String(x)] ?? x).join(" or ") : d.kind === "RANGE" ? `${d.mode === "inside" ? "inside" : "outside"} ${d.low} to ${d.high}` : d.kind === "CHANGE" ? "" : d.kind === "TEXT" ? `${d.mode === "contains" ? "contains " : ""}${d.values.join(" or ")}` : d.kind === "CUSUM" ? `${d.target} (sum over ${d.threshold})` : d.kind === "ANOMALY" ? `${d.z_limit} sd of ${d.window}` : d.limit ?? d.per_second ?? d.seconds;
     const lim = p.detectors.map(d => `${d.kind === "RANGE" ? "" : kinds[d.kind] || d.kind} ${arg(d)}${["NO_UPDATE", "NO_CHANGE"].includes(d.kind) ? " s" : ["HIGH_LIMIT", "LOW_LIMIT", "RATE_OF_CHANGE"].includes(d.kind) && p.unit ? " " + p.unit : ""} (${String(d.level || "WARNING").toLowerCase()})`.trim());
     $("#pd-settings").className = "";
-    $("#pd-settings").innerHTML = `<dl class="kv"><dt>Alarms</dt><dd>${lim.length ? lim.map(esc).join("; ") : "none set"}</dd>
+    setHtml($("#pd-settings"), `<dl class="kv"><dt>Alarms</dt><dd>${lim.length ? lim.map(esc).join("; ") : "none set"}</dd>
       <dt>Engineering range</dt><dd>${p.eu.low == null && p.eu.high == null ? "not set" : `${p.eu.low ?? "any"} to ${p.eu.high ?? "any"}${p.unit ? " " + esc(p.unit) : ""}`}</dd>
       <dt>Decimals shown</dt><dd>${p.decimals ?? "as received"}</dd></dl>
-      ${isAdmin() ? `<p><a class="btn" href="#config/point/${q}">Edit settings</a></p>` : ""}`;
+      ${isAdmin() ? `<p><a class="btn" href="#config/point/${q}">Edit settings</a></p>` : ""}`);
     await drawNotes();
     const evs = await api("GET", `/api/events?point=${q}`);
     $("#pd-alarms").className = evs.length ? "" : "status";
-    $("#pd-alarms").innerHTML = evs.length ? alarmTableHtml(evs.slice(0, 20), false) : "No alarms recorded for this point.";
+    evs.length ? setHtml($("#pd-alarms"), alarmTableHtml(evs.slice(0, 20), false)) : empty($("#pd-alarms"), "No alarms recorded for this point.");
   }
   let fcData = null, fcFor = "", fcSeq = 0;  // kept for the life of this page: the forecast is fetched on open, never polled
   const chart = async (fresh = false) => {

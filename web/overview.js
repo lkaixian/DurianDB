@@ -23,17 +23,18 @@ function viewOverview() {
     const name = prompt("Name for this watch list (letters, digits, dot, dash, underscore):");
     if (!name) return;
     // A personal save is a static snapshot on purpose; a query personal list is API-only today (PUT /api/mylists with {"query": {...}}).
-    try { await api("PUT", `/api/mylists/${encodeURIComponent(name.trim())}`, {points: lastPts.map(p => p.name)}); $("#f-out").textContent = "saved"; await lists(name.trim()); ptSig = ""; refreshOverview().catch(showErr); }
+    try { await api("PUT", `/api/mylists/${encodeURIComponent(name.trim())}`, {points: lastPts.map(p => p.name)}); $("#f-out").textContent = "saved"; toast(`Saved watch list ${name.trim()}.`); await lists(name.trim()); ptSig = ""; refreshOverview().catch(showErr); }
     catch (e) { $("#f-out").textContent = e.message; }
   });
   $("#f-del")?.addEventListener("click", async () => {
     const name = $("#f-wl").value;
     if (!name || !confirm(`Delete your watch list ${name}?`)) return;
-    try { await api("DELETE", `/api/mylists/${encodeURIComponent(name)}`); $("#f-out").textContent = "deleted"; await lists(); ptSig = ""; refreshOverview().catch(showErr); }
+    try { await api("DELETE", `/api/mylists/${encodeURIComponent(name)}`); $("#f-out").textContent = "deleted"; toast(`Deleted watch list ${name}.`); await lists(); ptSig = ""; refreshOverview().catch(showErr); }
     catch (e) { $("#f-out").textContent = e.message; }
   });
   ptSig = "";
-  $("#filter").addEventListener("input", () => { if ($("#f-del")) $("#f-del").hidden = !($("#f-wl").selectedOptions[0]?.hasAttribute("data-mine")); ptSig = ""; refreshOverview().catch(showErr); });
+  const refilter = debounce(() => { ptSig = ""; refreshOverview().catch(showErr); });  // typing waits a beat; a menu choice acts at once
+  $("#filter").addEventListener("input", ev => { if ($("#f-del")) $("#f-del").hidden = !($("#f-wl").selectedOptions[0]?.hasAttribute("data-mine")); ev.target.tagName === "INPUT" ? refilter() : (ptSig = "", refreshOverview().catch(showErr)); });
   bindAlarmActions($("#alarms"), refreshOverview);
   bindAckAll($("#alarms"), refreshOverview);
   bindSetForms($("#points"));
@@ -50,7 +51,7 @@ async function refreshKpis() {
     ["Held now (shelved or suppressed)", k.held_now], ["Shelved points / out of service", `${k.shelved_points} / ${k.out_of_service_points}`],
     ["Most frequent", list(k.top_points, "alarms", "alarms")], ["Chattering (3+ in 10 minutes)", list(k.chattering_points, "periods", "periods")]];
   $("#kpis").className = "";
-  $("#kpis").innerHTML = `<table class="stack"><tbody>${rows.map(([n, v]) => `<tr><th scope="row">${n}</th><td class="num">${typeof v === "string" ? v : esc(String(v))}</td></tr>`).join("")}</tbody></table>`;
+  setHtml($("#kpis"), `<table class="stack"><tbody>${rows.map(([n, v]) => `<tr><th scope="row">${n}</th><td class="num">${typeof v === "string" ? v : esc(String(v))}</td></tr>`).join("")}</tbody></table>`);
 }
 
 let lastPts = [];  // what the overview is showing, for "save view"
@@ -76,7 +77,7 @@ function spark(h, lim) {
 let ptSig = "";
 function renderPoints(pts, filtered) {
   const box = $("#points");
-  if (!pts.length) { ptSig = ""; box.className = "status"; box.textContent = filtered ? "No points match this filter." : "No points you can see yet. An administrator adds them under Config."; return; }
+  if (!pts.length) { ptSig = ""; filtered ? empty(box, "No points match this filter. Clear a field above to see more.") : empty(box, "No points you can see yet." + (isAdmin() ? "" : " An administrator adds them under Config."), isAdmin() ? "#config" : "", "Add a point in Config"); return; }
   box.className = "";
   pts = [...pts].sort((a, b) => (a.folder || "\uffff").localeCompare(b.folder || "\uffff") || a.name.localeCompare(b.name));  // foldered points first, in folder order
   const sig = pts.map(p => p.name + (p.settable ? "*" : "") + "|" + (p.folder || "")).join();
