@@ -1,5 +1,6 @@
 """POP3 source: numbers parsed out of received e-mail, against an in-process fake POP3 server. Run: python tests/test_pop3_source.py"""
 import json
+import re
 import socket
 import sys
 import tempfile
@@ -9,9 +10,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from durian.app import ApiError, App  # noqa: E402
+from durian.pop3_source import Pop3Source  # noqa: E402
 from _support import new_store  # noqa: E402
 
 MAILS = {}      # uid -> raw message bytes, in arrival order
+SIZES = {}      # uid -> size the fake LISTs (a lying server)
 DELETED = []
 LOGINS = []
 
@@ -22,6 +25,15 @@ def serve(srv):
             c, _ = srv.accept()
         except OSError:
             return
+        try:
+            session(c)
+        except OSError:  # the client hung up on purpose (a message over max_bytes)
+            pass
+        c.close()
+
+
+def session(c):
+    if True:
         f = c.makefile("rwb")
         w = lambda s: (f.write(s.encode() + b"\r\n"), f.flush())
         w("+OK fake ready")
@@ -37,7 +49,7 @@ def serve(srv):
             elif cmd == "UIDL":
                 w("+OK"); [w(f"{i + 1} {u}") for i, u in enumerate(ids)]; w(".")
             elif cmd == "LIST":
-                w("+OK"); [w(f"{i + 1} {len(MAILS[u])}") for i, u in enumerate(ids)]; w(".")
+                w("+OK"); [w(f"{i + 1} {SIZES.get(u, len(MAILS[u]))}") for i, u in enumerate(ids)]; w(".")
             elif cmd == "RETR":
                 w("+OK"); f.write(MAILS[ids[int(arg) - 1]] + b"\r\n.\r\n"); f.flush()
             elif cmd == "DELE":
@@ -46,7 +58,6 @@ def serve(srv):
                 w("+OK bye"); break
             else:
                 w("-ERR what")
-        c.close()
 
 
 srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(5)
@@ -92,6 +103,24 @@ assert "pattern" in props(put("point", "z", {"source": "m", "pattern": "(" + "a"
 for evil in (r"(a+)+(\d)", r"((\d)*)+", r"(\d+\s*)*x(\d)", r"(.*)*(\d)"):
     assert "pattern" in props(put("point", "z", {"source": "m", "pattern": evil})), evil
 assert "where" in props(put("point", "z", {"source": "m", "pattern": "(1)", "where": "header"}))
+# a regex timeout is impossible in stdlib, so the accepted subset itself must be safe
+for evil in (r"(\d|\d)+x(\d)", r"(\d+)\d*\d*\d*\d*x", r"(.*).*.*.*.*X", r"(a|aa)+$(\d)", r"(\d)\1", r"(?=a)(\d)", r"(?<!a)(\d)", r"(\d+)\s*\d*\s*"):
+    assert "pattern" in props(put("point", "z", {"source": "m", "pattern": evil})), evil
+import durian.pop3_source as ps  # noqa: E402
+hostile = ["1" * 20000, " " * 20000, "1 " * 10000, "Temp:" + " " * 20000, "-" + "1." * 10000]
+for ok in (r"Temp:\s?([-+]?\d+(?:\.\d+)?)", r"(\d+)\s*kW", r"([-+]?\d+\.?\d*)", r"(\w+)=",r"Temp=(-?\d+(?:\.\d+)?)"):
+    assert put("point", "z", {"source": "m", "pattern": ok})[0] == 200, ok
+    for h in hostile:
+        t0 = time.perf_counter(); re.search(ok, h[:ps.MAX_TEXT]); dt = time.perf_counter() - t0
+        assert dt < 0.1, (ok, len(h), dt)
+call("DELETE", "/api/config/point/z")
+big = Pop3Source._texts(b"Subject: " + b"1" * 30000 + b"\r\n\r\n" + b"2" * 30000)
+assert len(big["subject"]) <= 2000 and len(big["body"]) <= 2000, "the matcher is only handed a short prefix"
+# security: ssl unless the host is this machine
+assert "security" in props(put("source", "x", {**cfg, "host": "mail.example.com", "security": "none"}))
+assert "security" not in props(put("source", "x", {k: v for k, v in cfg.items() if k != "security"} | {"host": "mail.example.com"})), "default is ssl"
+assert "security" not in props(put("source", "x", {**cfg, "host": "mail.example.com", "security": "starttls"}))
+call("DELETE", "/api/config/source/x")
 
 # ---- reading: newest matching message wins; non-finite and non-matching mail ignored
 mail("u1", "Temp=10.5"); mail("u2", "hello"); mail("u3", "Temp=21.5", "pressure: 7"); mail("u4", "Temp=nan")
@@ -115,6 +144,14 @@ assert ps.MAX_MESSAGES <= 100
 mail("u6", "Temp=99", "x" * 200000)  # over max_bytes: skipped, not read
 src.cycle(); app.tick(time.time() + 4)
 assert last()["t"] == 30.0, last()
+
+# ---- a server that lies in LIST: bytes are counted as they arrive and the message is dropped, not buffered
+mail("u8", "Temp=1", ("y" * 70 + "\n") * 4000); SIZES["u8"] = 50
+src.next_try = 0; src.cycle()
+assert src.connected is False and "max_bytes" in src.error, src.error
+del MAILS["u8"]
+src.next_try = 0; src.cycle()
+assert src.connected, ("the oversized message is marked seen, so it does not wedge the source", src.error)
 
 # ---- a RETR that times out does not lose the message: it is fetched again next cycle
 mail("u7", "Temp=77")

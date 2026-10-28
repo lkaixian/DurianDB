@@ -2,7 +2,7 @@
 newest first, and a point takes the first capture of its `pattern` (one group) in the Subject or body of the newest message that has one.
 
 Mail is only deleted from the server when the source says `delete: true`. Patterns are checked at save (length, one group,
-no repeat inside a repeat) and matched against capped text.
+a safe subset, see _unsafe) and matched against the first MAX_TEXT characters.
 """
 import email
 import email.policy
@@ -15,26 +15,37 @@ from pathlib import Path
 from re import _parser as sre  # nested-repeat check walks the parsed pattern
 
 from .core import sentence
+from .oidc import _localhost
 from .polled import PolledSource, number, scale
 
-MAX_MESSAGES, MAX_TEXT, MAX_PATTERN = 20, 20000, 200
-SECURITY = ("none", "starttls", "ssl")
+MAX_MESSAGES, MAX_TEXT, MAX_PATTERN, MAX_UNBOUNDED = 20, 2000, 200, 2  # MAX_TEXT: the prefix of Subject/body a pattern is run on
+SECURITY = ("ssl", "starttls", "none")
 _REPEATS = (sre.MAX_REPEAT, sre.MIN_REPEAT)
+_BANNED = (sre.GROUPREF, sre.GROUPREF_EXISTS, sre.ASSERT, sre.ASSERT_NOT)
 
 
-def _nested(node, inside=False):
-    """True when a repeat that can run more than once sits inside another such repeat (the shape of catastrophic backtracking)."""
+def _ops(node):
+    """Every (op, args) in a parsed pattern, nested ones included."""
     for op, av in node:
-        if op in _REPEATS:
-            many = av[1] > 1
-            if (many and inside) or _nested(av[2], inside or many):
-                return True
-            continue
+        yield op, av
         for a in av if isinstance(av, (tuple, list)) else (av,):
             for sub in a if isinstance(a, list) else (a,):
-                if isinstance(sub, sre.SubPattern) and _nested(sub, inside):
-                    return True
-    return False
+                if isinstance(sub, sre.SubPattern):
+                    yield from _ops(sub)
+
+
+def _unsafe(tree):
+    """Why a pattern is refused, or None. ponytail: a conservative subset, because stdlib re has no timeout and a bad pattern holds the GIL.
+    At most MAX_UNBOUNDED unbounded repeats, no alternation or repeat inside a repeat that can run twice, no backreference or lookaround.
+    Ceiling: two unbounded repeats are quadratic at worst, which MAX_TEXT keeps to milliseconds. Raise either only with a new timing test."""
+    ops = list(_ops(tree))
+    if any(op in _BANNED for op, _ in ops):
+        return "backreferences and lookarounds are not allowed"
+    if sum(op in _REPEATS and av[1] == sre.MAXREPEAT for op, av in ops) > MAX_UNBOUNDED:
+        return f"use at most {MAX_UNBOUNDED} open-ended repeats (*, + or {{n,}})"
+    if any(op in _REPEATS and av[1] > 1 and any(o in _REPEATS + (sre.BRANCH,) for o, _ in _ops(av[2])) for op, av in ops):
+        return "a repeated group cannot contain a | or another repeat, such as (a+)+ or (a|b)*"
+    return None
 
 
 def validate_source(b, add):
@@ -42,8 +53,10 @@ def validate_source(b, add):
         add("host", "give the mail server's host name")
     if "port" in b and not (isinstance(b["port"], int) and not isinstance(b["port"], bool) and 1 <= b["port"] <= 65535):
         add("port", "must be a whole number from 1 to 65535")
-    if b.get("security", "none") not in SECURITY:
+    if b.get("security", "ssl") not in SECURITY:
         add("security", f"must be one of {', '.join(SECURITY)}")
+    elif b.get("security") == "none" and not _localhost(b.get("host")):
+        add("security", "none is allowed only for localhost; use ssl or starttls")
     if not (isinstance(b.get("creds"), str) and Path(b["creds"]).is_file()):
         add("creds", "must be the path of a JSON file with user and password")
     if not isinstance(b.get("delete", False), bool):
@@ -69,8 +82,28 @@ def validate_point(b, add):
         return
     if rx.groups != 1:
         add("pattern", "must have exactly one capture group around the number")
-    elif _nested(tree):
-        add("pattern", "a repeat inside a repeat, such as (a+)+, can hang the matcher; write it without nesting")
+    elif why := _unsafe(tree):
+        add("pattern", f"{why}; a pattern that can hang the matcher is refused")
+
+
+class _TooBig(ValueError):
+    pass
+
+
+class _Capped:
+    """The connection's reader, counting bytes as they arrive so a server that lies in LIST cannot make a RETR fill memory."""
+    def __init__(self, f):
+        self.f, self.left = f, float("inf")
+
+    def readline(self, n=-1):
+        line = self.f.readline(n)
+        self.left -= len(line)
+        if self.left < 0:
+            raise _TooBig("a message was larger than max_bytes and was skipped")
+        return line
+
+    def __getattr__(self, name):
+        return getattr(self.f, name)
 
 
 class Pop3Source(PolledSource):
@@ -80,12 +113,13 @@ class Pop3Source(PolledSource):
 
     def _connect(self):
         c, t = self.cfg, self.cfg.get("timeout", 10.0)
-        host, sec = c["host"], c.get("security", "none")
+        host, sec = c["host"], c.get("security", "ssl")
         if sec == "ssl":
             return poplib.POP3_SSL(host, c.get("port", 995), timeout=t, context=ssl.create_default_context())
         conn = poplib.POP3(host, c.get("port", 110), timeout=t)
         if sec == "starttls":
             conn.stls(context=ssl.create_default_context())
+        conn.file = _Capped(conn.file)
         return conn
 
     @staticmethod
@@ -118,7 +152,13 @@ class Pop3Source(PolledSource):
             for n in reversed(new):  # newest first, so the first match per point wins
                 if sizes.get(n, 0) > limit:
                     continue
-                texts = self._texts(b"\n".join(conn.retr(n)[1]))
+                conn.file.left = limit
+                try:
+                    raw = conn.retr(n)[1]
+                except _TooBig:
+                    self.seen.add(uids[n - 1])  # skipped for good, or the same lie would fail every cycle
+                    raise
+                texts = self._texts(b"\n".join(raw))
                 self.seen.add(uids[n - 1])  # only after the retr: a timeout leaves the message to be fetched next cycle
                 for p in self.points.values():
                     m = p.name not in found and re.search(p.meta["pattern"], texts[p.meta.get("where", "subject")])
