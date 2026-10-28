@@ -22,6 +22,7 @@ from .config import (build_engine, resolve, roles_ok, unknown_keys, validate_mai
                      validate_watchlist)
 from .core import SOURCE, Event, Level, Quality, alarm_state, sentence, state_label
 from .csvfmt import csv_bytes, iso
+from . import docfmt
 from .dashboards import validate_dashboard
 from .forecast import baseline as ewma_baseline, drift as baseline_drift, forecast as forecast_series
 from .ingest import HttpInSource, parse_line, parse_payload
@@ -1401,13 +1402,17 @@ class App:
                           "min": r["lo"], "max": r["hi"], "avg": r["mean"], "first": r.get("first"), "last": r.get("last"),
                           "bad_samples": r["bad"], "alarms": alarms.get(n, 0)})
         doc = {"from": start, "to": end, "items": items}
-        if query.get("format") != "csv":
+        fmt = query.get("format")
+        if fmt not in ("csv", "xlsx", "pdf"):
             return 200, doc
-        return 200, Raw(csv_bytes(
-            ["point", "unit", "description", "samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms", "from", "to"],
-            ([i["point"], i["unit"], i["description"], i["samples"], *(("" if i[k] is None else repr(float(i[k]))) for k in ("min", "max", "avg", "first", "last")),
-              i["bad_samples"], i["alarms"], iso(start), iso(end)] for i in items)),
-            "text/csv; charset=utf-8", "report.csv")
+        header = ["point", "unit", "description", "samples", "min", "max", "avg", "first", "last", "bad_samples", "alarms", "from", "to"]
+        rows = [[i["point"], i["unit"], i["description"], i["samples"], *(None if i[k] is None else float(i[k]) for k in ("min", "max", "avg", "first", "last")),
+                 i["bad_samples"], i["alarms"], iso(start), iso(end)] for i in items]
+        if fmt == "xlsx":
+            return 200, Raw(docfmt.xlsx_bytes(header, rows), docfmt.XLSX_TYPE, "report.xlsx")
+        if fmt == "pdf":
+            return 200, Raw(docfmt.pdf_bytes(f"DurianDB report {iso(start)} to {iso(end)}", header, rows), "application/pdf", "report.pdf")
+        return 200, Raw(csv_bytes(header, rows), "text/csv; charset=utf-8", "report.csv")
 
     def history_csv(self, ident, query):
         point = query.get("point")
