@@ -114,12 +114,12 @@ class Pop3Source(PolledSource):
                 raise ValueError("the mail server refused the login or the request") from e
             self.seen &= set(uids)  # forget mail that has left the mailbox
             new = [n for n, u in enumerate(uids, 1) if u not in self.seen][-MAX_MESSAGES:]  # ponytail: older new mail beyond the cap is skipped
-            self.seen.update(uids)
             limit, found, rejected = self.cfg.get("max_bytes", 100000), {}, []
             for n in reversed(new):  # newest first, so the first match per point wins
                 if sizes.get(n, 0) > limit:
                     continue
                 texts = self._texts(b"\n".join(conn.retr(n)[1]))
+                self.seen.add(uids[n - 1])  # only after the retr: a timeout leaves the message to be fetched next cycle
                 for p in self.points.values():
                     m = p.name not in found and re.search(p.meta["pattern"], texts[p.meta.get("where", "subject")])
                     if m:

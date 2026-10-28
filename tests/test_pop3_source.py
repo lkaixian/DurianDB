@@ -116,6 +116,24 @@ mail("u6", "Temp=99", "x" * 200000)  # over max_bytes: skipped, not read
 src.cycle(); app.tick(time.time() + 4)
 assert last()["t"] == 30.0, last()
 
+# ---- a RETR that times out does not lose the message: it is fetched again next cycle
+mail("u7", "Temp=77")
+real_connect = src._connect
+
+
+class Flaky:
+    def __init__(self, c): self.c = c
+    def retr(self, n): raise TimeoutError("timed out")
+    def __getattr__(self, a): return getattr(self.c, a)
+
+
+src._connect = lambda: Flaky(real_connect())
+src.next_try = 0; src.cycle()
+assert src.connected is False, "the timeout should mark the source down"
+src._connect = real_connect
+src.next_try = 0; src.cycle(); app.tick(time.time() + 5)
+assert last()["t"] == 77.0, last()
+
 # ---- delete only when asked
 assert put("source", "m", {**cfg, "delete": True})[0] == 200
 src = next(s for s in app.engine.sources if s.name == "m")
