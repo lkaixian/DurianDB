@@ -159,6 +159,18 @@ await save();
 const tplCfg = await ev(`fetch('/api/config/publisher/spark-tpl').then(r=>r.json())`);
 console.log("sparkplug from template:", JSON.stringify({type: tplCfg?.type, group: tplCfg?.group, node: tplCfg?.node, device: tplCfg?.device}));
 if (tplCfg?.type !== "sparkplug" || tplCfg?.group !== "Plant" || tplCfg?.node !== "edge-tpl" || tplCfg?.device !== "plc-9") { console.log("FAIL: a publisher started from the Sparkplug template saved the wrong type or ids"); process.exit(1); }
+// 12. a `file` source (durian/file_source.py) is created through the form and read back from the API
+await go("#config/source/_new");
+await ev(`document.querySelector('#ed').name.value='file-src'`);
+const fileTpl = await ev(`(()=>{const s=document.querySelector('#tpl');if(!s)return 'no dropdown';const o=[...s.options].find(o=>/^Text file/.test(o.textContent));if(!o)return 'missing';s.value=o.value;s.dispatchEvent(new Event('change',{bubbles:true}));return 'ok'})()`);
+await sleep(400);
+const filePath = await set("path", "values.txt");
+console.log("file template:", fileTpl, "| path field:", filePath);
+if (fileTpl !== "ok" || filePath !== "ok") { console.log("FAIL: the source form has no file type (Start from entry or path field)"); process.exit(1); }
+await save();
+const fileCfg = await ev(`fetch('/api/config/source/file-src').then(r=>r.json())`);
+console.log("stored file source:", JSON.stringify({type: fileCfg?.type, path: fileCfg?.path}));
+if (fileCfg?.type !== "file" || fileCfg?.path !== "values.txt") { console.log("FAIL: the saved file source did not keep type/path from the form"); process.exit(1); }
 // mobile
 await send("Emulation.setDeviceMetricsOverride", {width: 390, height: 800, deviceScaleFactor: 2, mobile: true});
 await sleep(500); console.log("mobile overflow:", await ev(`document.documentElement.scrollWidth>innerWidth`)); await shot("5-mobile");

@@ -76,6 +76,10 @@ const SOURCE_GROUPS = {
     F("path", "Database file", "text", {hint: "Opened read-only."}),
     F("query", "Query", "textarea", {hint: "One SELECT returning a key column and a number column."}),
     F("period", "Run every (seconds)", "number"), F("timeout", "Timeout (seconds)", "number")]}],
+  file: () => [{title: "Text file", fields: [
+    F("path", "File", "text", {hint: "A local file of name=value lines, read every period."}),
+    F("format", "Format", "select", {optional: true, options: opts("lines")}),
+    F("period", "Read every (seconds)", "number", {optional: true, hint: "1 to 86400."})]}],
   http_in: () => [{title: "Pushed values", fields: [
     F("auto_create", "Create points for new names", "check", {hint: "Off = only points you added accept values."}),
     F("max_age_days", "Oldest accepted timestamp (days)", "int")]}],
