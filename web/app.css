@@ -284,6 +284,34 @@ h3.fold{grid-column:1/-1;margin:18px 0 0;padding-bottom:4px;border-bottom:1px so
 .dgrid.design{display:grid}  /* the canvas stays a grid on a phone, or positions would mean nothing */
 .phead{align-items:center;gap:6px}.phead h3{flex:1;margin:0}
 .hit .x{position:absolute;right:0;top:0;width:28px;height:28px;padding:0;line-height:1;background:var(--accent);color:var(--paper);border:0;font-size:1.2rem;cursor:pointer}
+
+/* ---- sign-in and account (web/account.js) */
+.login form{gap:6px}.login form>label{margin-top:8px}.login form>.primary{margin-top:10px}
+.pwrow{display:flex;gap:var(--s2)}.pwrow input{flex:1;min-width:0}
+.msg{min-height:1.5em;margin:6px 0 0}  /* reserved, so an error does not move the button */
+.codeset{display:flex;flex-direction:column;gap:6px;margin-top:8px;animation:rise .25s ease-out}
+@keyframes rise{from{opacity:0;transform:translateY(-6px)}}
+.lbl{font-size:.9rem;font-weight:600}
+.code{display:flex;gap:var(--s2);position:relative}
+.code .dg{width:100%;min-width:0;max-width:3.2rem;height:52px;padding:0;text-align:center;font:600 1.4rem var(--mono)}
+.acct{max-width:40rem}
+.acct .card{background:var(--field);border:1px solid var(--rule);border-radius:var(--r2);padding:var(--s4) var(--s5);margin:var(--s4) 0}
+.acct .card h3{margin:0}
+.stack{display:flex;flex-direction:column;gap:var(--s3);align-items:flex-start}.stack label{display:flex;flex-direction:column;gap:4px;font-weight:600;font-size:.9rem}
+.chead{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);margin-bottom:var(--s2)}
+.chip{padding:2px 12px;border-radius:999px;border:1px solid var(--line);font-size:.85rem;font-weight:700;color:var(--muted)}
+.chip.on{border-color:var(--ok);color:var(--ok)}
+.steps{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s4);list-style:none;margin:var(--s3) 0;padding:0;font-size:.9rem;color:var(--muted)}
+.steps .n{display:inline-block;min-width:1.6em;height:1.6em;line-height:1.6em;text-align:center;border-radius:50%;border:1px solid var(--line)}
+.steps [aria-current=step]{color:var(--ink);font-weight:700}
+.steps [aria-current=step] .n{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.steps .past .n{border-color:var(--ok);color:var(--ok)}
+.key{display:flex;gap:var(--s2);align-items:stretch;flex-wrap:wrap}
+.key code{flex:1;min-width:12rem;padding:var(--s3);border:1px solid var(--line);border-radius:var(--r);background:var(--paper);font:600 1.05rem var(--mono);letter-spacing:.06em;word-break:break-all;user-select:all}
+.actions{display:flex;gap:var(--s2);flex-wrap:wrap}
+.off summary{cursor:pointer;min-height:32px}.off .warn{margin:0;color:var(--accent);font-weight:600}
+#mfa h4{margin:var(--s3) 0 var(--s2)}#mfa-done:focus-visible,#mfa h4:focus-visible{outline-offset:4px}
+
 /* ---- command palette (web/palette.js) */
 #cp{position:fixed;top:12vh;margin:0 auto;width:min(40rem,calc(100vw - 2*var(--s4)));max-height:70vh;padding:0;border:1px solid var(--rule);border-radius:var(--r2);background:var(--field);color:var(--ink);box-shadow:var(--shadow);overflow:hidden;opacity:0;transform:scale(.97);transition:opacity .12s ease-out,transform .12s ease-out}
 #cp[open]{display:flex;flex-direction:column}
