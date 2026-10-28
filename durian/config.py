@@ -29,11 +29,17 @@ from .sparkplug_source import SparkplugSource
 from .sql_source import SqlSource
 from . import file_source
 from .file_source import FileSource
+from . import pop3_source
+from .pop3_source import Pop3Source
+from . import egauge_source
+from .egauge_source import EgaugeSource
+from . import haystack_source
+from .haystack_source import HaystackSource
 
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAX_TEXT = 255
 SOURCE_TYPES = ("virtual", "mqtt", "sparkplug", "modbus", "snmp", "dnp3", "bacnet", "opcua", "http_json",
-                "sql", "http_in", "calc", "system", "file")
+                "sql", "http_in", "calc", "system", "file", "haystack", "egauge", "pop3")
 PARITY, BAUDS = ("N", "E", "O"), (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 
 # Every top-level setting a stored object of each kind may carry. A body with any other key is refused by name at
@@ -44,11 +50,11 @@ KNOWN_KEYS = {kind: set(keys.split()) for kind, keys in {
     "source": """type enabled read_roles heartbeat_seconds down_after default_tags default_unit tags unit folders
         creds prefix cmd_prefix auto_create group link framing retries max_read_bits max_read_regs max_write_regs
         timeout period backoff_max backoff_scale persistent contiguous_only multiple_writes_only monitor host port
-        community dnp3 bacnet opcua url headers token_file max_bytes ca path query max_age_days format""",
+        community dnp3 bacnet opcua url headers token_file max_bytes ca path query max_age_days format ids filter tls security delete""",
     "point": """source logging log_interval log_mode tolerance tags unit display_unit settable retention_days
         read_roles set_roles datatype detectors description eu_low eu_high set_min set_max decimals max_step confirm
         require_reason min_write_gap scan folder states suppress_when generator modbus snmp dnp3 bacnet opcua http
-        sql scale calc""",
+        sql scale calc pattern where""",
     "handler": """type min_level enabled scope url to from smtp creds on_clear escalate_after escalate_to groups
         subject body hour hours watchlist point value clear_value release_on_clear""",
     "publisher": "type url creds resend prefix group node device points enabled host port tls",
@@ -454,6 +460,12 @@ def validate_source(name, b):
         sql_source.validate_source(b, add)
     elif b.get("type") == "file":
         file_source.validate_source(b, add)
+    elif b.get("type") == "pop3":
+        pop3_source.validate_source(b, add)
+    elif b.get("type") == "egauge":
+        egauge_source.validate_source(b, add)
+    elif b.get("type") == "haystack":
+        haystack_source.validate_source(b, add)
     elif b.get("type") == "http_in":
         if not isinstance(b.get("auto_create", False), bool):
             add("auto_create", "must be true or false")
@@ -589,12 +601,14 @@ def validate_point(name, b, store):
         http_source.validate_point(b, add)
     elif src and src.get("type") == "sql":
         sql_source.validate_point(b, add)
+    elif src and src.get("type") == "pop3":
+        pop3_source.validate_point(b, add)
     sc = b.get("scale", {})
     if src and src.get("type") in ("http_json", "sql") and not (
             isinstance(sc, dict) and _num(sc.get("multiplier", 1)) and sc.get("multiplier", 1) != 0 and _num(sc.get("additive", 0))):
         add("scale", "must be {multiplier: non-zero number, additive: number}")
     if b.get("settable") and src and src.get("type") in ("http_json", "sql", "http_in", "calc", "snmp", "dnp3",
-                                                         "bacnet", "opcua", "file"):
+                                                         "bacnet", "opcua", "file", "haystack", "pop3", "egauge"):
         add("settable", "this source type is read-only")
     if src and src.get("type") == "calc":
         try:
@@ -668,7 +682,7 @@ def make_point(name, b, source_name):
               "read_roles": b.get("read_roles", ["user"]), "set_roles": b.get("set_roles", []),
               "detector_cfg": b.get("detectors", [])}
     for k in ("modbus", "snmp", "dnp3", "bacnet", "opcua", "http", "sql", "scale", "suppress_when", "calc",
-              "states", "folder"):
+              "states", "folder", "pattern", "where"):
         if b.get(k):
             p.meta[k] = b[k]
     for k in ("description", "eu_low", "eu_high", "decimals", "set_min", "set_max", "max_step", "confirm", "require_reason", "min_write_gap", "scan"):  # zero is a real value here
@@ -698,8 +712,9 @@ def build_engine(store):
                     src.gens[n] = p.get("generator", {"kind": "walk"})
                     if n in held:
                         src.override[n] = held[n]
-            elif s["type"] in ("http_json", "sql", "file"):
-                src = {"http_json": HttpJsonSource, "sql": SqlSource, "file": FileSource}[s["type"]](s["name"], s)
+            elif s["type"] in ("http_json", "sql", "file", "haystack", "pop3", "egauge"):
+                src = {"http_json": HttpJsonSource, "sql": SqlSource, "file": FileSource,
+                       "haystack": HaystackSource, "pop3": Pop3Source, "egauge": EgaugeSource}[s["type"]](s["name"], s)
                 for n, p in mine.items():
                     src.add(make_point(n, p, s["name"]))
                 eng.startable.append(src)

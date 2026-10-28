@@ -59,6 +59,8 @@ def validate_point(b, add):
 
 
 class HttpJsonSource(PolledSource):
+    body = None  # a subclass sets JSON to POST instead of GET
+
     def __init__(self, name, cfg):
         super().__init__(name, cfg.get("period", 10.0), cfg.get("backoff_scale", 1.5), cfg.get("backoff_max", 300.0))
         self.url, self.headers = cfg["url"], dict(cfg.get("headers", {}))
@@ -71,9 +73,11 @@ class HttpJsonSource(PolledSource):
     def document(self):
         """One fetch of the JSON document. Public so the Test button can show what a source would see."""
         headers = {"Accept": "application/json", **self.headers}
+        if self.body is not None:
+            headers["Content-Type"] = "application/json"
         if self.token_file and "Authorization" not in headers:  # read each time so a rotated token is picked up
             headers["Authorization"] = "Bearer " + Path(self.token_file).read_text().strip()
-        with self.opener.open(urllib.request.Request(self.url, headers=headers), timeout=self.timeout) as r:
+        with self.opener.open(urllib.request.Request(self.url, None if self.body is None else json.dumps(self.body).encode(), headers), timeout=self.timeout) as r:
             raw = r.read(self.max_bytes + 1)
         if len(raw) > self.max_bytes:
             raise ValueError("response larger than max_bytes")
