@@ -260,10 +260,10 @@
   </header>
 
   <div class="figures">
-    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">13,442</div><div class="n">lines, 53 modules</div></div>
-    <div class="fig"><div class="k">Tests</div><div class="v">11,885</div><div class="n">lines, 101 suites</div></div>
-    <div class="fig"><div class="k">Commits</div><div class="v">255</div><div class="n">across 10 calendar days</div></div>
-    <div class="fig"><div class="k">Open debt</div><div class="v">23</div><div class="n">entries (9 untested paths, 14 left by the 10-28 work), none high severity</div></div>
+    <div class="fig"><div class="k">Python, <code>durian/</code></div><div class="v">13,719</div><div class="n">lines, 53 modules</div></div>
+    <div class="fig"><div class="k">Tests</div><div class="v">12,139</div><div class="n">lines, 104 suites</div></div>
+    <div class="fig"><div class="k">Commits</div><div class="v">265</div><div class="n">across 10 calendar days</div></div>
+    <div class="fig"><div class="k">Open debt</div><div class="v">22</div><div class="n">entries in <a href="../TECHNICAL_DEBT.md">TECHNICAL_DEBT.md</a>, none high severity</div></div>
   </div>
 
   <section>
@@ -271,7 +271,7 @@
     <div class="charts">
       <div class="card">
         <h3>Code in the tree</h3>
-        <div class="summary">Server 13,442 lines · tests 11,885 lines</div>
+        <div class="summary">Server 13,719 lines · tests 12,139 lines</div>
         <div class="legend">
           <span><i class="swatch"></i>server</span>
           <span><i class="swatch dashed"></i>tests</span>
@@ -280,7 +280,7 @@
       </div>
       <div class="card">
         <h3>Test suites</h3>
-        <div class="summary">101 suites · one process each, <code>run_all.py</code></div>
+        <div class="summary">104 suites · one process each, <code>run_all.py</code></div>
         <div class="chart-wrap" id="wrap-suites"></div>
       </div>
     </div>
@@ -321,7 +321,7 @@
           <tr><td class="name">Alarms</td><td class="name">13 detectors with on-delay, off-delay and deadband; ISA-18.2 states; shelving, suppression, out of service, maintenance windows; journal; KPIs; acknowledge-all; per-point scan classes (poll every n-th cycle, Modbus path)</td><td class="name"><code>test_scan_classes</code>, <code>test_core</code>, <code>test_holds</code>, <code>test_maintenance</code>, <code>test_journal</code></td></tr>
           <tr><td class="name">Control</td><td class="name">Permissioned writes, engineering limits, max step, per-point write rate limit (<code>min_write_gap</code>), two-step confirm, reason required, audit with old and new value</td><td class="name"><code>test_safe_control</code>, <code>test_set_value_required</code></td></tr>
           <tr><td class="name">Outbound</td><td class="name">Webhook, email, Slack, escalation, set-point handler, scheduled reports, MQTT publisher, Sparkplug B publisher, HTTP sender, persistent TCP publisher with reconnect backoff</td><td class="name"><code>test_handlers</code>, <code>test_http_sender</code>, <code>test_sparkplug_pub</code>, <code>test_tcp_publisher</code></td></tr>
-          <tr><td class="name">HMI</td><td class="name">Overview, point page with trend, forecast and logbook, history comparison, dashboards with 10 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>, <code>test_prediction_widget</code>; 11 browser scripts, all in CI</td></tr>
+          <tr><td class="name">HMI</td><td class="name">Overview, point page with trend, forecast and logbook, history comparison, dashboards with 10 widget types, drag-and-drop designer, mimic editor, kiosk and public views</td><td class="name"><code>test_dashboards</code>, <code>test_prediction_widget</code>; 13 browser checks, all in CI</td></tr>
           <tr><td class="name">Accounts</td><td class="name">scrypt passwords, sessions, role inheritance, lockout, TOTP second factor, reset by one-time code, account disable, offline admin reset, scoped machine tokens, LDAP simple-bind sign-in for names with no local account</td><td class="name"><code>test_ldap_auth</code>, <code>test_auth</code>, <code>test_mfa</code>, <code>test_disabled</code>, <code>test_reset</code></td></tr>
           <tr><td class="name">Storage</td><td class="name">SQLite or MySQL/MariaDB, versioned migrations, eight rollups, retention, backups, buffered writes with a system alarm, unique history rows per (point, time), read-only admin SQL console (SELECT only, secret tables refused, audited)</td><td class="name"><code>test_sql_console</code>, <code>test_history_unique</code>, <code>test_store</code>, <code>test_series</code>, <code>test_maintenance</code></td></tr>
           <tr><td class="name">Transport</td><td class="name">TLS 1.2+ with HSTS and Secure cookies when a certificate is given; plain HTTP refuses any non-local address</td><td class="name"><code>test_tls</code></td></tr>
@@ -329,7 +329,8 @@
           <tr><td class="name">AI/ML</td><td class="name">EWMA baseline, robust-z score, short-horizon forecast with a 95% band (linear, or a robust Theil-Sen option); a seasonal hour-of-week baseline with a per-slot score route; change-point detection; Pearson/Spearman correlation with best lag and a related-points ranking that never names a point the caller cannot see; a backtest reporting MAE, RMSE and 95% coverage across naive, linear, robust and seasonal-naive; a predictive TREND_LIMIT detector (alarms when a limit is projected to be reached within a horizon); persisted per-point models retrained daily in bounded batches, with an admin retrain route; a prediction dashboard widget that says when no honest forecast exists</td><td class="name"><code>test_forecast</code>, <code>test_prediction_widget</code>, <code>test_anomaly</code>, <code>test_seasonal</code>, <code>test_changepoint</code>, <code>test_correlate</code>, <code>test_backtest</code>, <code>test_trend_limit</code>, <code>test_models</code>. Measured: on a ramp with spikes robust MAE 0.90 vs linear 79.53; on a seasonal series seasonal-naive 0.436 vs linear 6.370; coverage about 0.945 for linear and robust on Gaussian noise; TREND_LIMIT alarmed on 0 of 300 noise seeds. Synthetic data only, no real plant series</td></tr>
           <tr><td class="name">Security hardening</td><td class="name">A penetration test of the new surface: POP3 pattern-shape guard and a 2000-character match cap, bytes counted as they arrive, ssl by default; file source with printable bounded text, bounded reads, devices and special files refused; eGauge accepts only a host name or address literal; LDAP one lockout and account per case-folded name, reserved names refused, no admin default role; SQL console byte caps and blobs as hex; report dates bounded and exports surrogate-safe; line-protocol overflow is a 422</td><td class="name"><code>test_pop3_source</code>, <code>test_file_source</code>, <code>test_egauge_source</code>, <code>test_ldap_auth</code>, <code>test_sql_console</code>, <code>test_report_formats</code>, <code>test_ingest_line</code>. Equalised login timing is not measured, and the MySQL/MariaDB paths were not run</td></tr>
           <tr><td class="name">Resilience</td><td class="name">Atomic reload (the new engine is built before the old one stops); bounded, health-reporting MQTT publishers; stop() never blocks; recovery from a backward clock step; NaN source timestamps refused; atomic migration v11; partial-backup cleanup; POP3 marks a message seen only after retrieval</td><td class="name"><code>test_output_resilience</code>, <code>test_clock_step</code>, <code>test_ts_nan_mqtt</code>, <code>test_history_unique</code>, <code>test_store</code>, <code>test_pop3_source</code>; migration v11 and backup cleanup only on SQLite</td></tr>
-          <tr><td class="name">Operations</td><td class="name">Safe mode (<code>--safe</code> or <code>DURIAN_SAFE=1</code>: login, config and backup, no sources, publishers or tick); the <code>durian</code> command line (run, supervise, check, backups, restore, passwd, version); frozen-build path resolution; a failsafe spool (NDJSON segments, fsync per batch, 50 MB bound, oldest dropped and counted, replayed oldest-first, a spool block in <code>/api/health</code>); a supervisor that restarts a hung or crashed server with backoff and starts once in safe mode on a crash loop (<code>supervisor.json</code>, <code>DURIAN_ALERT_URL</code>, systemd unit and a Windows startup-task installer); a single-file executable and a tag-triggered release workflow; MariaDB fixes (statement timeout name, exact-case account lookup on case-insensitive collations)</td><td class="name">The safe-mode, spool, supervisor and store test suites. Windows exe built and smoke-tested locally (14.6 MB). NOT yet run: the Linux build and <code>release.yml</code> on GitHub, the installers, the supervisor SIGTERM path end to end. The exe is unsigned. The spool covers history only</td></tr>
+          <tr><td class="name">Operations</td><td class="name">Safe mode (<code>--safe</code> or <code>DURIAN_SAFE=1</code>: login, config and backup, no sources, publishers or tick); the <code>durian</code> command line (run, supervise, check, backups, restore, passwd, version) plus <code>start</code>, <code>status</code>, <code>stop</code>, <code>restart</code> and <code>logs</code>, which run a detached supervised server with a log file and pid file and stop it through a stop file with a kill fallback (this also fixed <code>durian supervise</code> argv and the detached child losing its output); a tick lease that records host and pid so a dead local holder is replaced at once; frozen-build path resolution; a failsafe spool (NDJSON segments, 50 MB bound, replayed oldest-first, a spool block in <code>/api/health</code>); a supervisor with backoff and one safe-mode start on a crash loop; systemd unit and a Windows startup-task installer; MariaDB CI fixes (statement timeout name, exact-case account lookup); a single-file executable and a tag-triggered release workflow. <strong>First release v20261028-DEV, 2026-10-28:</strong> <code>durian-windows-x86_64.exe</code> (15.4 MB), <code>durian-linux-x86_64</code> (30.7 MB) and <code>SHA256SUMS</code>, both builds passing tests and smoke on GitHub</td><td class="name"><code>test_service_control</code>, <code>test_lease_takeover</code>, <code>test_cli</code>, and the safe-mode, spool, supervisor and store suites. Not run: the installers, the supervisor SIGTERM path end to end. The exe is unsigned. The spool covers history only</td></tr>
+          <tr><td class="name">Console</td><td class="name">Sidebar navigation (collapsible, mobile drawer), light and dark themes with a toggle, health banner, toasts, skeletons, flicker-free polling that patches the DOM; <code>Ctrl+K</code> command palette (accessible combobox, ranked matches, recent picks) to jump to a page, point or dashboard or run an action; sign-in and two-factor setup with six-digit code boxes, a three-step setup with a copyable key (no QR code), inline turn-off</td><td class="name"><code>test_about</code>; browser checks (13, all in CI) including the new palette check and the extended account check. NOT verified: no person has looked at the redesigned console; the 2FA assertions were written after the code and the clipboard check is stubbed; the mobile header wraps to three rows; <code>light-dark()</code> needs Chrome 123, Safari 17.5 or Firefox 120</td></tr>
           <tr><td class="name">Modelling</td><td class="name">Engineering units with an optional display unit and conversion, tags inherited from folder and source</td><td class="name"><code>test_units</code></td></tr>
           <tr><td class="name">Federation</td><td class="name">SSO sign-in through OpenID Connect: authorization code with PKCE, RS256 from the provider JWKS, same sessions and roles</td><td class="name"><code>test_oidc</code></td></tr>
           <tr><td class="name">Safety net</td><td class="name">A permission matrix over every dispatcher branch, background jobs for backups and source tests, bounded in-memory state, percent-decoded route names</td><td class="name"><code>test_permissions</code>, <code>test_jobs</code>, <code>test_bounded_state</code>, <code>test_route_names</code></td></tr>
@@ -353,7 +354,7 @@
     <h2>Features by category</h2>
     <img src="feature-stack.svg" alt="Feature stack: one square per feature, grouped by category, coloured by status" style="max-width:100%;height:auto">
     <p class="meta">139 features, generated by <code>tools/features.py</code> from a checked registry; every path below exists.</p>
-    <div class="figures"><div class="fig"><div class="k">implemented</div><div class="v">95</div><div class="n">features</div></div><div class="fig"><div class="k">partial</div><div class="v">22</div><div class="n">features</div></div><div class="fig"><div class="k">declined</div><div class="v">16</div><div class="n">features</div></div><div class="fig"><div class="k">planned</div><div class="v">6</div><div class="n">features</div></div><div class="fig"><div class="k">Implemented</div><div class="v">77%</div><div class="n">of those not declined</div></div></div>
+    <div class="figures"><div class="fig"><div class="k">implemented</div><div class="v">96</div><div class="n">features</div></div><div class="fig"><div class="k">partial</div><div class="v">21</div><div class="n">features</div></div><div class="fig"><div class="k">declined</div><div class="v">16</div><div class="n">features</div></div><div class="fig"><div class="k">planned</div><div class="v">6</div><div class="n">features</div></div><div class="fig"><div class="k">Implemented</div><div class="v">78%</div><div class="n">of those not declined</div></div></div>
     <details><summary>Data sources <span class="meta">15 implemented, 5 partial, 4 declined, 2 planned</span></summary><div class="tablewrap"><table>
       <thead><tr><th>Feature</th><th>Status</th><th>Evidence</th><th>Note</th></tr></thead><tbody>
       <tr><td class="name">Virtual generator (Mango virtualDS)</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../durian/config.py"><code>durian/config.py</code></a><a href="../tests/test_core.py"><code>tests/test_core.py</code></a></td><td class="name">Sine, ramp, random and similar generators.</td></tr>
@@ -486,13 +487,13 @@
       <tr><td class="name">Baseline drift between two windows</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../durian/forecast.py"><code>durian/forecast.py</code></a><a href="../tests/test_forecast.py"><code>tests/test_forecast.py</code></a><a href="../tests/test_drift.py"><code>tests/test_drift.py</code></a></td><td class="name"></td></tr>
       <tr><td class="name">Analytics validated on real plant data</td><td><span class="pill plan">planned</span></td><td class="ev"><a href="../docs/progress.html"><code>docs/progress.html</code></a></td><td class="name">Every figure comes from generated series.</td></tr>
       </tbody></table></div></details>
-    <details><summary>Operations &amp; resilience <span class="meta">9 implemented, 4 partial, 1 declined, 0 planned</span></summary><div class="tablewrap"><table>
+    <details><summary>Operations &amp; resilience <span class="meta">10 implemented, 3 partial, 1 declined, 0 planned</span></summary><div class="tablewrap"><table>
       <thead><tr><th>Feature</th><th>Status</th><th>Evidence</th><th>Note</th></tr></thead><tbody>
       <tr><td class="name">Safe mode (login, config and backup only)</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../durian/app.py"><code>durian/app.py</code></a><a href="../tests/test_app.py"><code>tests/test_app.py</code></a><a href="../tests/test_safe_mode.py"><code>tests/test_safe_mode.py</code></a></td><td class="name"></td></tr>
       <tr><td class="name">Failsafe spool for history the database refuses</td><td><span class="pill part">partial</span></td><td class="ev"><a href="../durian/spool.py"><code>durian/spool.py</code></a><a href="../tests/test_spool.py"><code>tests/test_spool.py</code></a></td><td class="name">History only; events and alarm state are not spooled; the health ok flag ignores the spool (debt V5, V6).</td></tr>
       <tr><td class="name">Supervisor: restart on hang or crash, safe-mode fallback</td><td><span class="pill part">partial</span></td><td class="ev"><a href="../durian/supervisor.py"><code>durian/supervisor.py</code></a><a href="../tests/test_supervisor.py"><code>tests/test_supervisor.py</code></a></td><td class="name">SIGTERM path untested end to end (debt V4).</td></tr>
-      <tr><td class="name">durian command line: run, supervise, check, backups, restore, passwd, version</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../durian/cli.py"><code>durian/cli.py</code></a><a href="../durian/__main__.py"><code>durian/__main__.py</code></a><a href="../tests/test_cli.py"><code>tests/test_cli.py</code></a></td><td class="name"></td></tr>
-      <tr><td class="name">Single-file executable and tag-triggered release</td><td><span class="pill part">partial</span></td><td class="ev"><a href="../tools/build_exe.py"><code>tools/build_exe.py</code></a><a href="../tools/smoke_exe.py"><code>tools/smoke_exe.py</code></a><a href="../.github/workflows/release.yml"><code>.github/workflows/release.yml</code></a></td><td class="name">Windows build smoke-tested; unsigned, Linux build and release workflow unverified (debt V1, V7).</td></tr>
+      <tr><td class="name">durian command line: run, start, status, stop, restart, logs, supervise, check, backups, restore, passwd, version</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../durian/cli.py"><code>durian/cli.py</code></a><a href="../durian/__main__.py"><code>durian/__main__.py</code></a><a href="../tests/test_cli.py"><code>tests/test_cli.py</code></a></td><td class="name"></td></tr>
+      <tr><td class="name">Single-file executable and tag-triggered release</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../tools/build_exe.py"><code>tools/build_exe.py</code></a><a href="../tools/smoke_exe.py"><code>tools/smoke_exe.py</code></a><a href="../.github/workflows/release.yml"><code>.github/workflows/release.yml</code></a></td><td class="name">Release v20261028-DEV published from CI with both builds passing tests and smoke; the Windows exe is unsigned (debt V1).</td></tr>
       <tr><td class="name">systemd unit and Windows startup task</td><td><span class="pill part">partial</span></td><td class="ev"><a href="../tools/service/durian.service"><code>tools/service/durian.service</code></a><a href="../tools/service/install-windows-service.ps1"><code>tools/service/install-windows-service.ps1</code></a></td><td class="name">Never run on a machine (debt V3).</td></tr>
       <tr><td class="name">Background jobs for backups and source tests</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../durian/jobs.py"><code>durian/jobs.py</code></a><a href="../tests/test_jobs.py"><code>tests/test_jobs.py</code></a></td><td class="name"></td></tr>
       <tr><td class="name">Health endpoint, heartbeat, poll-overrun alarm, engine lock</td><td><span class="pill done">implemented</span></td><td class="ev"><a href="../durian/app.py"><code>durian/app.py</code></a><a href="../tests/test_app.py"><code>tests/test_app.py</code></a><a href="../tests/test_engine_lock.py"><code>tests/test_engine_lock.py</code></a><a href="../tests/test_source_down.py"><code>tests/test_source_down.py</code></a><a href="../tests/test_tick_health.py"><code>tests/test_tick_health.py</code></a></td><td class="name"></td></tr>
@@ -564,25 +565,13 @@
     <h2>Open now</h2>
     <div class="note">
       <p>The 2026-10-28 AI/ML work was verified on synthetic series only. All eleven findings of the 2026-10-27 audit (<code>docs/12-error-handling.md</code>, <code>NEXTPLAN.md</code>
-        section 1) are closed, each with a test. What is open now is in <code>TECHNICAL_DEBT.md</code>, and every
-        entry is a path that has only met a simulator or a fake server.</p>
+        section 1) are closed, each with a test. What is open now, 22 entries, is in <a href="../TECHNICAL_DEBT.md"><code>TECHNICAL_DEBT.md</code></a>; this is the summary.</p>
     </div>
     <ol class="steps" style="margin-top:16px">
-      <li><span class="body">Modbus, email/Slack/escalation delivery, SNMP, Sparkplug B, DNP3, BACnet/IP and OPC UA
-        (U1, U3, U8 to U12) have never met real hardware or a real external server.</span></li>
-      <li><span class="body">eGauge, Haystack and POP3 (U13) were run against fake servers only. POP3 STARTTLS and SSL
-        and Haystack authentication beyond a Bearer token are untested.</span></li>
-      <li><span class="body">LDAP sign-in (U14) ran against a fake directory on plain <code>ldap://</code> localhost;
-        <code>ldaps://</code> never ran, and result codes 51 and 52 count as a bad password.</span></li>
-      <li><span class="body">The SQL console MySQL/MariaDB branch has not been run; the SQLite branch is
-        tested. The console byte caps, the <code>performance_schema</code>/<code>sys</code> secret additions, the atomic
-        migration v11 and the partial-backup cleanup have not run on MySQL/MariaDB either.</span></li>
-      <li><span class="body">Seven more entries (V1 to V7, §5b) came from the safe-mode, spool, supervisor and executable work: the Windows exe is unsigned; <code>cryptography</code> is bundled because <code>requirements.txt</code> mixes dev dependencies; the Windows installer is a startup task, not a Services-panel entry, and was not run; the supervisor SIGTERM path is untested end to end; the spool covers history only; <code>/api/health</code> <code>ok</code> ignores the spool; the Linux build and the release workflow have not run on GitHub.</span></li>
-      <li><span class="body">Seven entries (W1 to W7) were left by the 10-28 work: POP3 now defaults to ssl and refuses
-        patterns with three or more open-ended repeats, so common ones such as <code>Temp:\s*(...)</code> must be
-        rewritten; TREND_LIMIT state is memory-only and UNCERTAIN values enter its fit; the robust forecast band is
-        constant width; model retraining is once a day and the stored profile serves only the 14-day window; LDAP login
-        timing is untested; dashboards accept unknown keys.</span></li>
+      <li><span class="body">Untested against the real thing (U1, U3, U8 to U14): Modbus, email/Slack/escalation, SNMP, Sparkplug B, DNP3, BACnet/IP, OPC UA, eGauge, Haystack, POP3 and LDAP have met simulators or fake servers only; <code>ldaps://</code> and POP3 STARTTLS never ran.</span></li>
+      <li><span class="body">MySQL/MariaDB: the SQL console branch, migration v11 and partial-backup cleanup have only run on SQLite (W6).</span></li>
+      <li><span class="body">Operations (V1 to V6): the exe is unsigned, the installers and the supervisor SIGTERM path never ran, the spool covers history only and <code>/api/health</code> <code>ok</code> ignores it. The Linux build and release workflow (V7) are now verified by the first release.</span></li>
+      <li><span class="body">AI/ML and hardening leftovers (W1 to W5, W7): the POP3 pattern guard is strict, TREND_LIMIT state is memory-only, the forecast band is constant width, retraining is daily, LDAP login timing is unmeasured, dashboards accept unknown keys.</span></li>
     </ol>
   </section>
 
@@ -615,11 +604,11 @@
 
   var DATES = ["10-19", "10-20", "10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27", "10-28"];
   var FULL = ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27", "2026-10-28"];
-  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 198, 255];
+  var COMMITS = [19, 79, 79, 79, 79, 79, 79, 79, 198, 265];
   var MODULES = [9, 24, 24, 24, 24, 24, 24, 24, 37, 53];
-  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 66, 101];
-  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 10935, 13442];
-  var TESTS = [274, 2670, 2670, 2670, 2670, 2670, 2670, 2670, 8074, 11885];
+  var SUITES = [4, 27, 27, 27, 27, 27, 27, 27, 66, 104];
+  var SERVER = [1241, 5048, 5048, 5048, 5048, 5048, 5048, 5048, 10935, 13719];
+  var TESTS = [274, 2670, 2670, 2670, 2670, 2670, 2670, 2670, 8074, 12139];
 
   var NS = "http://www.w3.org/2000/svg";
   var W = 400, H = 172, PL = 36, PR = 58, PT = 12, PB = 24;
@@ -724,8 +713,8 @@
   }
 
   build("wrap-code", [
-    { name: "Server lines", short: "13,442", values: SERVER },
-    { name: "Test lines", short: "11,885", values: TESTS, dashed: true }
+    { name: "Server lines", short: "13,719", values: SERVER },
+    { name: "Test lines", short: "12,139", values: TESTS, dashed: true }
   ], { label: "Lines of code in durian and tests, 19 to 28 October" });
 
   build("wrap-suites", [
