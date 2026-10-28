@@ -219,6 +219,7 @@ class Outputs:
         self.last_value = {}  # point -> last value label, so a template can say {value}; ponytail: bounded by the point count
         self.resolve, self.setter = resolve or (lambda name: ({}, None)), setter
         self.q = queue.Queue(maxsize=1000)
+        self.halt = threading.Event()
         self.failed = 0  # every delivery that did not work, for the health view
         self.status = {}  # target name -> {kind, failed, last_error, last_ok}; a dead route must not be invisible
         self.publishers, self.senders = [], []  # MQTT clients, and HTTP senders {url, names, headers, resend, sent}
@@ -246,6 +247,8 @@ class Outputs:
                 # The target is the topic prefix for plain MQTT, or the Sparkplug publisher that owns this client.
                 target = (SparkplugPublisher(p["group"], p["node"], p.get("device"), client=cl)
                           if p.get("type") == "sparkplug" else p["prefix"])
+                cl.max_queued_messages_set(1000)  # paho's queue is unbounded; a dead broker must not grow memory
+                cl.on_connect, cl.on_disconnect, cl.on_connect_fail = self._mqtt_health(p["name"], cl.on_connect)
                 cl.connect_async(c["host"], c["port"])
                 cl.loop_start()
                 self.publishers.append((cl, target, set(p["points"])))
@@ -254,6 +257,24 @@ class Outputs:
                 self._note(p["name"], "publisher", f"the publisher could not start: {sentence(ex) or 'check the broker address and credentials'}")
         self.worker = threading.Thread(target=self._work, daemon=True)
         self.worker.start()
+
+    def _mqtt_health(self, name, prev=None):
+        """(on_connect, on_disconnect, on_connect_fail) that report one MQTT publisher's link; `prev` is a handler to keep (Sparkplug births)."""
+        def up(c, u, flags, rc, props=None):
+            if prev:
+                prev(c, u, flags, rc, props)
+            if rc == 0:
+                self._note(name, "publisher", ok=True)
+            else:
+                self._note(name, "publisher", "the broker refused the connection")
+
+        def down(c, u, flags, rc, props=None):
+            if rc:
+                self._note(name, "publisher", "the connection to the broker was lost")
+
+        def fail(c, u, *a):
+            self._note(name, "publisher", "the broker could not be reached")
+        return up, down, fail
 
     def on_value(self, point, value, ts):
         self.last_value[point.name] = state_label(point, value)
@@ -424,7 +445,7 @@ class Outputs:
             raise
 
     def _work(self):
-        while True:
+        while not self.halt.is_set():
             target, item = self.q.get()
             try:
                 if item[0] == "stop":
@@ -449,7 +470,16 @@ class Outputs:
                     self._note(target, "output", ok=True)
 
     def stop(self):
-        self.q.put((None, ("stop",)))
+        self.halt.set()  # the worker leaves after the delivery it is in; nothing queued is worth waiting for
+        while True:
+            try:
+                self.q.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self.q.put_nowait((None, ("stop",)))
+        except queue.Full:  # a _put raced in; the halt flag still ends the worker after its current item
+            pass
         for cl, _, _ in self.publishers:
             cl.loop_stop()
             cl.disconnect()

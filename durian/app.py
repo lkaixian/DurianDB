@@ -125,6 +125,19 @@ class App:
     def reload(self):
         """Rebuild the engine from stored config. Detector state is lost, so open events are closed."""
         with self.engine_lock:
+            # Build everything that reads the store first: if that fails the old engine keeps running untouched.
+            engine = outputs = None
+            try:
+                engine = build_engine(self.store)
+                outputs = Outputs(self.store, self.scope_of, self.handler_write)
+                holds = {h["name"]: h for h in self.store.list("alarmhold")}
+                folders = {f["name"]: f for f in self.store.list("folder")}  # folder tags and unit, if any are configured
+            except Exception:  # release what the half-built replacement opened (an MQTT source connects when built)
+                if outputs:
+                    outputs.stop()
+                for s in (engine.sources if engine else []):
+                    getattr(s, "stop", lambda: None)()
+                raise
             if self.outputs:
                 self.outputs.stop()
             for s in (self.engine.sources if self.engine else []):
@@ -134,11 +147,8 @@ class App:
                 if ev.id is not None:
                     self.store.clear_event(ev.id, now)
             self.open_events = []
-            self.engine = build_engine(self.store)
-            self.outputs = Outputs(self.store, self.scope_of, self.handler_write)
+            self.engine, self.outputs, self.holds, self.folder_defaults = engine, outputs, holds, folders
             self.engine.publishers.append(self.outputs.on_value)
-            self.holds = {h["name"]: h for h in self.store.list("alarmhold")}
-            self.folder_defaults = {f["name"]: f for f in self.store.list("folder")}  # folder tags and unit, if any are configured
             self.load_windows()
             for name, (p, _) in self.points().items():
                 p.in_service = self.holds.get(name, {}).get("kind") != "oos"
